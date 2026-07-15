@@ -1,0 +1,34 @@
+[package]
+name = "envoir-gateway"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.75"
+license = "Apache-2.0 OR MIT"
+description = "DMTAP legacy SMTP gateway — the optional bridge between DMTAP and legacy email"
+repository = "https://example.invalid/envoir"
+
+# The gateway is the ONLY component that speaks SMTP and the ONLY one not content-blind
+# (the legacy leg is unavoidably plaintext). It is OPTIONAL and fades as adoption grows.
+# See the DMTAP spec repo (../dmtap/07-gateway.md). Stateless: durability is punted to the edges.
+#
+# Intended dependencies are commented until implemented, so the scaffold builds std-only.
+
+[dependencies]
+# dmtap = { path = "../node" }        # shared MOTE / identity / mesh types
+
+# --- SMTP (inbound MX + outbound submission) ---
+# mail-parser = "0.9"                # RFC 5322 parsing
+# mail-send   = "0.4"                # SMTP client (outbound to legacy MX)
+# (an SMTP server for inbound; evaluate `samotop` or a minimal custom server)
+
+# --- DKIM (delegated selector signing; spec §7.3) ---
+# (evaluate mail-auth for DKIM sign/verify + SPF/DMARC/ARC)
+
+# --- Spam gating before DATA (spec §9): RBL/DNSBL, SPF, DMARC, greylisting ---
+
+# --- Runtime ---
+# tokio = { version = "1", features = ["full"] }
+
+[[bin]]
+name = "envoir-gateway"
+path = "src/main.rs"
