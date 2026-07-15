@@ -20,6 +20,7 @@ export function render(root) {
     <section class="chat-main" id="chat-main"></section>`;
   drawConvs(root);
   drawMain(root);
+  root.classList.toggle('detail', state.ui.mobileDetail && !!state.chats.find(x => x.id === state.ui.selChat));
 }
 
 function convTitle(c) { return c.type === 'channel' ? (state.groups.find(g => g.id === c.group)?.name || c.group) : person(c.with).name; }
@@ -39,7 +40,7 @@ function drawConvs(root) {
       </div>
       ${c.unread ? `<i class="conv-unread">${c.unread}</i>` : ''}
     </button>`);
-    row.onclick = () => { state.ui.selChat = c.id; c.unread = 0; bus.rerender(); };
+    row.onclick = () => { state.ui.selChat = c.id; c.unread = 0; state.ui.mobileDetail = true; bus.rerender(); };
     wrap.appendChild(row);
   });
 }
@@ -54,6 +55,7 @@ function drawMain(root) {
 
   wrap.innerHTML = `
     <header class="chat-head">
+      <button class="icon-btn mobile-back" id="chat-back" aria-label="Back to conversation list" title="Back">${icon('reply')}</button>
       ${isCh ? `<span class="av chgroup" style="--h:250;width:38px;height:38px">${icon('groups')}</span>` : avatar(p, 38, { presence: state.settings.presence ? c.presence : null, ring: true })}
       <div class="chat-head-main">
         <div class="chat-head-name">${esc(convTitle(c))} ${isCh ? '' : (p.trust === 'verified' ? trustPill('verified') : trustPill('tofu'))}</div>
@@ -81,6 +83,7 @@ function drawMain(root) {
     if (!isCh && Math.random() > 0.4) setTimeout(() => { c.typing = true; bus.rerender();
       setTimeout(() => { c.typing = false; c.msgs.push({ from: c.with, me: false, t: Date.now(), body: pick(REPLIES), reactions: {} }); if (state.ui.selChat === c.id) bus.rerender(); }, 1400); }, 700);
   };
+  wrap.querySelector('#chat-back').onclick = () => { state.ui.mobileDetail = false; bus.rerender(); };
   wrap.querySelector('#cs').onclick = send;
   wrap.querySelector('#ci').onkeydown = e => { if (e.key === 'Enter') send(); };
   setTimeout(() => wrap.querySelector('#ci')?.focus(), 30);

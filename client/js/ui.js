@@ -102,6 +102,8 @@ export function trustPill(trust) {
 export function toast(msg, opts = {}) {
   const t = document.getElementById('toast');
   const ms = opts.ms || 2800;
+  t.setAttribute('role', 'status');
+  t.setAttribute('aria-live', 'polite');
   t.innerHTML = `<span>${msg}</span>${opts.action ? `<button class="toast-act">${esc(opts.action)}</button>` : ''}`;
   t.classList.remove('hidden'); t.classList.add('show');
   clearTimeout(t._h);
@@ -111,18 +113,45 @@ export function toast(msg, opts = {}) {
 }
 
 // ---- Modal --------------------------------------------------------------------------------
+// Accessible dialog: role=dialog + aria-modal, a Tab focus-trap, initial focus onto the first
+// control, and focus restoration to whatever was focused before it opened.
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+let _modalReturnFocus = null;
+let _modalTrap = null;
+
 export function openModal(html, opts = {}) {
   const m = document.getElementById('modal');
-  m.innerHTML = `<div class="modal-scrim"></div><div class="modal-card ${opts.wide ? 'wide' : ''} ${opts.compose ? 'compose-card' : ''}">${html}</div>`;
+  _modalReturnFocus = document.activeElement;
+  const labelAttr = opts.label ? ` aria-label="${esc(opts.label)}"` : '';
+  m.innerHTML = `<div class="modal-scrim"></div><div class="modal-card ${opts.wide ? 'wide' : ''} ${opts.compose ? 'compose-card' : ''}" role="dialog" aria-modal="true"${labelAttr}>${html}</div>`;
   m.classList.remove('hidden');
   requestAnimationFrame(() => m.classList.add('show'));
+  const card = m.querySelector('.modal-card');
   m.querySelector('.modal-scrim').onclick = () => { if (!opts.sticky) closeModal(); };
-  return m.querySelector('.modal-card');
+
+  // Focus trap — keep Tab within the dialog.
+  _modalTrap = (e) => {
+    if (e.key !== 'Tab') return;
+    const items = [...card.querySelectorAll(FOCUSABLE)].filter(el => el.offsetParent !== null);
+    if (!items.length) return;
+    const first = items[0], last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  };
+  card.addEventListener('keydown', _modalTrap);
+  // Initial focus: first field/control, else the dialog itself.
+  requestAnimationFrame(() => {
+    const target = card.querySelector('input, textarea, select, [autofocus]') || card.querySelector(FOCUSABLE) || card;
+    target.focus?.();
+  });
+  return card;
 }
 export function closeModal() {
   const m = document.getElementById('modal');
   m.classList.remove('show');
+  const ret = _modalReturnFocus; _modalReturnFocus = null; _modalTrap = null;
   setTimeout(() => { m.classList.add('hidden'); m.innerHTML = ''; }, 180);
+  if (ret && ret.isConnected) ret.focus?.();
 }
 
 // ---- Loading shimmer ----------------------------------------------------------------------
@@ -172,6 +201,8 @@ export function showInspector(mote, plan) {
     </div>
     <div class="insp-path-h">Delivery path <span class="sim-tag">simulated network</span></div>
     <div class="path">${hops}</div>`;
+  insp.setAttribute('role', 'complementary');
+  insp.setAttribute('aria-label', 'MOTE privacy inspector');
   insp.classList.remove('hidden');
   requestAnimationFrame(() => insp.classList.add('show'));
   insp.querySelector('#insp-close').onclick = hideInspector;

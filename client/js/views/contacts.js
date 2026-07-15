@@ -35,11 +35,12 @@ export function render(root) {
       <div class="ct-row-main"><span class="ct-name">${esc(p.name)}</span><span class="ct-addr mono">${esc(p.address)}</span></div>
       ${p.trust === 'verified' ? `<span class="vglyph sm">${icon('verified')}</span>` : ''}
     </button>`);
-    row.onclick = () => { selId = p.id; bus.rerender(); };
+    row.onclick = () => { selId = p.id; state.ui.mobileDetail = true; bus.rerender(); };
     rows.appendChild(row);
   });
   root.querySelector('#ct-import').onclick = () => toast(`${icon('import')} Simulated — a production client imports vCard 4.0 / JSContact and pins each key on first contact (TOFU)`, { ms: 4200 });
   root.querySelector('#ct-export').onclick = () => toast(`${icon('export')} Simulated — exports your address book as JSContact MOTEs / vCard 4.0`, { ms: 4200 });
+  root.classList.toggle('detail', state.ui.mobileDetail && !!selId);
   drawDetail(root);
 }
 
@@ -53,6 +54,7 @@ async function drawDetail(root) {
   wrap.innerHTML = `
     <div class="ct-card">
       <div class="ct-card-hero" style="--h:${p.hue}">
+        <button class="icon-btn mobile-back" id="ct-back" aria-label="Back to contacts list" title="Back" style="position:absolute;left:14px;top:14px">${icon('reply')}</button>
         ${avatar(p, 84, { ring: true, badge: true })}
         <h1>${esc(p.name)}</h1>
         <div class="ct-card-sub">${esc([p.title, p.org].filter(Boolean).join(' · ')) || 'Contact'}</div>
@@ -82,6 +84,7 @@ async function drawDetail(root) {
       </div>
     </div>`;
 
+  wrap.querySelector('#ct-back')?.addEventListener('click', () => { state.ui.mobileDetail = false; bus.rerender(); });
   const vb = wrap.querySelector('#verify');
   if (vb) vb.onclick = () => { p.trust = 'verified'; toast(`${icon('verified')} Safety number matched — ${p.name} is now verified`); bus.rerender(); };
 }

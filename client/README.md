@@ -33,6 +33,10 @@ an address*; it is now correctly a verification affordance, never an address.)
 - **Unified shell** — left rail (Mail · Chat · Calendar · Contacts · Files · Groups · Settings),
   a live **global search**, a **command palette** (⌘/Ctrl-K), and full **keyboard shortcuts** with
   a help overlay (`?`).
+- **Accessible & responsive** — semantic landmarks + ARIA (dialog/listbox/status/`aria-current`),
+  a single consistent **focus-visible** ring on every control, a **focus-trapped** modal that
+  restores focus on close, `prefers-reduced-motion` honored throughout, and a **master/detail**
+  layout that collapses to one pane (with a back affordance) from phone width to wide desktop.
 - **Mail** — three-pane, conversation **threading**, folders + color **labels**, star, archive,
   **snooze**, **scheduled send**, **undo send**, drafts, rich compose with **signatures**,
   multi-select **bulk actions**, mark read/unread, per-message **verified badges**, clear

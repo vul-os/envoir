@@ -28,6 +28,8 @@ export function render(root) {
   drawLabels(root);
   drawList(root);
   drawRead(root);
+  // mobile master/detail: reveal the reading pane only when a visible thread is chosen
+  root.classList.toggle('detail', state.ui.mobileDetail && currentList().some(x => x.id === state.ui.selThread));
 }
 
 function drawFolders(root) {
@@ -94,7 +96,7 @@ function drawList(root) {
     const last = t.msgs[t.msgs.length - 1];
     const p = person(t.msgs[0].from === 'you' ? (t.msgs[0].to?.[0] || 'you') : t.msgs[0].from);
     const names = [...new Set(t.msgs.map(m => m.from === 'you' ? 'You' : person(m.from).name.split(' ')[0]))].join(', ');
-    const row = el(`<div class="trow ${state.ui.selThread === t.id ? 'sel' : ''} ${t.read ? '' : 'unread'} ${t.legacy ? 'legacy' : ''}" data-id="${t.id}" style="animation-delay:${Math.min(i * 20, 300)}ms">
+    const row = el(`<div class="trow ${state.ui.selThread === t.id ? 'sel' : ''} ${t.read ? '' : 'unread'} ${t.legacy ? 'legacy' : ''}" data-id="${t.id}" role="button" tabindex="0" aria-label="${esc(t.subject)} — from ${esc(names)}${t.read ? '' : ', unread'}" style="animation-delay:${Math.min(i * 20, 300)}ms">
       <button class="tcheck ${sel.has(t.id) ? 'on' : ''}" data-check="${t.id}" aria-label="Select">${sel.has(t.id) ? icon('check') : ''}</button>
       ${avatar(p, 36, { ring: true })}
       <div class="tmain">
@@ -110,7 +112,9 @@ function drawList(root) {
     </div>`);
     row.querySelector('[data-check]').onclick = (e) => { e.stopPropagation(); toggleSel(t.id); };
     row.querySelector('[data-star]').onclick = (e) => { e.stopPropagation(); t.starred = !t.starred; bus.rerender(); };
-    row.onclick = () => { state.ui.selThread = t.id; t.read = true; bus.rerender(); };
+    const open = () => { state.ui.selThread = t.id; t.read = true; state.ui.mobileDetail = true; bus.rerender(); };
+    row.onclick = open;
+    row.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
     tl.appendChild(row);
   });
 }
@@ -137,6 +141,7 @@ function drawRead(root) {
   }
   wrap.innerHTML = `
     <header class="read-head">
+      <button class="icon-btn mobile-back" id="m-back" aria-label="Back to conversation list" title="Back">${icon('reply')}</button>
       <div class="read-title">
         <h1>${esc(t.subject)}</h1>
         <div class="read-tags">
@@ -186,6 +191,7 @@ function drawRead(root) {
   });
 
   const A = wrap;
+  A.querySelector('#m-back').onclick = () => { state.ui.mobileDetail = false; bus.rerender(); };
   A.querySelector('#a-archive').onclick = () => { t.folder = 'archive'; nextAfterAction(); };
   A.querySelector('#a-trash').onclick = () => { t.folder = 'trash'; nextAfterAction(); };
   A.querySelector('#a-star').onclick = () => { t.starred = !t.starred; bus.rerender(); };

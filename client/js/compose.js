@@ -35,9 +35,9 @@ export function openCompose(opts = {}) {
       <textarea id="cbody" placeholder="Write your message — it is sealed to the recipient's key and routed privately.">${esc(draft.body)}</textarea>
       <div class="compose-foot">
         <button class="btn primary" id="csend">${icon('send')} Send</button>
-        <div class="tier-seg" id="ctier">
-          <button data-t="private" class="${draft.tier === 'private' ? 'on' : ''}">${icon('shield')} Private</button>
-          <button data-t="fast" class="${draft.tier === 'fast' ? 'on' : ''}">Fast</button>
+        <div class="tier-seg" id="ctier" role="group" aria-label="Privacy tier">
+          <button data-t="private" aria-pressed="${draft.tier === 'private'}" class="${draft.tier === 'private' ? 'on' : ''}">${icon('shield')} Private</button>
+          <button data-t="fast" aria-pressed="${draft.tier === 'fast'}" class="${draft.tier === 'fast' ? 'on' : ''}">Fast</button>
         </div>
         <div class="spacer"></div>
         <button class="icon-btn" id="cschedule" title="Schedule send">${icon('clock')}</button>
@@ -50,7 +50,7 @@ export function openCompose(opts = {}) {
   const $ = (s) => card.querySelector(s);
   $('#cx').onclick = () => { saveDraft(draft, card); closeModal(); };
   $('#ctier').querySelectorAll('[data-t]').forEach(b => b.onclick = () => {
-    draft.tier = b.dataset.t; $('#ctier').querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.t === draft.tier));
+    draft.tier = b.dataset.t; $('#ctier').querySelectorAll('button').forEach(x => { const on = x.dataset.t === draft.tier; x.classList.toggle('on', on); x.setAttribute('aria-pressed', on); });
   });
   $('#csig').onclick = () => {
     const s = state.settings.signatures.find(x => x.default);

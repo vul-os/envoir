@@ -24,8 +24,8 @@ export function render(root) {
         <h1 id="cal-title">${esc(title())}</h1>
       </div>
       <div class="cal-right">
-        <div class="seg" id="calseg">
-          ${['month', 'week', 'day'].map(v => `<button data-v="${v}" class="${state.ui.calView === v ? 'on' : ''}">${v[0].toUpperCase() + v.slice(1)}</button>`).join('')}
+        <div class="seg" id="calseg" role="group" aria-label="Calendar range">
+          ${['month', 'week', 'day'].map(v => `<button data-v="${v}" aria-pressed="${state.ui.calView === v}" class="${state.ui.calView === v ? 'on' : ''}">${v[0].toUpperCase() + v.slice(1)}</button>`).join('')}
         </div>
         <button class="btn primary" id="newev">${icon('plus')} Event</button>
       </div>

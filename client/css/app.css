@@ -13,8 +13,8 @@
   --line:    #222a38;
   --line-2:  #2f3a4c;
   --text:    #eaedf3;
-  --text-dim:#98a2b6;
-  --text-faint:#5d6880;
+  --text-dim:#a1abbf;
+  --text-faint:#727e96;
 
   --accent:  #5b9dff;
   --accent-2:#7c5cff;
@@ -39,7 +39,7 @@
 :root[data-theme="light"] {
   --bg:#eef1f7; --bg-1:#ffffff; --bg-2:#f5f7fb; --bg-3:#e9edf5; --elev:#ffffff;
   --line:#e2e7f0; --line-2:#cfd7e5;
-  --text:#111624; --text-dim:#556080; --text-faint:#8b95ab;
+  --text:#111624; --text-dim:#4c576f; --text-faint:#77839c;
   --sh-2: 0 12px 30px -10px rgba(30,50,90,.22);
   --sh-3: 0 24px 60px -14px rgba(30,50,90,.28);
 }
@@ -60,8 +60,34 @@ body {
 .spacer { flex: 1; }
 h1, h2, h3 { letter-spacing: -.02em; font-weight: 700; }
 button { font-family: inherit; cursor: pointer; color: inherit; border: none; background: none; }
-a { color: var(--accent); }
+a { color: var(--accent); border-radius: 3px; }
 ::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+
+/* ---------- focus-visible: one consistent keyboard ring everywhere ----------
+   Mouse clicks stay ring-free; keyboard/AT focus always shows a clear ring. */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+input:focus-visible, textarea:focus-visible, select:focus-visible { outline: none; }
+.btn:focus-visible, .icon-btn:focus-visible, .chip:focus-visible, kbd + *:focus-visible { outline-offset: 3px; }
+/* rows/cells already have their own rounded surfaces — tighten the offset */
+.trow:focus-visible, .conv:focus-visible, .ct-row:focus-visible, .gr-row:focus-visible,
+.folder:focus-visible, .label-item:focus-visible, .rail-btn:focus-visible, .pal-item:focus-visible,
+.mo-cell:focus-visible, .ev-block:focus-visible, .mo-ev:focus-visible, .ag-item:focus-visible,
+.add-row:focus-visible, .conv:focus-visible { outline-offset: -2px; }
+
+/* ---------- respect reduced-motion: keep meaning, drop movement ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 /* scrollbars */
 *::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -470,7 +496,7 @@ kbd { font-family: var(--mono); font-size: 11px; background: var(--bg-3); border
 .ev-att-h { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); margin: 18px 0 10px; }
 .ev-atts { display: grid; gap: 8px; }
 .ev-att { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
-.ev-att span { flex: 1; }
+.ev-att > span:not(.av) { flex: 1; min-width: 0; }
 .ev-att-none { color: var(--text-faint); font-size: 13px; }
 .rsvp { font-size: 11px; font-weight: 650; padding: 2px 9px; border-radius: 20px; }
 .rsvp.yes { color: var(--good); background: color-mix(in srgb, var(--good) 15%, transparent); }
@@ -761,10 +787,53 @@ kbd { font-family: var(--mono); font-size: 11px; background: var(--bg-3); border
   .ev-new-row { grid-template-columns: 1fr; }
   .id-grid, .ob-final { grid-template-columns: 1fr; }
 }
+/* The mobile "back to list" control lives in every detail pane; desktop hides it. */
+.mobile-back { display: none; }
+
 @media (max-width: 680px) {
-  .app { grid-template-columns: 64px 1fr; }
+  .app { grid-template-columns: 58px 1fr; }
+  .rail { padding: 12px 0 10px; }
+  .rail-btn { width: 50px; }
   .rail-btn span { display: none; }
-  .mail-list, .chat-list, .ct-list, .gr-list { display: none; }
   .kbd-grid { grid-template-columns: 1fr; }
-  .net-pill { display: none; }
+  .net-pill, .cmd-open { display: none; }
+  .topbar { padding: 0 12px; gap: 10px; }
+  .topbar-search { max-width: none; }
+
+  /* Master / detail: one pane at a time. Show the list; a selection reveals the
+     detail pane with a back affordance, so nothing is ever an empty dead-end. */
+  .mail-view, .chat-view, .contacts-view, .groups-view { grid-template-columns: 1fr; }
+  .mail-rail { display: none; }
+  .mail-view .mail-read, .chat-view .chat-main,
+  .contacts-view .ct-detail, .groups-view .gr-detail { display: none; }
+  .mail-view.detail .mail-list, .chat-view.detail .chat-list,
+  .contacts-view.detail .ct-list, .groups-view.detail .gr-list { display: none; }
+  .mail-view.detail .mail-read, .chat-view.detail .chat-main { display: flex; }
+  .contacts-view.detail .ct-detail, .groups-view.detail .gr-detail { display: block; }
+  .mobile-back { display: inline-grid; }
+
+  /* calendar: month is the only grid that fits; week/day scroll horizontally in-pane */
+  .cal-head { flex-wrap: wrap; gap: 10px; padding: 12px 14px; }
+  .cal-nav h1 { font-size: 16px; }
+  .day-agenda { display: none; }
+  .cal-body.day { flex-direction: column; }
+  .compose .cfield { grid-template-columns: 52px 1fr; }
+  .files-inner, .set-inner { padding-left: 16px; padding-right: 16px; }
+
+  /* reading pane at phone width: keep the header legible, let controls wrap */
+  .read-head { padding: 12px 14px 10px; gap: 8px; align-items: flex-start; }
+  .read-title h1 { font-size: 16.5px; line-height: 1.3; }
+  .read-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .read-scroll { padding: 14px; }
+  .msg-head { flex-wrap: wrap; row-gap: 4px; }
+  .msg-who { flex-basis: calc(100% - 52px); }
+  .msg-side { width: 100%; justify-content: flex-end; }
+  .msg-name { flex-wrap: wrap; }
+  .read-foot { padding: 12px 14px; }
+  .chat-head { padding: 10px 14px; }
+  .bubbles { padding: 16px 14px; }
+  .brow { max-width: 86%; }
+  .gr-detail { padding: 20px 16px 40px; }
+  .ct-card-body { padding: 8px 18px 32px; }
+  .modal { padding-top: 6vh; padding-left: 10px; padding-right: 10px; }
 }

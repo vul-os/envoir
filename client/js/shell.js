@@ -5,7 +5,7 @@
 import { state, initStore, saveSettings } from './store.js';
 import { currentIdentity, displayAddress, displayName } from './identity.js';
 import { PEOPLE } from './seed.js';
-import { esc, icon, brandMark, openModal, closeModal, initials } from './ui.js';
+import { esc, icon, brandMark, openModal, closeModal, initials, hideInspector } from './ui.js';
 import { bus } from './bus.js';
 import { openCompose } from './compose.js';
 
@@ -51,29 +51,29 @@ export function mountShell() {
   app.classList.remove('hidden');
   const id = currentIdentity();
   app.innerHTML = `
-    <nav class="rail">
-      <div class="rail-brand" title="Envoir">${brandMark(30)}</div>
+    <nav class="rail" aria-label="Primary">
+      <div class="rail-brand" title="Envoir" aria-hidden="true">${brandMark(30)}</div>
       <div class="rail-nav" id="rail-nav">
-        ${VIEWS.filter(v => v.id !== 'settings').map(v => `<button class="rail-btn" data-view="${v.id}" title="${v.name}">${icon(v.icon)}<span>${v.name}</span><i class="rail-badge" data-badge="${v.id}"></i></button>`).join('')}
+        ${VIEWS.filter(v => v.id !== 'settings').map(v => `<button class="rail-btn" data-view="${v.id}" title="${v.name}" aria-label="${v.name}">${icon(v.icon)}<span>${v.name}</span><i class="rail-badge" data-badge="${v.id}" aria-hidden="true"></i></button>`).join('')}
       </div>
       <div class="rail-spacer"></div>
-      <button class="rail-btn" data-view="settings" title="Settings">${icon('settings')}<span>Settings</span></button>
-      <button class="rail-id" id="rail-id" title="${esc(displayAddress(id))}">${esc(initials(displayName(id)))}</button>
+      <button class="rail-btn" data-view="settings" title="Settings" aria-label="Settings">${icon('settings')}<span>Settings</span></button>
+      <button class="rail-id" id="rail-id" title="${esc(displayAddress(id))}" aria-label="Open settings — signed in as ${esc(displayAddress(id))}">${esc(initials(displayName(id)))}</button>
     </nav>
     <div class="workspace">
       <header class="topbar">
-        <div class="topbar-search">
+        <div class="topbar-search" role="search">
           ${icon('search')}
-          <input id="globalsearch" placeholder="Search this view…" autocomplete="off" spellcheck="false">
+          <input id="globalsearch" placeholder="Search this view…" aria-label="Search the current view" autocomplete="off" spellcheck="false">
         </div>
-        <button class="cmd-open" id="cmdk"><kbd>⌘K</kbd> commands</button>
+        <button class="cmd-open" id="cmdk" aria-label="Open command palette"><kbd>⌘K</kbd> commands</button>
         <div class="topbar-right">
           <span class="net-pill" title="This client's network is simulated">${icon('network')} simulated network</span>
-          <button class="icon-btn" id="theme-toggle" title="Toggle theme">${icon(state.settings.theme === 'dark' ? 'sun' : 'moon')}</button>
+          <button class="icon-btn" id="theme-toggle" title="Toggle theme" aria-label="Toggle light or dark theme">${icon(state.settings.theme === 'dark' ? 'sun' : 'moon')}</button>
           <button class="btn primary sm" id="quick-compose">${icon('edit')} Compose</button>
         </div>
       </header>
-      <main id="view" class="view"></main>
+      <main id="view" class="view" role="main" aria-live="polite"></main>
     </div>`;
 
   app.querySelectorAll('.rail-btn').forEach(b => b.onclick = () => setView(b.dataset.view));
@@ -98,9 +98,15 @@ export function mountShell() {
 function setView(v) {
   state.view = v;
   state.ui.search = '';
+  state.ui.mobileDetail = false;   // land on the list pane when arriving at a view (mobile)
+  hideInspector();                 // the MOTE inspector is mail-scoped; don't leak it across views
   const nav = document.getElementById('app');
   const gs = nav.querySelector('#globalsearch'); if (gs) gs.value = '';
-  nav.querySelectorAll('.rail-btn').forEach(b => b.classList.toggle('active', b.dataset.view === v));
+  nav.querySelectorAll('.rail-btn').forEach(b => {
+    const on = b.dataset.view === v;
+    b.classList.toggle('active', on);
+    if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  });
   rerender();
 }
 const rerenderKeepSearch = () => rerender();
@@ -143,17 +149,18 @@ function commands() {
 function openPalette() {
   const card = openModal(`
     <div class="palette">
-      <div class="pal-input">${icon('search')}<input id="palq" placeholder="Search commands, views, people…" autocomplete="off"></div>
-      <div class="pal-list" id="pallist"></div>
+      <div class="pal-input">${icon('search')}<input id="palq" role="combobox" aria-expanded="true" aria-controls="pallist" aria-activedescendant="pal-0" aria-label="Search commands, views and people" placeholder="Search commands, views, people…" autocomplete="off"></div>
+      <div class="pal-list" id="pallist" role="listbox" aria-label="Commands"></div>
       <div class="pal-foot"><kbd>↑↓</kbd> navigate <kbd>↵</kbd> run <kbd>esc</kbd> close</div>
-    </div>`, { sticky: false });
+    </div>`, { sticky: false, label: 'Command palette' });
   const all = commands();
   let cur = 0, filtered = all;
   const listEl = card.querySelector('#pallist');
   const input = card.querySelector('#palq');
   const draw = () => {
-    listEl.innerHTML = filtered.map((c, i) => `<button class="pal-item ${i === cur ? 'on' : ''}" data-i="${i}">${icon(c.icon)}<span class="pal-label">${esc(c.label)}</span><span class="pal-hint mono">${esc(c.hint)}</span></button>`).join('') || '<div class="pal-empty">No matches</div>';
+    listEl.innerHTML = filtered.map((c, i) => `<button id="pal-${i}" role="option" aria-selected="${i === cur}" class="pal-item ${i === cur ? 'on' : ''}" data-i="${i}">${icon(c.icon)}<span class="pal-label">${esc(c.label)}</span><span class="pal-hint mono">${esc(c.hint)}</span></button>`).join('') || '<div class="pal-empty">No matches</div>';
     listEl.querySelectorAll('[data-i]').forEach(b => b.onclick = () => run(Number(b.dataset.i)));
+    input.setAttribute('aria-activedescendant', filtered.length ? `pal-${cur}` : '');
     const on = listEl.querySelector('.on'); on?.scrollIntoView({ block: 'nearest' });
   };
   const run = (i) => { const c = filtered[i]; if (c) { closeModal(); c.run(); } };

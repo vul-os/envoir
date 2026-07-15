@@ -29,6 +29,7 @@ export const state = {
     calView: 'week', calCursor: Date.now(), selEvent: null,
     selected: new Set(),            // multi-select mail ids
     search: '',
+    mobileDetail: false,            // mobile master/detail: false = list pane, true = detail pane
     compose: null,                  // active compose draft object or null
   },
   settings: { ...defaultSettings },

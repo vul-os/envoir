@@ -31,10 +31,11 @@ export function render(root) {
       <div class="gr-row-main"><span class="gr-name">${esc(gr.name)}</span><span class="gr-addr mono">${esc(gr.address)}</span></div>
       <i class="pill ${gr.mode === 'broadcast' ? 'warn' : 'accent'} sm">${gr.mode}</i>
     </button>`);
-    row.onclick = () => { state.ui.selGroup = gr.id; bus.rerender(); };
+    row.onclick = () => { state.ui.selGroup = gr.id; state.ui.mobileDetail = true; bus.rerender(); };
     rows.appendChild(row);
   });
   root.querySelector('#gnew').onclick = newGroupModal;
+  root.classList.toggle('detail', state.ui.mobileDetail && !!g);
   drawDetail(root, g);
 }
 
@@ -47,6 +48,7 @@ function drawDetail(root, g) {
 
   wrap.innerHTML = `
     <div class="gr-hero">
+      <button class="icon-btn mobile-back" id="gr-back" aria-label="Back to groups list" title="Back">${icon('reply')}</button>
       <span class="av chgroup" style="--h:250;width:56px;height:56px">${icon(g.mode === 'broadcast' ? 'bell' : 'groups')}</span>
       <div class="gr-hero-main">
         <h1>${esc(g.name)}</h1>
@@ -95,6 +97,7 @@ function drawDetail(root, g) {
     mwrap.appendChild(row);
   });
 
+  wrap.querySelector('#gr-back').onclick = () => { state.ui.mobileDetail = false; bus.rerender(); };
   wrap.querySelector('#gcopy').onclick = () => { navigator.clipboard?.writeText(g.address); toast(`${icon('check')} Copied ${g.address}`); };
   wrap.querySelector('#gpost').onclick = () => openCompose({ to: g.address, subject: '' });
   if (canManage) {
