@@ -1,0 +1,17 @@
+# Envoir OSS monorepo — Cargo workspace.
+# Reference implementation of the Decentralized Message Transfer & Access Protocol.
+# Fully open source (MIT). The private billing/management control-plane lives in the
+# separate `envoir-cloud` repo and consumes the operator seam (crates/dmtap-seam) over a
+# documented contract — it is NOT part of this workspace.
+
+[workspace]
+resolver = "2"
+members = [
+    "node",      # the whole client side; it IS the mesh
+    "gateway",   # optional legacy SMTP bridge
+    "crates/*",  # shared libraries incl. dmtap-seam (the operator seam)
+]
+
+[workspace.metadata.dmtap]
+spec = "../dmtap/"   # the DMTAP spec repo (sibling; the spec no longer lives in this repo)
+license = "MIT"

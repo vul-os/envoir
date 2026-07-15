@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Envoir — sovereign mail, chat &amp; files on one key</title>
+<meta name="description" content="Envoir is the open-source reference of DMTAP: mail, chat, files and login on one keypair identity, held by a node you run, moving through a mesh and mixnet that hides who talks to whom.">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="css/style.css">
+
+<meta property="og:title" content="Envoir — your key is your identity">
+<meta property="og:description" content="Sovereign mail, chat, files and login on one keypair. Open source, MIT, self-hostable. The reference implementation of DMTAP.">
+<meta property="og:type" content="website">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top" aria-label="Envoir home">
+      <svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="nav-g" x1="16" y1="12" x2="112" y2="116" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#5B9DFF"/><stop offset="1" stop-color="#7C5CFF"/>
+          </linearGradient>
+        </defs>
+        <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#nav-g)"/>
+        <rect x="30" y="40" width="68" height="48" rx="9" fill="none" stroke="#fff" stroke-width="5"/>
+        <path d="M33 45 L64 68 L95 45" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="33" cy="45" r="6" fill="#fff"/><circle cx="95" cy="45" r="6" fill="#fff"/><circle cx="64" cy="68" r="7" fill="#fff"/>
+        <path d="M33 45 L95 45" stroke="#fff" stroke-width="2.5" stroke-opacity="0.45" stroke-dasharray="3 5"/>
+      </svg>
+      <span class="word">Envoir</span>
+    </a>
+
+    <nav class="nav-links hide-mobile" aria-label="Primary">
+      <a href="#how">How it works</a>
+      <a href="#naming">Naming</a>
+      <a href="#identity">One identity</a>
+      <a href="#privacy">Privacy</a>
+      <a href="#open-source">Open source</a>
+    </nav>
+
+    <div class="nav-right">
+      <button class="switch" id="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Toggle light/dark theme"></button>
+      <a class="btn btn-ghost btn-mono nav-cta" href="https://github.com/envoir" target="_blank" rel="noopener">Get the code</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ============ HERO ============ -->
+  <section class="hero" id="top">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="tag">DMTAP</span> reference client · MIT · pre-alpha</p>
+        <h1>Your key is your identity. <em>Your node is your provider.</em></h1>
+        <p class="lede">
+          Envoir is the open-source reference implementation of <strong>DMTAP</strong> —
+          mail, chat, and files on one keypair identity, held on a node you run, moving through
+          a peer mesh and mixnet built so that no one, including us, sees who's talking to whom.
+        </p>
+        <div class="hero-ctas">
+          <a class="btn btn-primary" href="https://github.com/envoir/envoir" target="_blank" rel="noopener">Get the code</a>
+          <a class="btn btn-ghost" href="https://github.com/envoir/dmtap" target="_blank" rel="noopener">Read the spec →</a>
+        </div>
+        <div class="hero-keyname">
+          <span class="label">Your identity, as a name — zero authority, zero signup</span>
+          <span class="readout mono" id="keyname-readout" aria-live="off">maple-heron-otter-cabin-river-slate-amber-quill<span class="cursor">&nbsp;</span></span>
+        </div>
+      </div>
+
+      <div class="hero-visual" role="img" aria-label="Illustrative animation of MOTEs (encrypted messages) hopping across a peer mesh through mixnet relays before reaching an always-on node.">
+        <span class="hv-tag"><span class="dot"></span>mesh · illustrative</span>
+        <canvas id="mesh-canvas"></canvas>
+        <span class="hv-caption">simulated routing — not live network telemetry</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PROBLEM ============ -->
+  <section id="problem">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow"><span class="tag">§0</span> the problem</p>
+        <h2>Email was never really yours</h2>
+        <p class="lede">Every inbox today is a courtesy, extended by whoever's server it lives on. DMTAP starts from a different premise: the identity is yours before any provider is involved.</p>
+      </div>
+      <div class="grid-3">
+        <div class="card reveal" data-d="1">
+          <span class="num">01</span>
+          <h3>Your address is a lease</h3>
+          <p>It lives on someone else's domain, on someone else's server — and it can be suspended, sold, or shut down without your consent.</p>
+        </div>
+        <div class="card reveal" data-d="2">
+          <span class="num">02</span>
+          <h3>The provider can read it</h3>
+          <p>Centralized inboxes mean centralized reading, whatever the assurances. The operator of the mailbox is, by construction, able to see the mail.</p>
+        </div>
+        <div class="card reveal" data-d="3">
+          <span class="num">03</span>
+          <h3>Metadata is the whole graph</h3>
+          <p>Even where content is protected, who emailed whom, when, and how often is usually sitting in the clear — a complete social graph, timestamped forever.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HOW IT WORKS ============ -->
+  <section id="how">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow"><span class="tag">§0.3 – §0.4</span> how it works</p>
+        <h2>Three layers of indirection free your address from any server</h2>
+        <p class="lede">A name resolves to a key once. After that, contacts route by key through the mesh — no domain, registrar, or server sits in the middle of an existing relationship again.</p>
+      </div>
+
+      <div class="indirection reveal">
+        <div class="ind-box">
+          <div class="tt">Name · human, stable</div>
+          <div class="vv">abc@def.com</div>
+          <div class="dd">Looked up once, via DNS + key transparency (§3)</div>
+        </div>
+        <div class="arrow" aria-hidden="true"><svg viewBox="0 0 26 14"><path d="M0 7H24M24 7L17 1M24 7L17 13" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></div>
+        <div class="ind-box">
+          <div class="tt">Key · durable, portable</div>
+          <div class="vv">IK: 7f2a…9c1b</div>
+          <div class="dd">The identity itself — never changes on a whim (§1)</div>
+        </div>
+        <div class="arrow" aria-hidden="true"><svg viewBox="0 0 26 14"><path d="M0 7H24M24 7L17 1M24 7L17 13" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></div>
+        <div class="ind-box">
+          <div class="tt">Location · ephemeral</div>
+          <div class="vv">mesh DHT record</div>
+          <div class="dd">Self-republished as your node's address changes (§4)</div>
+        </div>
+      </div>
+
+      <p class="lede reveal" style="margin: 28px 0 22px;">A message between two DMTAP identities never touches a mail server. It's built, sealed, and routed hop-by-hop by the sender's own node:</p>
+
+      <div class="trace reveal" role="img" aria-label="Message flow trace: resolve name to key, fetch key packages and location, build a sealed and encrypted MOTE, send through the mixnet, and receive an acknowledgement.">
+<span class="prompt">$</span> envoir send alice@yourdomain
+<span class="step">[1]</span> resolve   alice@yourdomain → key <span class="tag">K</span>            <span class="tag">dns + key-transparency, §3</span>
+<span class="step">[2]</span> fetch     K's KeyPackages + current location  <span class="tag">mesh DHT, §4 / §5.3</span>
+<span class="step">[3]</span> build     MOTE — sealed-sender · MLS/HPKE-encrypted · signed  <span class="tag">§2 / §5 / §6</span>
+<span class="step">[4]</span> send      via mixnet, <span class="tag">private</span> tier — onion-routed, minutes  <span class="tag">§4 / §6</span>
+<span class="step">[5]</span> <span class="ok">ack</span>       delivered &amp; stored on alice's node · sender retries until ack
+
+<span class="tag">no gateway · no SMTP · no plaintext outside the two endpoints</span></div>
+    </div>
+  </section>
+
+  <!-- ============ NAMING ============ -->
+  <section id="naming">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow"><span class="tag">§3</span> naming</p>
+        <h2>Pick as many names as you like. They all point at one key.</h2>
+        <p class="lede">The identity is always the keypair. A name is only a memorable pointer to it — and DMTAP defines a ladder of name forms, from zero-authority to fully human-chosen, that you can hold at the same time.</p>
+      </div>
+
+      <div class="ladder reveal">
+        <div class="rung featured">
+          <span class="form">Key-name<br><span class="authority" style="text-align:left;">default</span></span>
+          <span class="example">maple-heron-otter-cabin-river-slate-amber-quill</span>
+          <span class="authority">zero authority</span>
+        </div>
+        <div class="rung">
+          <span class="form">Fingerprint</span>
+          <span class="example">k:7f2a9c1b…</span>
+          <span class="authority">none</span>
+        </div>
+        <div class="rung">
+          <span class="form">Handle</span>
+          <span class="example">@thisismyname</span>
+          <span class="authority">thin directory</span>
+        </div>
+        <div class="rung">
+          <span class="form">name@domain</span>
+          <span class="example">me@yourdomain</span>
+          <span class="authority">your DNS</span>
+        </div>
+        <div class="rung">
+          <span class="form">Self-sovereign</span>
+          <span class="example">thisismyname · name-chain</span>
+          <span class="authority">chain ordering</span>
+        </div>
+      </div>
+
+      <p class="keyname-note reveal">
+        Every identity gets its key-name the instant a key is generated — no directory, no registration, no waiting.
+        It's 8 words drawn from an ~1,024-word list (80 bits), with a <span class="chk">checksum folded into the last word</span>
+        so a mistyped or mistyped name fails closed instead of quietly resolving to someone else's key.
+        Want it adversary-proof forever instead of just memorable? Use the 12-word form.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ ONE IDENTITY ============ -->
+  <section id="identity">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow"><span class="tag">§5 · §13</span> one identity</p>
+        <h2>Mail, chat, files, and login — one key, no central provider</h2>
+        <p class="lede">MLS groups carry 1:1 messages, chat, and file folders on the same substrate as mail. The same key that receives your mail signs you into the web.</p>
+      </div>
+
+      <div class="grid-4">
+        <div class="thing reveal" data-d="1">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M4 6.5 12 13 20 6.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <h3>Mail</h3>
+          <p>Async, store-and-forward, delivered even while your node sleeps — with a gateway bridge into the legacy SMTP world.</p>
+        </div>
+        <div class="thing reveal" data-d="2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 5h16v11H8l-4 4V5Z" stroke-linejoin="round"/></svg>
+          <h3>Chat</h3>
+          <p>1:1 and group messaging over MLS, with async join via KeyPackages — no one has to be online at the same time.</p>
+        </div>
+        <div class="thing reveal" data-d="3">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" stroke-linejoin="round"/></svg>
+          <h3>Files</h3>
+          <p>Content-addressed, encrypted chunks shared through the same MLS groups as your conversations — no separate drive to trust.</p>
+        </div>
+        <div class="thing reveal" data-d="4">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="14" r="4"/><path d="M11 11 19 3M15 5l2 2M18 2l2 2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <h3>Sign-in</h3>
+          <p>An origin-bound challenge, signed by your key — phishing-resistant like a passkey, because a passkey is what gates it.</p>
+        </div>
+      </div>
+
+      <div class="signin-strip reveal">
+        <span class="lbl">On any site: <b>“Sign in with Envoir”</b> → enter <span class="mono">alice@yourdomain</span> → approve on your device. No password created, no bearer token to steal.</span>
+        <a class="btn btn-ghost btn-mono" href="https://github.com/envoir/dmtap" target="_blank" rel="noopener">DMTAP-Auth, §13 →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PRIVACY ============ -->
+  <section id="privacy">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow"><span class="tag">§6</span> privacy, honestly</p>
+        <h2>Metadata-private by architecture, not by promise</h2>
+        <p class="lede">Content privacy is table stakes. DMTAP also treats the social graph itself — who talks to whom, when, how much — as something to protect.</p>
+      </div>
+
+      <div class="priv-grid">
+        <ul class="priv-list reveal">
+          <li>
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 8l9 5 9-5" stroke-linecap="round"/></svg>
+            <div><h3>Sealed sender</h3><p>Intermediaries relay a MOTE without ever learning who sent it.</p></div>
+          </li>
+          <li>
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6" cy="12" r="2.4"/><circle cx="12" cy="6" r="2.4"/><circle cx="18" cy="12" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M8 11l2-3M14 6.5l2 3M16 14l-2 3M10 15l-2-1" stroke-linecap="round"/></svg>
+            <div><h3>Mixnet + cover traffic</h3><p>Onion-routed hops, mixing delays, and padding hide timing and size — email's tolerance for latency is what makes this affordable.</p></div>
+          </li>
+          <li>
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v4M12 17v4M3 12h4M17 12h4" stroke-linecap="round"/><circle cx="12" cy="12" r="5"/></svg>
+            <div><h3>Push, not poll</h3><p>Your always-on node receives through the mixnet — there's no store-and-poll step for an observer to time.</p></div>
+          </li>
+          <li>
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6l7-3Z" stroke-linejoin="round"/></svg>
+            <div><h3>Private lookups</h3><p>Name→key resolution is routed through the mixnet too, so the directory never learns who's asking about whom.</p></div>
+          </li>
+        </ul>
+
+        <div class="honest-box reveal">
+          <p class="eyebrow">honest boundary</p>
+          <p><strong>DMTAP targets a global passive adversary</strong> — an observer who can watch traffic but not actively manipulate every hop.</p>
+          <p>It does not claim perfect resistance to a global <em>active</em> adversary with unlimited resources. That's a deliberately drawn line, not a marketing gap: every privacy guarantee here is one we can defend on the spec's own terms.</p>
+          <p>Messages can choose <strong>private</strong> (full mixnet, minutes) or <strong>fast</strong> (fewer hops, seconds, less metadata protection). Default is private.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ OPEN SOURCE ============ -->
+  <section id="open-source">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow"><span class="tag">§12</span> operators</p>
+        <h2>Free to self-host, forever. Paid is optional — for not running it yourself.</h2>
+        <p class="lede">Envoir is MIT-licensed end to end: protocol, node, gateway, and client. Nothing that matters is held back for a paid tier.</p>
+      </div>
+
+      <div class="compare">
+        <div class="col reveal">
+          <h3>Self-host</h3>
+          <span class="price mono">$0 · your hardware</span>
+          <ul>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Run the node on a Pi, NAS, old laptop, or $2 VPS</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Full protocol: mesh, mixnet, MLS, DMTAP-Auth — nothing gated</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Unlimited by default — the operator seam's self-host implementation is a no-op</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>MIT license, auditable top to bottom</li>
+          </ul>
+        </div>
+        <div class="col hosted reveal">
+          <h3>Hosted operator</h3>
+          <span class="price mono">optional · e.g. Envoir Cloud</span>
+          <ul>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Someone else runs the always-on node for you</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Billing, quotas, and multi-tenant management</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Same protocol, same client, same privacy guarantees</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Never a crippled feature set — the paid thing is only <em>running</em> it</li>
+          </ul>
+        </div>
+      </div>
+
+      <p class="seam-note reveal">Both modes are the same code, talking through one documented contract — the <code>dmtap-seam</code>: metering, provisioning, policy, and gateway authorization. Self-host gets the unlimited defaults; a hosted operator implements the same seam without forking or gating the protocol.</p>
+    </div>
+  </section>
+
+  <!-- ============ TRUST ============ -->
+  <section id="trust">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow"><span class="tag">§0.5</span> where state lives</p>
+        <h2>Your key, not our servers</h2>
+        <p class="lede">The middle of the network — mesh, mixnet, gateway — is built to hold no durable user data at all. Durability always lives at an edge you control.</p>
+      </div>
+
+      <div class="table-wrap reveal">
+        <table class="state-table">
+          <thead><tr><th>State</th><th>Lives on</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>Keys, mailbox, files, retry queue</td><td class="loc">your node</td><td>All durable state — the edge, not the middle</td></tr>
+            <tr><td>Name → key</td><td class="loc">DNS + key transparency</td><td>Stable; small; auditable for silent key swaps</td></tr>
+            <tr><td>Key → location</td><td class="loc">mesh DHT</td><td>Dynamic, signed, TTL'd, self-republished</td></tr>
+            <tr><td>In-flight ciphertext</td><td class="loc">mixnet / relay</td><td>Held only until delivered — content-blind</td></tr>
+            <tr><td>Legacy reputation</td><td class="loc">gateway</td><td>The one real operational cost, if you bridge legacy mail</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FINAL CTA ============ -->
+  <section id="get-started">
+    <div class="wrap">
+      <div class="cta-final reveal">
+        <div>
+          <p class="eyebrow"><span class="tag">start here</span></p>
+          <h2>Run your own front door.</h2>
+          <p class="lede">Two pieces of software, plus DNS you already have. The node holds the mailbox; the gateway is optional and only needed if you correspond with the legacy world.</p>
+          <div class="hero-ctas">
+            <a class="btn btn-primary" href="https://github.com/envoir/envoir" target="_blank" rel="noopener">Get the code</a>
+            <a class="btn btn-ghost" href="https://github.com/envoir/dmtap" target="_blank" rel="noopener">Read the full spec</a>
+          </div>
+          <div class="status-pill"><span class="dot"></span>pre-alpha — spec is detailed, reference implementation is a scaffold. not production-ready.</div>
+        </div>
+        <div class="code-block">
+<span class="c"># build the workspace</span>
+cargo build
+<span class="c"># run a reference node</span>
+cargo run -p envoir-node -- --help
+<span class="c"># the web client needs no build step</span>
+<span class="g">→</span> serve <span class="c">client/</span> with any static server
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="foot-brand">
+          <svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <g stroke="currentColor" fill="currentColor">
+              <rect x="30" y="40" width="68" height="48" rx="9" fill="none" stroke-width="5"/>
+              <path d="M33 45 L64 68 L95 45" fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="33" cy="45" r="6" stroke="none"/><circle cx="95" cy="45" r="6" stroke="none"/><circle cx="64" cy="68" r="7" stroke="none"/>
+              <path d="M33 45 L95 45" stroke-width="2.5" stroke-opacity="0.4" stroke-dasharray="3 5" fill="none"/>
+            </g>
+          </svg>
+          <strong>Envoir</strong>
+        </div>
+        <p class="foot-desc">The open-source reference implementation of DMTAP — sovereign mail, chat, files, and login on one keypair identity.</p>
+      </div>
+
+      <div class="foot-col">
+        <h4>Product</h4>
+        <ul>
+          <li><a href="#identity">Mail</a></li>
+          <li><a href="#identity">Chat</a></li>
+          <li><a href="#identity">Files</a></li>
+          <li><a href="#identity">Sign in with Envoir</a></li>
+        </ul>
+      </div>
+
+      <div class="foot-col">
+        <h4>Protocol</h4>
+        <ul>
+          <li><a href="https://github.com/envoir/dmtap" target="_blank" rel="noopener">DMTAP overview (§0)</a></li>
+          <li><a href="https://github.com/envoir/dmtap" target="_blank" rel="noopener">Naming &amp; directory (§3)</a></li>
+          <li><a href="https://github.com/envoir/dmtap" target="_blank" rel="noopener">Privacy model (§6)</a></li>
+          <li><a href="https://github.com/envoir/dmtap" target="_blank" rel="noopener">DMTAP-Auth (§13)</a></li>
+        </ul>
+      </div>
+
+      <div class="foot-col">
+        <h4>Open source</h4>
+        <ul>
+          <li><a href="https://github.com/envoir/envoir" target="_blank" rel="noopener">Source (envoir/envoir)</a></li>
+          <li><a href="https://github.com/envoir/dmtap" target="_blank" rel="noopener">Spec (envoir/dmtap)</a></li>
+          <li><a href="../LICENSE-MIT" target="_blank" rel="noopener">MIT license</a></li>
+          <li><a href="../brand/README.md" target="_blank" rel="noopener">Brand assets</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="foot-bottom">
+      <span>© 2026 Envoir. MIT licensed. DMTAP is an open protocol — Envoir is one implementation of it.</span>
+      <span class="legal-links">
+        <a href="https://github.com/envoir/dmtap" target="_blank" rel="noopener">Spec</a>
+        <a href="https://github.com/envoir/envoir" target="_blank" rel="noopener">Repo</a>
+      </span>
+    </div>
+  </div>
+</footer>
+
+<script src="js/mesh.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

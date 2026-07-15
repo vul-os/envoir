@@ -1,0 +1,27 @@
+//! # DMTAP — Decentralized Message Transfer & Access Protocol (reference node library)
+//!
+//! This crate is a **reference implementation**, not normative. The normative source of
+//! truth is the specification in the DMTAP spec repo (`../dmtap/`). Where this code and the
+//! spec disagree, the spec governs (spec §10.4).
+//!
+//! One substrate carries mail, chat, and files over a P2P mesh + mixnet, with an optional
+//! legacy SMTP gateway (a separate crate). See `../dmtap/00-overview.md`.
+//!
+//! ## Layering
+//! The protocol **core** — crypto suites, content addressing, the identity lifecycle, the
+//! 8-word key-name, and the MOTE object (spec §1, §2, §3.9) — now lives in the workspace-shared
+//! [`dmtap_core`] crate so it can be reused by the gateway. This node crate re-exports it and
+//! adds the node-only subsystems (mesh, transport, delivery, client protocols, abuse).
+
+// Re-export the shared core so existing paths (`dmtap::Suite`, `dmtap::identity`,
+// `dmtap::mote`, …) keep working after the move into `dmtap-core`.
+pub use dmtap_core::{self, id, identity, keyname, mote, ContentId, Suite, TimestampMs};
+
+// Node-only planned modules (see README): the client side that *is* the mesh.
+// pub mod naming;
+// pub mod transport;
+// pub mod messaging;
+// pub mod privacy;
+// pub mod clients;
+// pub mod abuse;
+// pub mod store;

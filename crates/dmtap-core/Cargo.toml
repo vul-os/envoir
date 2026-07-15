@@ -1,0 +1,28 @@
+[package]
+name = "dmtap-core"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+description = "DMTAP core primitives — crypto suites, content addressing, identity lifecycle, the 8-word key-name, and the MOTE object — shared by the Envoir reference node and gateway"
+repository = "https://example.invalid/envoir"
+
+[dependencies]
+# --- Signing (spec §1.1 suite 0x01: Ed25519, RFC 8032) ---
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+# --- KEM key material (spec §1.1: X25519, RFC 7748) ---
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+# --- HPKE payload sealing (spec §2.4; RFC 9180 DHKEM(X25519)/HKDF-SHA256/ChaCha20Poly1305) ---
+hpke = "0.12"
+# --- Hashing / content addressing (spec §2.2, §3.9: BLAKE3-256 with agility prefix) ---
+blake3 = "1"
+# --- Deterministic CBOR (spec §README, RFC 8949) ---
+ciborium = "0.2"
+serde = { version = "1", features = ["derive"] }
+# --- KDF for blinded delivery tags (spec §2.2a: BT = HKDF(shared_secret, epoch_day)) ---
+hkdf = "0.12"
+sha2 = "0.10"
+# --- RNG ---
+rand_core = { version = "0.6", features = ["getrandom"] }
+# --- Errors ---
+thiserror = "1"

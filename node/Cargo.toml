@@ -1,0 +1,68 @@
+[package]
+name = "envoir-node"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.75"
+license = "Apache-2.0 OR MIT"
+description = "Envoir reference node — identity, mailbox, mesh, messaging, and files for the Decentralized Message Transfer & Access Protocol (DMTAP)"
+repository = "https://example.invalid/envoir"
+
+# The node is the whole client-side: identity, mailbox, mesh participation, delivery,
+# messaging (MLS), files, and client protocols. See the DMTAP spec repo (../dmtap/) for the spec.
+#
+# Dependencies below are the INTENDED reference stack (grounded against current standards).
+# They are commented until the corresponding module is implemented, so the scaffold builds
+# with std only. Uncomment as each subsystem lands.
+
+[dependencies]
+# --- Shared DMTAP core primitives (identity, MOTE, key-name, suites, content addressing) ---
+# Moved out of this crate into the workspace-shared library; the node re-exports it (spec §1, §2, §3.9).
+dmtap-core = { path = "../crates/dmtap-core" }
+
+# --- Serialization (spec §README, deterministic CBOR RFC 8949 §4.2, bytewise key order) ---
+# ciborium = "0.2"          # CBOR; verify it emits/validates deterministic (core) form
+# serde = { version = "1", features = ["derive"] }
+
+# --- Hashing / content addressing (spec §2; BLAKE3-256, with hash-agility prefix) ---
+# blake3 = "1"
+
+# --- Classical crypto (spec §1.1 suite 0x01) — now provided via dmtap-core ---
+# ed25519-dalek = "2"       # Ed25519 (RFC 8032), PureEd25519
+# x25519-dalek  = "2"       # X25519 (RFC 7748)
+# hpke = "0.12"             # HPKE (RFC 9180): DHKEM(X25519,HKDF-SHA256)/HKDF-SHA256/ChaCha20Poly1305
+
+# --- Post-quantum (spec §1.1 suite 0x02; hybrid) ---
+# ml-kem = "0.2"           # FIPS 203 ML-KEM-768
+# ml-dsa = "0.0"           # FIPS 204 ML-DSA-65   (track maturity/audit)
+# x-wing  = "*"            # X-Wing hybrid KEM (ML-KEM-768 ⊕ X25519) for HPKE — preferred combiner
+
+# --- Messaging / groups (spec §5; MLS RFC 9420) ---
+# openmls = "0.6"          # MLS; suites 0x0001/0x0003 (X25519+ChaCha20+Ed25519)
+                            # NOTE: MLS handshake (Commit/Proposal/Welcome) needs an ORDERED
+                            # channel — do NOT send handshakes over the reordering mixnet.
+                            # Track draft-kohbrok-mls-dmls for leaderless operation.
+
+# --- Mesh / transport (spec §4; libp2p) ---
+# libp2p = { version = "0.54", features = [
+#   "kad", "relay", "dcutr", "autonat", "noise", "quic", "tcp", "websocket", "mdns", "identify", "ping",
+# ] }
+
+# --- Mixnet (spec §4.4, §6; Sphinx / Loopix-style) ---
+# sphinx-packet = "*"      # Sphinx packet format (evaluate nym crates vs. own)
+
+# --- Recovery (spec §1.4) ---
+# NOTE: prefer VSS (Feldman/Pedersen) over plain Shamir; consider SLIP-0039 (mnemonic+Shamir)
+#       and FROST (RFC 9591) threshold signatures to avoid ever reassembling the secret.
+# frost-ed25519 = "*"
+
+# --- Async runtime / CLI (scaffold) ---
+# tokio = { version = "1", features = ["full"] }
+# clap  = { version = "4", features = ["derive"] }
+
+[lib]
+name = "dmtap"
+path = "src/lib.rs"
+
+[[bin]]
+name = "envoir-node"
+path = "src/main.rs"
