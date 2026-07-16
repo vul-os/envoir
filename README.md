@@ -1,79 +1,234 @@
-# Envoir
+<p align="center">
+  <img src="brand/logo-mark.svg" width="88" height="88" alt="Envoir" />
+</p>
 
-**Sovereign mail, chat & files** — the open-source reference implementation of
-**[DMTAP](../dmtap)** (the Decentralized Message Transfer & Access Protocol), for private,
-metadata-protected communication and decentralized login over a peer-to-peer mesh, with an
-optional bridge to legacy email.
+<h1 align="center">Envoir</h1>
 
-Envoir is to DMTAP what Element is to Matrix, or Fastmail is to JMAP: the branded, open-source
-apps that implement an open protocol. Fully open source under the **MIT license**. This is the
-OSS monorepo (client + node + gateway + the operator seam). The DMTAP spec lives in the sibling
-[`../dmtap`](../dmtap) repo; the private billing/management layer lives in
-[`../envoir-cloud`](../envoir-cloud) and plugs in through the documented **operator seam** —
-withholding *no* protocol, client, or privacy feature. Everything a user touches and everything
-trust depends on is here and open.
+<p align="center">
+  <b>Sovereign mail, chat, files &amp; identity — your key is your identity, not an account.</b>
+</p>
 
-> Licensing note: shipped as MIT. Apache-2.0 dual-licensing is under consideration for its
-> explicit patent grant (relevant to novel mechanisms like anti-abuse postage/tokens); some
-> crate manifests currently declare `Apache-2.0 OR MIT` toward that end.
+<p align="center">
+  <a href="LICENSE-MIT"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-4C4DFF"></a>
+  <a href="node/Cargo.toml"><img alt="Rust" src="https://img.shields.io/badge/rust-1.75%2B-9A4DFF?logo=rust&logoColor=white"></a>
+  <img alt="Status" src="https://img.shields.io/badge/status-pre--alpha%20reference-00E0C7">
+  <a href="https://github.com/env-oir/dmtap"><img alt="Spec: DMTAP" src="https://img.shields.io/badge/spec-DMTAP-4C4DFF"></a>
+</p>
 
-## The model in one paragraph
+<p align="center">
+  <img src="docs/img/mail-dark.png#gh-dark-mode-only" width="900" alt="Envoir Mail — three-pane inbox, dark theme">
+  <img src="docs/img/mail-light.png#gh-light-mode-only" width="900" alt="Envoir Mail — three-pane inbox, light theme">
+</p>
 
-Your identity is a **keypair**, not an account or an address. You run a **node** on any box
-that stays on most of the time (a Raspberry Pi, NAS, old laptop, or $2 VPS); the node holds
-your keys and data and does the work. Nodes form a **mesh** (discovery + relaying + delivery)
-and route through a **mixnet** so not even a global observer sees who talks to whom. A human
-name like `abc@def.com` is only a *pointer* to your key. An **optional gateway** bridges DMTAP
-⇄ legacy SMTP, and fades as the network grows.
+## What is Envoir
 
-## Repository layout (monorepo)
+Envoir is the open-source reference implementation of **[DMTAP](https://github.com/env-oir/dmtap)**
+(the Decentralized Message Transfer & Access Protocol): one sovereign **keypair identity** for mail,
+chat, calendar, contacts, files, and groups, delivered over a peer-to-peer mesh and mixnet so that
+not even a global observer sees who talks to whom. A human address like `you@envoir.org` is only a
+*pointer* to your key — lose the provider, keep the identity. An optional gateway bridges DMTAP to
+legacy SMTP so it's useful on day one, and fades as the network grows. Envoir is to DMTAP what
+Element is to Matrix: the branded, MIT-licensed apps for an open protocol. There is **no
+cryptocurrency and no blockchain** anywhere in this project — anti-abuse for cold contact uses
+anonymous Privacy-Pass-style rate-limit tokens, proof-of-work, and optional real-money postage,
+never a coin.
 
+| Surface | What it gives you |
+|---|---|
+| **Mail** | Three-pane inbox, threading, labels, snooze, scheduled/undo send, per-message **transport-path provenance** |
+| **Chat** | DMs (deniable X3DH + Double Ratchet) and channels (signed MLS groups) on the same MOTE substrate |
+| **Calendar** | Month/week/day views, recurring events, peer-to-peer invitations + RSVP |
+| **Contacts** | Per-contact key verification — TOFU-pinned vs. verified via safety number |
+| **Files** | Content-addressed, end-to-end encrypted, any size; a shared folder *is* a group |
+| **Groups** | A group has an address (`team@envoir.org`); broadcast vs. channel, members + roles |
+| **Identity** | Safety number (words/digits/QR-grid), linked devices, signed-in apps, recovery phrase |
+
+This repository is a **reference implementation / preview** — a real client compiles the Rust core
+to WASM and speaks to a real mesh; today's web client simulates the network (clearly labeled) so the
+whole protocol is demonstrable end to end in a browser. See [Security & honesty](#security--honesty)
+for exactly what's real.
+
+## Mail
+
+Three-pane conversation view with folders, color labels, star/archive/snooze, scheduled send, undo
+send, and rich compose with signatures. Every message carries a **verified ✓** badge once you've
+checked its sender's safety number, and a clear **legacy-origin** marker when it arrived through the
+gateway rather than pure-mesh.
+
+<p align="center">
+  <img src="docs/img/mail-dark.png#gh-dark-mode-only" width="860" alt="Mail — dark theme">
+  <img src="docs/img/mail-light.png#gh-light-mode-only" width="860" alt="Mail — light theme">
+</p>
+
+## Chat
+
+DMs and channels (channels are **groups with addresses**) over the same MOTE substrate as mail, just
+`kind=chat` on the fast tier. Every conversation header carries an honest protocol badge: a DM is
+**Deniable 1:1** (pairwise X3DH + Double Ratchet, MAC-authenticated — no signature ties a message to
+you), a channel is **MLS group · signed** (scales to any group size, but each message's signature is
+non-repudiable). Click the badge for the tradeoff, spelled out in full.
+
+<p align="center">
+  <img src="docs/img/chat-dark.png#gh-dark-mode-only" width="860" alt="Chat — Deniable 1:1 badge, dark theme">
+  <img src="docs/img/chat-light.png#gh-light-mode-only" width="860" alt="Chat — Deniable 1:1 badge, light theme">
+</p>
+
+## Transport-path provenance
+
+Every received message carries a recipient-only provenance record: which transport **tier** it
+arrived on, whether it is **pure-mesh** (never plaintext at any gateway) or **gateway-touched**
+(legacy-origin, with a verified domain-anchored attestation), and — for the private tier — a
+guaranteed **hop-count floor**, never a measured route. The UI is careful never to invent a mix-node
+identity or claim more anonymity than the tier actually provides.
+
+<p align="center">
+  <img src="docs/img/path-graph.png" width="860" alt="Transport path graph — sender to private tier mixnet to recipient">
+</p>
+
+## Files
+
+Content-addressed, end-to-end encrypted, chunked and hashed client-side — any file size, no protocol
+cap. A shared folder is simply a **group**: drop a file, and everyone with membership can read it.
+
+<p align="center">
+  <img src="docs/img/files-dark.png" width="860" alt="Files — content-addressed, shared folders as groups">
+</p>
+
+## Identity
+
+Your key is the security boundary; the address is just a pointer to it. The Identity view surfaces
+the **safety number** (words, digits, and a scannable grid, derived deterministically from your
+public key alone), your linked devices, your signed-in apps, and recovery.
+
+<p align="center">
+  <img src="docs/img/identity-dark.png" width="860" alt="Identity — safety number, devices, signed-in apps">
+</p>
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph You["Your device"]
+        Client["Web client (client/)<br/>mail · chat · files · identity<br/>no build step"]
+    end
+
+    subgraph Node["Your node — envoir-node"]
+        Identity_["identity + safety number"]
+        Mailbox["MOTE store / mailbox"]
+        Messaging["messaging<br/>deniable 1:1 + MLS groups"]
+        Journal["outbound retry journal"]
+    end
+
+    subgraph Mesh["P2P mesh + mixnet"]
+        Transport["libp2p: Kad · Relay · DCUtR · mDNS"]
+        Mix["entry-mix → mix-α → mix-β → exit-mix"]
+    end
+
+    subgraph Naming["Naming & directory"]
+        KT["domain directory +<br/>key transparency (dmtap-naming)"]
+    end
+
+    subgraph Legacy["Legacy email — optional"]
+        Gateway["envoir-gateway (gateway/)<br/>the one component that speaks SMTP"]
+        SMTP["SMTP / the existing internet"]
+    end
+
+    subgraph Op["Operator seam — optional"]
+        Seam["dmtap-seam contract<br/>metering · policy · gateway-authz"]
+        Cloud["private operator, e.g. envoir-cloud<br/>(NOT in this repo)"]
+    end
+
+    Client <--> Node
+    Node --> Transport
+    Transport <--> Mix
+    Mix <--> Peer["their node"]
+    Client -.->|resolve name@domain| KT
+    Node -.->|legacy bridge| Gateway
+    Gateway <--> SMTP
+    Node -.->|metering / policy hooks| Seam
+    Seam -.->|self-host default: no-op| Cloud
 ```
-envoir/
-├── node/            Reference node (Rust): identity, mailbox, mesh, messaging, files, clients
-├── gateway/         Reference legacy SMTP gateway (Rust), optional
-├── crates/
-│   └── dmtap-seam/   The OPERATOR SEAM: metering / provisioning / policy / gateway-authz
-│                    traits with self-host defaults, consumed by envoir-cloud over a contract
-└── client/          Comprehensive-but-simple web client (no build; mail + chat + files)
-```
 
-The normative specification is **not** in this repo — it lives in the sibling **DMTAP spec
-repo** (`../dmtap/`, e.g. [`../dmtap/00-overview.md`](../dmtap/00-overview.md); 12 sections).
-The private billing/management layer lives in the sibling **`envoir-cloud`** repo (not open
-source, not part of this workspace). It implements the `dmtap-seam` contract out-of-process.
+In **self-host** mode every `dmtap-seam` hook is unlimited/no-op, so the OSS stack is fully
+functional standalone — the operator seam and any hosted operator are optional.
 
-## Two components, one seam
+| Path | What it is |
+|---|---|
+| [`node/`](node) | **envoir-node** — the whole client side: identity, mailbox, mesh, messaging, files, and the IMAP/POP3/SMTP-submission/JMAP client servers |
+| [`gateway/`](gateway) | **envoir-gateway** — the optional legacy SMTP bridge; the only component that isn't content-blind |
+| [`crates/dmtap-core`](crates/dmtap-core) | Identity, MOTE, content addressing, canonical CBOR — the shared primitives |
+| [`crates/dmtap-auth`](crates/dmtap-auth) | DMTAP-Auth — decentralized, key-based sign-in |
+| [`crates/dmtap-deniable`](crates/dmtap-deniable) | Deniable 1:1 messaging (X3DH + Double Ratchet) |
+| [`crates/dmtap-mls`](crates/dmtap-mls) | MLS group messaging |
+| [`crates/dmtap-mail`](crates/dmtap-mail) | Client protocol servers: IMAP/POP3/SMTP-submission, JMAP, autodiscovery |
+| [`crates/dmtap-naming`](crates/dmtap-naming) | Naming/addressing + key-transparency |
+| [`crates/dmtap-p2p`](crates/dmtap-p2p) | Mesh transport (libp2p) |
+| [`crates/dmtap-seam`](crates/dmtap-seam) | The **operator seam**: the contract a hosted operator implements |
+| [`crates/conformance-runner`](crates/conformance-runner) | Runs the implementation against the spec's conformance catalog |
+| [`crates/netsim`](crates/netsim), [`crates/downgrade-tests`](crates/downgrade-tests) | Network simulation + downgrade-attack regressions |
+| [`client/`](client) | Web client — mail, chat, calendar, contacts, files, groups, identity |
+| [`console/`](console) | Open-source **domain admin** console (org-level, never sees member keys) |
+| [`status/`](status) | Public + personal status page |
+| [`superadmin/`](superadmin) | Fleet operator console — content-blind by construction |
+| [`site/`](site) | Marketing/landing page |
+| [`integration/`](integration), [`fuzz/`](fuzz), [`formal/`](formal) | Cross-component + adversarial tests, wire-decoder fuzzing, ProVerif symbolic models |
+| [`brand/`](brand) | Logo marks, wordmark, and the Aurora Indigo design tokens |
 
-You build only two pieces of software plus DNS (which we don't build):
+The private billing/management layer for a hosted operator (e.g. `envoir-cloud`) is a **separate,
+non-OSS repository** that implements `dmtap-seam` out of process — it is never part of this
+workspace, and it never gates a protocol, client, or privacy feature.
 
-- **Node** — the whole client side; *it is the mesh*.
-- **Gateway** — the optional legacy bridge.
-
-Both expose the **operator seam** (`crates/dmtap-seam`): clean hooks for metering, account
-provisioning, policy/entitlements, and gateway authorization. In **self-host** mode the seam's
-default implementations are unlimited/no-op, so the OSS is fully functional standalone. A
-**hosted operator** (e.g. `envoir-cloud`) implements the seam to add billing, quotas, and
-multi-tenant management — *without forking or gating the protocol*. This is the GitLab-style
-open-software + paid-operations split, done cleanly: the paid thing is *running it*, never a
-crippled feature set. Privacy and crypto are always free and open.
-
-## Build
+## Quickstart
 
 ```sh
-cargo build            # workspace builds std-only; heavy deps are commented in each Cargo.toml
-cargo run -p envoir-node -- --help
+# Build the whole workspace (node, gateway, and every crate)
+cargo build --workspace
+
+# Two in-process nodes exchange a real, end-to-end-encrypted MOTE
+cargo run -p envoir-node -- run
+
+# Demo IMAP (1143) / POP3 (1110) / SMTP-submission (1587) servers against an in-memory mailbox
+cargo run -p envoir-node -- serve-mail
+
+# The optional legacy-email bridge (reads GATEWAY_DOMAIN / GATEWAY_LISTEN / GATEWAY_TLS_CERT+KEY env vars)
+cargo run -p envoir-gateway -- run
 ```
 
-The web client in `client/` needs no build — serve it with any static server (or the node
-serves it in production).
+The web client needs no build step — no framework, no npm, no CDNs:
 
-## Status
+```sh
+cd client
+python3 -m http.server 8095
+# open http://localhost:8095
+```
 
-Pre-alpha. The spec is written and grounded against current standards (see the DMTAP spec
-repo, [`../dmtap/11-grounding-and-references.md`](../dmtap/11-grounding-and-references.md)); the
-Rust crates and web client are scaffolds/references. Not production-ready.
+`console/`, `status/`, `superadmin/`, and `site/` each run the same way — see their own `README.md`.
+
+## Spec
+
+The normative specification is **not** in this repository — it lives in the sibling
+**[env-oir/dmtap](https://github.com/env-oir/dmtap)** repo: 22 markdown sections (identity, MOTE,
+naming, transport, messaging, privacy, gateway, clients, anti-abuse, conformance, and more), grounded
+against current standards, plus a compiled **`dmtap.pdf`**. This repo is one implementation of that
+spec; conformance is checked mechanically by [`crates/conformance-runner`](crates/conformance-runner)
+against the spec's own conformance catalog.
+
+## Security & honesty
+
+Envoir's privacy model is **honest, not absolute**: recovery is a first-class, versioned, signed
+policy (spec §1.4) built from phrase, linked-device, and Shamir'd social-guardian factors that the
+owner composes and rotates — never a silent key-escrow backdoor. (The web client's onboarding shows
+a 12-word demo phrase; a real client uses the full SLIP-0039 word list.) The two security-critical
+messaging ceremonies (deniable 1:1 and DMTAP-Auth sign-in) have machine-checked **ProVerif symbolic
+models** in [`formal/`](formal) (secrecy, mutual authentication, forward secrecy, deniability,
+replay/origin-binding — see its README for exact property statements and honest limitations); the
+wire-format decoders are exercised by **`cargo-fuzz`** targets in [`fuzz/`](fuzz); and
+[`integration/`](integration) includes dedicated adversarial tests. None of this substitutes for an
+**independent external security audit**, which has not yet happened and is the gate before any
+production deployment. Treat everything here as pre-alpha.
 
 ## License
 
-MIT — see [`LICENSE-MIT`](LICENSE-MIT).
+MIT — see [`LICENSE-MIT`](LICENSE-MIT). Some crate manifests currently declare
+`Apache-2.0 OR MIT` while dual-licensing (for its explicit patent grant) is under consideration; the
+project ships as MIT today.
