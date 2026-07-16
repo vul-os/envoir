@@ -1,0 +1,18 @@
+[package]
+name = "conformance-runner"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+description = "Executable §18-conformance proof: drives dmtap-core's committed KAT vectors.json (and, where byte-backed, the ../dmtap conformance-suite catalog) through the reference codec and reports PASS/FAIL per case. This is the harness a second implementer runs to check their own decoder/signer against the same fixed inputs."
+publish = false
+
+[dependencies]
+dmtap-core = { path = "../dmtap-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ciborium = "0.2"
+
+[[bin]]
+name = "conformance-runner"
+path = "src/main.rs"

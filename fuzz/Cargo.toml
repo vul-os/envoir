@@ -1,0 +1,124 @@
+# cargo-fuzz project — NOT a member of the main `envoir` workspace (the `[workspace]` table
+# below detaches it, per the standard cargo-fuzz convention: libFuzzer/nightly-only build flags
+# must never leak into `cargo build --workspace` / `cargo test --workspace` on stable).
+#
+# Run with: `cargo +nightly fuzz run <target>` (see README.md).
+
+[package]
+name = "dmtap-core-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.dmtap-core]
+path = "../crates/dmtap-core"
+
+[workspace]
+members = ["."]
+
+# One target per decodable wire object (§18) — the real attack surface: canonical-CBOR decoders
+# fed fully attacker-controlled bytes. Each target's contract (see fuzz_targets/*.rs and the
+# shared `common.rs`): (1) never panic / never UB on ANY input; (2) any `Ok` decode result MUST
+# re-encode to byte-identical input (canonical-form idempotence, §18.1.1 — a decoder that accepts
+# non-canonical bytes has a bug, since two different wire encodings would then be treated as "the
+# same" object by this node but possibly differently by another).
+
+[[bin]]
+name = "identity"
+path = "fuzz_targets/identity.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "device_cert"
+path = "fuzz_targets/device_cert.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "recovery_policy"
+path = "fuzz_targets/recovery_policy.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "move_record"
+path = "fuzz_targets/move_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "envelope"
+path = "fuzz_targets/envelope.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "payload"
+path = "fuzz_targets/payload.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "manifest"
+path = "fuzz_targets/manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mix_node_descriptor"
+path = "fuzz_targets/mix_node_descriptor.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mix_directory"
+path = "fuzz_targets/mix_directory.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "domain_directory"
+path = "fuzz_targets/domain_directory.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "deniable_prekey_bundle"
+path = "fuzz_targets/deniable_prekey_bundle.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "deniable_frame"
+path = "fuzz_targets/deniable_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "deniable_payload"
+path = "fuzz_targets/deniable_payload.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = 1
