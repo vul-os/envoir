@@ -33,13 +33,18 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 use serde_json::Value;
 
+use dmtap_core::capability::{CapabilityRevocation, CapabilityToken};
 use dmtap_core::cbor::{self, Cv};
 use dmtap_core::deniable::{DeniableFrame, DeniablePayload, DeniablePrekeyBundle};
 use dmtap_core::directory::DomainDirectory;
 use dmtap_core::id::ContentId;
 use dmtap_core::identity::{verify_domain, DeviceCert, Identity};
+use dmtap_core::kt::{
+    identity_leaf_hash, ConsistencyProof, InclusionProof, SignedTreeHead,
+};
 use dmtap_core::mixnet::{MixDirectory, MixNodeDescriptor};
 use dmtap_core::mote::{Envelope, Manifest, Payload};
+use dmtap_core::sphinx::{RoutingCommand, SphinxCell, SphinxFragmentHeader, Surb};
 use dmtap_core::suite::Suite;
 
 // ============================================================================================
@@ -315,8 +320,91 @@ fn check_vector_inner(v: &Vector) -> Result<Verdict, String> {
                 Err(format!("manifest_root mismatch: got {got}, want {want}"))
             }
         }
+        "kt_leaf_hash" => {
+            let name = v.input.get("name").and_then(Value::as_str).ok_or("missing input.name")?;
+            let ik = unhex(as_hex_str(&v.input, "ik_hex")?)?;
+            let version = v.input.get("version").and_then(Value::as_u64).ok_or("missing input.version")?;
+            let id = ContentId(unhex(as_hex_str(&v.input, "identity_id_hex")?)?);
+            let leaf = identity_leaf_hash(name, &ik, version, &id);
+            let want = as_hex_str(&v.expected, "leaf_hash_hex")?;
+            if hex(leaf.as_bytes()) == want {
+                Ok(Verdict::Pass)
+            } else {
+                Err(format!("kt_leaf_hash mismatch: got {}, want {want}", hex(leaf.as_bytes())))
+            }
+        }
+        "sphinx_encode" => check_sphinx_encode_vector(v),
         "cbor_encode" => check_cbor_encode_vector(v),
         other => Err(format!("conformance-runner does not know operation `{other}` (extend check_vector_inner)")),
+    }
+}
+
+/// Reconstruct a Sphinx byte-layout object (§18.5.4) from a `sphinx_encode` vector, re-encode it,
+/// and assert the fixed on-wire bytes match — plus a `from_bytes`→`to_bytes` round-trip.
+fn check_sphinx_encode_vector(v: &Vector) -> Result<Verdict, String> {
+    fn arr<const N: usize>(v: &Value, field: &str) -> Result<[u8; N], String> {
+        unhex(as_hex_str(v, field)?)?.try_into().map_err(|_| format!("`{field}` is not {N} bytes"))
+    }
+    let ty = v.input.get("type").and_then(Value::as_str).ok_or("missing sphinx input.type")?;
+    let want = as_hex_str(&v.expected, "bytes_hex")?;
+    let got = match ty {
+        "RoutingCommand" => {
+            let rc = RoutingCommand {
+                cmd: v.input.get("cmd").and_then(Value::as_u64).ok_or("cmd")? as u8,
+                flags: v.input.get("flags").and_then(Value::as_u64).ok_or("flags")? as u8,
+                delay_ms: v.input.get("delay_ms").and_then(Value::as_u64).ok_or("delay_ms")? as u32,
+                next_hop: arr(&v.input, "next_hop_hex")?,
+            };
+            let bytes = rc.to_bytes();
+            if RoutingCommand::from_bytes(&bytes).map_err(|e| e.to_string())? != rc {
+                return Err("RoutingCommand from_bytes round-trip mismatch".into());
+            }
+            bytes.to_vec()
+        }
+        "Surb" => {
+            let s = Surb {
+                first_hop: arr(&v.input, "first_hop_hex")?,
+                header: unhex(as_hex_str(&v.input, "header_hex")?)?,
+                key_seed: arr(&v.input, "key_seed_hex")?,
+            };
+            let bytes = s.to_bytes();
+            if Surb::from_bytes(&bytes).map_err(|e| e.to_string())? != s {
+                return Err("Surb from_bytes round-trip mismatch".into());
+            }
+            bytes
+        }
+        "SphinxFragmentHeader" => {
+            let h = SphinxFragmentHeader {
+                msg_id: arr(&v.input, "msg_id_hex")?,
+                frag_index: v.input.get("frag_index").and_then(Value::as_u64).ok_or("frag_index")? as u16,
+                frag_count: v.input.get("frag_count").and_then(Value::as_u64).ok_or("frag_count")? as u16,
+                total_len: v.input.get("total_len").and_then(Value::as_u64).ok_or("total_len")? as u32,
+            };
+            let bytes = h.to_bytes();
+            if SphinxFragmentHeader::from_bytes(&bytes).map_err(|e| e.to_string())? != h {
+                return Err("SphinxFragmentHeader from_bytes round-trip mismatch".into());
+            }
+            bytes.to_vec()
+        }
+        "SphinxCell" => {
+            let c = SphinxCell {
+                alpha: arr(&v.input, "alpha_hex")?,
+                beta: unhex(as_hex_str(&v.input, "beta_hex")?)?,
+                gamma: arr(&v.input, "gamma_hex")?,
+                delta: unhex(as_hex_str(&v.input, "delta_hex")?)?,
+            };
+            let bytes = c.to_bytes();
+            if SphinxCell::from_bytes(&bytes).map_err(|e| e.to_string())? != c {
+                return Err("SphinxCell from_bytes round-trip mismatch".into());
+            }
+            bytes
+        }
+        other => return Err(format!("unknown sphinx type `{other}`")),
+    };
+    if hex(&got) == want {
+        Ok(Verdict::Pass)
+    } else {
+        Err(format!("sphinx_encode mismatch: got {}, want {want}", hex(&got)))
     }
 }
 
@@ -400,6 +488,29 @@ fn check_cbor_encode_vector(v: &Vector) -> Result<Verdict, String> {
             if obj.id != obj.merkle_root() {
                 return Err("Manifest.id does not equal its own Merkle root".into());
             }
+            re_encode_matches(&obj.det_cbor(), cbor_hex)?;
+        }
+        Some("SignedTreeHead") => {
+            let obj = SignedTreeHead::from_det_cbor(&bytes).map_err(|e| format!("SignedTreeHead::from_det_cbor: {e}"))?;
+            obj.verify().map_err(|e| format!("SignedTreeHead::verify: {e}"))?;
+            re_encode_matches(&obj.det_cbor(), cbor_hex)?;
+        }
+        Some("InclusionProof") => {
+            let obj = InclusionProof::from_det_cbor(&bytes).map_err(|e| format!("InclusionProof::from_det_cbor: {e}"))?;
+            re_encode_matches(&obj.det_cbor(), cbor_hex)?;
+        }
+        Some("ConsistencyProof") => {
+            let obj = ConsistencyProof::from_det_cbor(&bytes).map_err(|e| format!("ConsistencyProof::from_det_cbor: {e}"))?;
+            re_encode_matches(&obj.det_cbor(), cbor_hex)?;
+        }
+        Some("CapabilityToken") => {
+            let obj = CapabilityToken::from_det_cbor(&bytes).map_err(|e| format!("CapabilityToken::from_det_cbor: {e}"))?;
+            obj.verify().map_err(|e| format!("CapabilityToken::verify: {e}"))?;
+            re_encode_matches(&obj.det_cbor(), cbor_hex)?;
+        }
+        Some("CapabilityRevocation") => {
+            let obj = CapabilityRevocation::from_det_cbor(&bytes).map_err(|e| format!("CapabilityRevocation::from_det_cbor: {e}"))?;
+            obj.verify().map_err(|e| format!("CapabilityRevocation::verify: {e}"))?;
             re_encode_matches(&obj.det_cbor(), cbor_hex)?;
         }
         Some(other) => {

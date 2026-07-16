@@ -16,8 +16,6 @@
 //! 5. No NaN/Infinity, no tags, no `undefined`; and no `null` on the wire (an absent optional is
 //!    simply omitted from the map, never present as `null`).
 
-use std::collections::BTreeSet;
-
 /// A canonical CBOR value restricted to the DMTAP wire subset (§18.1.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Cv {
@@ -43,6 +41,14 @@ pub enum Cv {
 pub enum CborError {
     #[error("malformed CBOR")]
     Malformed,
+    #[error("non-shortest-form integer/length encoding (§18.1.1 rule 1)")]
+    NonShortestForm,
+    #[error("indefinite-length item is forbidden (§18.1.1 rule 1)")]
+    IndefiniteLength,
+    #[error("map keys are not in strictly ascending encoded-byte order (§18.1.1 rule 2)")]
+    MapKeyOrder,
+    #[error("trailing bytes after the top-level CBOR item (§18.1.1)")]
+    TrailingData,
     #[error("floating-point value is forbidden on the DMTAP wire (§18.1.1 rule 4)")]
     FloatPresent,
     #[error("CBOR null is forbidden on the wire — absent optionals are omitted (§18.1.1)")]
@@ -158,81 +164,215 @@ fn enc(v: &Cv, out: &mut Vec<u8>) {
 
 // ── Decoding ───────────────────────────────────────────────────────────────────────────────
 
-/// Parse and validate canonical CBOR into a [`Cv`], **failing closed** on any value outside the
-/// DMTAP wire subset: floats, NaN/Infinity, tags, `undefined`, `null`, negative integers, and
-/// duplicate map keys are all rejected here (§18.1.1). Higher layers additionally reject unknown
-/// keys in *signed* objects (§18.1.2).
+/// Parse and validate **canonical** CBOR into a [`Cv`], **failing closed** on any deviation from
+/// RFC 8949 Core Deterministic Encoding as profiled by §18.1.1. This is a *strict* decoder written
+/// against the raw bytes (not a lenient library normalize-and-accept), so it enforces the input
+/// side of §18.1.1 that a canonical decoder MUST re-check:
+///
+/// 1. **Shortest-form** integers, string/array/map lengths (rule 1) — a longer-than-minimal head
+///    (`0x18 0x0a` for 10, etc.) is rejected ([`CborError::NonShortestForm`]).
+/// 2. **Definite-length only** — no indefinite-length items or the `break` code
+///    ([`CborError::IndefiniteLength`]).
+/// 3. **Strictly ascending map keys**, compared by their *encoded bytes* (rule 2), with **no
+///    duplicates** (rule 3) ([`CborError::MapKeyOrder`] / [`CborError::DuplicateKey`]).
+/// 4. **No floats / NaN / Infinity** (rule 4), **no tags / `undefined` / simple values**, **no
+///    `null` on the wire** (rule 5), **no negative integers**, and **no trailing bytes** after the
+///    top-level item.
+///
+/// Because the decoder accepts *only* the canonical encoding of a value, `encode(decode(b)) == b`
+/// for every accepted `b` — the malleability/ signature-reproducibility guarantee §18.1.1 exists
+/// to provide. Higher layers additionally reject unknown keys in *signed* objects (§18.1.2).
 pub fn decode(bytes: &[u8]) -> Result<Cv, CborError> {
-    let value: ciborium::value::Value =
-        ciborium::de::from_reader(bytes).map_err(|_| CborError::Malformed)?;
-    from_value(&value)
+    let mut d = Decoder { b: bytes, pos: 0 };
+    let cv = d.value()?;
+    if d.pos != bytes.len() {
+        return Err(CborError::TrailingData); // one, and only one, top-level item (§18.1.1)
+    }
+    Ok(cv)
 }
 
-fn from_value(v: &ciborium::value::Value) -> Result<Cv, CborError> {
-    use ciborium::value::Value as V;
-    match v {
-        V::Integer(i) => {
-            let n: i128 = (*i).into();
-            if n < 0 || n > u64::MAX as i128 {
-                return Err(CborError::IntRange);
-            }
-            Ok(Cv::U64(n as u64))
-        }
-        V::Bytes(b) => Ok(Cv::Bytes(b.clone())),
-        V::Text(s) => Ok(Cv::Text(s.clone())),
-        V::Bool(b) => Ok(Cv::Bool(*b)),
-        V::Float(_) => Err(CborError::FloatPresent),
-        V::Null => Err(CborError::NullPresent),
-        V::Tag(..) => Err(CborError::TagOrUndefined),
-        V::Array(a) => Ok(Cv::Array(a.iter().map(from_value).collect::<Result<_, _>>()?)),
-        V::Map(m) => from_map(m),
-        // `Value` is not marked non-exhaustive in this version; a future variant would land here.
-        #[allow(unreachable_patterns)]
-        _ => Err(CborError::TagOrUndefined),
-    }
+/// A strict, byte-level recursive-descent canonical-CBOR reader (§18.1.1). Every method advances
+/// `pos` and fails closed on the first non-canonical byte.
+struct Decoder<'a> {
+    b: &'a [u8],
+    pos: usize,
 }
 
-fn from_map(m: &[(ciborium::value::Value, ciborium::value::Value)]) -> Result<Cv, CborError> {
-    use ciborium::value::Value as V;
-    if m.is_empty() {
-        return Ok(Cv::Map(Vec::new()));
+impl<'a> Decoder<'a> {
+    fn byte(&mut self) -> Result<u8, CborError> {
+        let b = *self.b.get(self.pos).ok_or(CborError::Malformed)?;
+        self.pos += 1;
+        Ok(b)
     }
-    let all_int = m.iter().all(|(k, _)| matches!(k, V::Integer(_)));
-    let all_text = m.iter().all(|(k, _)| matches!(k, V::Text(_)));
-    if all_int {
-        let mut seen = BTreeSet::new();
-        let mut out = Vec::with_capacity(m.len());
-        for (k, val) in m {
-            let key: i128 = match k {
-                V::Integer(i) => (*i).into(),
-                _ => unreachable!(),
-            };
-            if key < 0 || key > u64::MAX as i128 {
-                return Err(CborError::IntRange);
+
+    fn take(&mut self, n: usize) -> Result<&'a [u8], CborError> {
+        let end = self.pos.checked_add(n).ok_or(CborError::Malformed)?;
+        let s = self.b.get(self.pos..end).ok_or(CborError::Malformed)?;
+        self.pos = end;
+        Ok(s)
+    }
+
+    /// Read the argument for a head whose additional-info is `ai`, enforcing shortest form
+    /// (rule 1) and rejecting indefinite-length / reserved additional-info values.
+    fn argument(&mut self, ai: u8) -> Result<u64, CborError> {
+        match ai {
+            0..=23 => Ok(ai as u64),
+            24 => {
+                let v = self.byte()? as u64;
+                if v < 24 {
+                    return Err(CborError::NonShortestForm); // fits in the 1-byte head
+                }
+                Ok(v)
             }
-            let key = key as u64;
-            if !seen.insert(key) {
-                return Err(CborError::DuplicateKey(key));
+            25 => {
+                let b = self.take(2)?;
+                let v = u16::from_be_bytes([b[0], b[1]]) as u64;
+                if v <= u8::MAX as u64 {
+                    return Err(CborError::NonShortestForm);
+                }
+                Ok(v)
             }
-            out.push((key, from_value(val)?));
+            26 => {
+                let b = self.take(4)?;
+                let v = u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as u64;
+                if v <= u16::MAX as u64 {
+                    return Err(CborError::NonShortestForm);
+                }
+                Ok(v)
+            }
+            27 => {
+                let b = self.take(8)?;
+                let v = u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
+                if v <= u32::MAX as u64 {
+                    return Err(CborError::NonShortestForm);
+                }
+                Ok(v)
+            }
+            28 | 29 | 30 => Err(CborError::Malformed), // reserved additional-info
+            _ => Err(CborError::IndefiniteLength),     // 31 = indefinite / break
         }
-        Ok(Cv::Map(out))
-    } else if all_text {
-        let mut seen: BTreeSet<String> = BTreeSet::new();
-        let mut out = Vec::with_capacity(m.len());
-        for (k, val) in m {
-            let key = match k {
-                V::Text(s) => s.clone(),
-                _ => unreachable!(),
-            };
-            if !seen.insert(key.clone()) {
-                return Err(CborError::DuplicateTextKey);
+    }
+
+    fn value(&mut self) -> Result<Cv, CborError> {
+        let ib = self.byte()?;
+        let major = ib >> 5;
+        let ai = ib & 0x1f;
+        match major {
+            0 => Ok(Cv::U64(self.argument(ai)?)), // unsigned integer
+            1 => {
+                // negative integer — read (and length-check) the argument, then reject the value.
+                let _ = self.argument(ai)?;
+                Err(CborError::IntRange)
             }
-            out.push((key, from_value(val)?));
+            2 => {
+                let n = self.argument(ai)? as usize;
+                Ok(Cv::Bytes(self.take(n)?.to_vec()))
+            }
+            3 => {
+                let n = self.argument(ai)? as usize;
+                let s = self.take(n)?;
+                let s = std::str::from_utf8(s).map_err(|_| CborError::Malformed)?;
+                Ok(Cv::Text(s.to_owned()))
+            }
+            4 => {
+                let n = self.argument(ai)? as usize;
+                let mut out = Vec::with_capacity(n.min(1024));
+                for _ in 0..n {
+                    out.push(self.value()?);
+                }
+                Ok(Cv::Array(out))
+            }
+            5 => self.map(ai),
+            6 => {
+                // tag — read (and length-check) the tag number, then reject.
+                let _ = self.argument(ai)?;
+                Err(CborError::TagOrUndefined)
+            }
+            _ => self.simple(ai), // major 7: bool / null / undefined / floats / simple
         }
-        Ok(Cv::TextMap(out))
-    } else {
-        Err(CborError::MixedMapKeys)
+    }
+
+    fn map(&mut self, ai: u8) -> Result<Cv, CborError> {
+        let n = self.argument(ai)? as usize;
+        if n == 0 {
+            return Ok(Cv::Map(Vec::new())); // empty map (variant-neutral; matches encode)
+        }
+        // Track key type from the first key; every key must match it (no mixed maps), and each
+        // key's *encoded bytes* must be strictly greater than the previous (rule 2 + rule 3).
+        let mut prev_key: Vec<u8> = Vec::new();
+        enum KeyKind {
+            Int,
+            Text,
+        }
+        let mut kind: Option<KeyKind> = None;
+        let mut int_out: Vec<(u64, Cv)> = Vec::new();
+        let mut text_out: Vec<(String, Cv)> = Vec::new();
+        for i in 0..n {
+            let key_start = self.pos;
+            let key = self.value()?;
+            let key_bytes = self.b[key_start..self.pos].to_vec();
+            if i > 0 {
+                match key_bytes.as_slice().cmp(prev_key.as_slice()) {
+                    std::cmp::Ordering::Less => return Err(CborError::MapKeyOrder),
+                    std::cmp::Ordering::Equal => {
+                        // A duplicate key: same encoded bytes ⇒ same key (rule 3).
+                        return match &key {
+                            Cv::U64(k) => Err(CborError::DuplicateKey(*k)),
+                            _ => Err(CborError::DuplicateTextKey),
+                        };
+                    }
+                    std::cmp::Ordering::Greater => {}
+                }
+            }
+            prev_key = key_bytes;
+            let val = self.value()?;
+            match (&kind, key) {
+                (None, Cv::U64(k)) => {
+                    kind = Some(KeyKind::Int);
+                    int_out.push((k, val));
+                }
+                (None, Cv::Text(s)) => {
+                    kind = Some(KeyKind::Text);
+                    text_out.push((s, val));
+                }
+                (Some(KeyKind::Int), Cv::U64(k)) => int_out.push((k, val)),
+                (Some(KeyKind::Text), Cv::Text(s)) => text_out.push((s, val)),
+                // A key that is neither a small unsigned int nor a text string, or a map that
+                // mixes the two — neither is a DMTAP wire map (§18.1.2).
+                _ => return Err(CborError::MixedMapKeys),
+            }
+        }
+        match kind {
+            Some(KeyKind::Text) => Ok(Cv::TextMap(text_out)),
+            _ => Ok(Cv::Map(int_out)),
+        }
+    }
+
+    fn simple(&mut self, ai: u8) -> Result<Cv, CborError> {
+        match ai {
+            20 => Ok(Cv::Bool(false)),
+            21 => Ok(Cv::Bool(true)),
+            22 => Err(CborError::NullPresent),    // null — never on the wire (§18.1.1)
+            23 => Err(CborError::TagOrUndefined), // undefined
+            24 => {
+                // one-byte simple value — none are used by DMTAP; reject fail-closed.
+                let _ = self.byte()?;
+                Err(CborError::TagOrUndefined)
+            }
+            25 | 26 | 27 => {
+                // half / single / double float — forbidden anywhere (rule 4). Consume the bytes
+                // for a clean cursor, then reject.
+                let n = match ai {
+                    25 => 2,
+                    26 => 4,
+                    _ => 8,
+                };
+                let _ = self.take(n)?;
+                Err(CborError::FloatPresent)
+            }
+            28 | 29 | 30 => Err(CborError::Malformed),
+            _ => Err(CborError::IndefiniteLength), // 31 = break
+        }
     }
 }
 
@@ -410,5 +550,96 @@ mod tests {
         let mut f = Fields::from_cv(Cv::Map(vec![(1, Cv::U64(0)), (99, Cv::U64(0))])).unwrap();
         let _ = f.take(1);
         assert_eq!(f.deny_unknown(), Err(CborError::UnknownKey(99)));
+    }
+
+    // ── Strict-canonical decode: each §18.1.1 rejection the harness proved was missing ──────
+
+    #[test]
+    fn rejects_non_shortest_integer() {
+        // uint 10 encoded in a two-byte head (0x18 0x0a); preferred form is the single byte 0x0a.
+        assert_eq!(decode(&[0x18, 0x0a]), Err(CborError::NonShortestForm));
+        // uint 23 in a two-byte head (DMTAP-CBOR-05: 0x18 0x17).
+        assert_eq!(decode(&[0x18, 0x17]), Err(CborError::NonShortestForm));
+        // uint 200 encoded in a two-byte (0x19) head when one-byte (0x18 0xc8) suffices.
+        assert_eq!(decode(&[0x19, 0x00, 0xc8]), Err(CborError::NonShortestForm));
+        // uint 0 encoded 8-wide.
+        assert_eq!(
+            decode(&[0x1b, 0, 0, 0, 0, 0, 0, 0, 0]),
+            Err(CborError::NonShortestForm)
+        );
+        // A non-shortest *length* head on a byte string is equally rejected.
+        assert_eq!(decode(&[0x58, 0x01, 0xaa]), Err(CborError::NonShortestForm));
+    }
+
+    #[test]
+    fn accepts_genuine_shortest_forms() {
+        // These are the *canonical* two-byte forms (value truly needs the wider head) — accepted.
+        assert_eq!(decode(&[0x18, 0x18]).unwrap(), Cv::U64(24));
+        assert_eq!(decode(&[0x19, 0x01, 0x00]).unwrap(), Cv::U64(256));
+    }
+
+    #[test]
+    fn rejects_indefinite_length_items() {
+        // Indefinite-length array (DMTAP-CBOR-06: 0x9f … 0xff).
+        assert_eq!(decode(&[0x9f, 0xff]), Err(CborError::IndefiniteLength));
+        // Indefinite-length byte string, text string, and map.
+        assert_eq!(decode(&[0x5f, 0xff]), Err(CborError::IndefiniteLength));
+        assert_eq!(decode(&[0x7f, 0xff]), Err(CborError::IndefiniteLength));
+        assert_eq!(decode(&[0xbf, 0xff]), Err(CborError::IndefiniteLength));
+    }
+
+    #[test]
+    fn rejects_descending_map_keys() {
+        // map {2:0, 1:0} — keys 2 then 1 are descending (DMTAP-CBOR-07: 0xa2 02 00 01 00).
+        assert_eq!(decode(&[0xa2, 0x02, 0x00, 0x01, 0x00]), Err(CborError::MapKeyOrder));
+    }
+
+    #[test]
+    fn accepts_ascending_map_keys() {
+        let cv = decode(&[0xa2, 0x01, 0x00, 0x02, 0x00]).unwrap();
+        assert_eq!(cv, Cv::Map(vec![(1, Cv::U64(0)), (2, Cv::U64(0))]));
+    }
+
+    #[test]
+    fn rejects_descending_text_map_keys() {
+        // map {"b":0, "a":0} — text keys 0x62.. then 0x61.. are descending.
+        assert_eq!(
+            decode(&[0xa2, 0x61, 0x62, 0x00, 0x61, 0x61, 0x00]),
+            Err(CborError::MapKeyOrder)
+        );
+    }
+
+    #[test]
+    fn rejects_negative_integer() {
+        // -1 is major type 1; DMTAP wire maps carry only unsigned integers.
+        assert_eq!(decode(&[0x20]), Err(CborError::IntRange));
+    }
+
+    #[test]
+    fn rejects_undefined_and_simple() {
+        assert_eq!(decode(&[0xf7]), Err(CborError::TagOrUndefined)); // undefined (DMTAP-CBOR-10)
+        assert_eq!(decode(&[0xf8, 0xff]), Err(CborError::TagOrUndefined)); // simple(255)
+    }
+
+    #[test]
+    fn rejects_trailing_bytes() {
+        // A valid single item (0x00) followed by a stray byte MUST be rejected — exactly one
+        // top-level item is permitted, else re-encoding would silently drop the tail.
+        assert_eq!(decode(&[0x00, 0x00]), Err(CborError::TrailingData));
+    }
+
+    #[test]
+    fn strict_decode_is_reencode_idempotent_on_canonical_bytes() {
+        // Every accepted encoding round-trips byte-for-byte (the malleability guarantee).
+        let v = Cv::Map(vec![
+            (1, Cv::U64(24)),
+            (2, Cv::Bytes(vec![0xde, 0xad, 0xbe, 0xef])),
+            (3, Cv::Text("hi".into())),
+            (7, Cv::Array(vec![Cv::U64(256), Cv::Bool(true), Cv::Bool(false)])),
+            (24, Cv::U64(1_700_000_000_000)),
+        ]);
+        let bytes = encode(&v);
+        assert_eq!(decode(&bytes).unwrap(), v);
+        assert_eq!(encode(&decode(&bytes).unwrap()), bytes);
     }
 }

@@ -8,13 +8,20 @@
 // Non-deterministic operations (HPKE ephemeral encapsulation, key generation) are NOT vectored;
 // their deterministic sub-operations (content-address, sender_sig, payload_sig) are.
 
+use dmtap_core::capability::{
+    Capability, CapabilityRevocation, CapabilityToken, CAP_REVOCATION_DS, CAP_TOKEN_DS,
+};
+use dmtap_core::cbor::Cv;
 use dmtap_core::deniable::{
     DeniableFrame, DeniableInit, DeniableMessage, DeniablePayload, DeniablePrekeyBundle,
-    DENIABLE_PREKEYS_DS, DENIABLE_SPK_DS,
+    DENIABLE_IDK_DS, DENIABLE_PREKEYS_DS, DENIABLE_SPK_DS,
 };
 use dmtap_core::directory::{Custody, DirEntry, DomainDirectory, Visibility, DOMAIN_DIRECTORY_DS};
 use dmtap_core::id::ContentId;
 use dmtap_core::identity::{verify_domain, Cap, DeviceCert, Identity, IdentityKey, KeyPackageBundleRef};
+use dmtap_core::kt::{
+    identity_leaf_hash, ConsistencyProof, InclusionProof, SignedTreeHead, KT_STH_DS,
+};
 use dmtap_core::mixnet::{
     MixDirectory, MixKeyEntry, MixNodeDescriptor, MIX_DESCRIPTOR_DS, MIX_DIRECTORY_DS,
 };
@@ -22,6 +29,7 @@ use dmtap_core::mote::{
     DeliveryTag, Envelope, Headers, Kind, Manifest, Payload, ENVELOPE_SENDER_DS, PAYLOAD_SIG_DS,
 };
 use dmtap_core::safety;
+use dmtap_core::sphinx::{RoutingCommand, SphinxCell, SphinxFragmentHeader, Surb};
 use dmtap_core::suite::Suite;
 use dmtap_core::keyname;
 use serde::{Deserialize, Serialize};
@@ -51,6 +59,61 @@ fn cbor(v: &impl Serialize) -> Vec<u8> {
     let mut buf = Vec::new();
     ciborium::into_writer(v, &mut buf).expect("infallible CBOR encode");
     buf
+}
+
+fn arr32(hexs: &str) -> [u8; 32] {
+    unhex(hexs).try_into().expect("32-byte hex")
+}
+
+/// Reconstruct a Sphinx byte-layout object from a `sphinx_encode` vector's `input` and return its
+/// fixed on-wire bytes (§18.5.4), asserting a `from_bytes` round-trip on the way.
+fn sphinx_encode_from_input(inp: &Value) -> Vec<u8> {
+    match inp["type"].as_str().unwrap() {
+        "RoutingCommand" => {
+            let rc = RoutingCommand {
+                cmd: inp["cmd"].as_u64().unwrap() as u8,
+                flags: inp["flags"].as_u64().unwrap() as u8,
+                delay_ms: inp["delay_ms"].as_u64().unwrap() as u32,
+                next_hop: arr32(inp["next_hop_hex"].as_str().unwrap()),
+            };
+            let bytes = rc.to_bytes();
+            assert_eq!(RoutingCommand::from_bytes(&bytes).unwrap(), rc, "RoutingCommand round-trip");
+            bytes.to_vec()
+        }
+        "Surb" => {
+            let s = Surb {
+                first_hop: arr32(inp["first_hop_hex"].as_str().unwrap()),
+                header: unhex(inp["header_hex"].as_str().unwrap()),
+                key_seed: arr32(inp["key_seed_hex"].as_str().unwrap()),
+            };
+            let bytes = s.to_bytes();
+            assert_eq!(Surb::from_bytes(&bytes).unwrap(), s, "Surb round-trip");
+            bytes
+        }
+        "SphinxFragmentHeader" => {
+            let h = SphinxFragmentHeader {
+                msg_id: unhex(inp["msg_id_hex"].as_str().unwrap()).try_into().expect("8-byte msg_id"),
+                frag_index: inp["frag_index"].as_u64().unwrap() as u16,
+                frag_count: inp["frag_count"].as_u64().unwrap() as u16,
+                total_len: inp["total_len"].as_u64().unwrap() as u32,
+            };
+            let bytes = h.to_bytes();
+            assert_eq!(SphinxFragmentHeader::from_bytes(&bytes).unwrap(), h, "fragment header round-trip");
+            bytes.to_vec()
+        }
+        "SphinxCell" => {
+            let c = SphinxCell {
+                alpha: arr32(inp["alpha_hex"].as_str().unwrap()),
+                beta: unhex(inp["beta_hex"].as_str().unwrap()),
+                gamma: unhex(inp["gamma_hex"].as_str().unwrap()).try_into().expect("16-byte gamma"),
+                delta: unhex(inp["delta_hex"].as_str().unwrap()),
+            };
+            let bytes = c.to_bytes();
+            assert_eq!(SphinxCell::from_bytes(&bytes).unwrap(), c, "cell round-trip");
+            bytes
+        }
+        other => panic!("unknown sphinx type {other}"),
+    }
 }
 
 // ---- vector data model --------------------------------------------------------------------
@@ -631,9 +694,12 @@ fn build_all() -> VectorFile {
     }
 
     // === 10. Deniable 1:1 mode objects (§18.4.8 / §18.3.9 / §18.3.10) ========================
-    // (a) DeniablePrekeyBundle — two signatures: spk_sig over the raw spk, sig over the body.
+    // (a) DeniablePrekeyBundle — three signatures over public keys only: idk_sig (dedicated
+    //     deniable-identity DH key, §18.4.8), spk_sig (signed prekey), and sig (the whole body).
+    let deniable_idk = vec![0xcd; 32]; // dedicated X25519 deniable-identity DH key (NOT from IK)
     let prekey_bundle = DeniablePrekeyBundle::issue(
         &IdentityKey::from_seed(&SEED_A),
+        deniable_idk.clone(),
         vec![0xab; 32],
         vec![vec![0x01; 32], vec![0x02; 32]],
         3,
@@ -644,11 +710,28 @@ fn build_all() -> VectorFile {
         vectors.push(v(
             "cbor_deniable_prekey_bundle",
             "cbor_encode",
-            json!({ "type": "DeniablePrekeyBundle", "note": "ik seed 0x11*32; spk = 0xab*32; two one-time prekeys; §18.4.8 integer-keyed" }),
+            json!({ "type": "DeniablePrekeyBundle", "note": "ik seed 0x11*32; idk = 0xcd*32 (key 11) certified by idk_sig (key 12); spk = 0xab*32; two one-time prekeys; §18.4.8 integer-keyed" }),
             json!({ "cbor_hex": hex(&bytes) }),
-            "§18-canonical integer-keyed CBOR of a device-signed DeniablePrekeyBundle",
+            "§18-canonical integer-keyed CBOR of a device-signed DeniablePrekeyBundle (hardened: dedicated idk DH key, XEdDSA-from-IK dropped)",
         ));
         let sk = IdentityKey::from_seed(&SEED_A);
+        // idk_sig KAT (§18.9.10): Ed25519 over DS-tag ‖ raw idk bytes (field 11) — the deniable-
+        // identity DH-key certification that replaced XEdDSA-from-IK.
+        let idk_sig = sk.sign_domain(DENIABLE_IDK_DS, &deniable_idk);
+        vectors.push(v(
+            "deniable_idk_sig",
+            "ed25519_sign",
+            json!({ "seed_hex": hex(&SEED_A), "domain_hex": hex(DENIABLE_IDK_DS), "msg_hex": hex(&deniable_idk) }),
+            json!({ "pubkey_hex": hex(&sk.public_array()), "sig_hex": hex(&idk_sig) }),
+            "§18.9.10 DeniablePrekeyBundle.idk_sig (== DeniableInit.idk_a_cert): DS-tag 'DMTAP-v0/deniable-idk\\0' ‖ raw idk (field 11); device seed 0x11*32",
+        ));
+        vectors.push(v(
+            "deniable_idk_sig_verify",
+            "ed25519_verify",
+            json!({ "pubkey_hex": hex(&sk.public_array()), "domain_hex": hex(DENIABLE_IDK_DS), "msg_hex": hex(&deniable_idk), "sig_hex": hex(&idk_sig) }),
+            json!({ "valid": true }),
+            "the idk certification above MUST verify under ik (§18.4.8 key 2)",
+        ));
         // spk_sig KAT (§18.9.10): Ed25519 over DS-tag ‖ raw spk bytes (field 3).
         let spk = vec![0xabu8; 32];
         let spk_sig = sk.sign_domain(DENIABLE_SPK_DS, &spk);
@@ -659,7 +742,8 @@ fn build_all() -> VectorFile {
             json!({ "pubkey_hex": hex(&sk.public_array()), "sig_hex": hex(&spk_sig) }),
             "§18.9.10 DeniablePrekeyBundle.spk_sig: DS-tag 'DMTAP-v0/deniable-spk\\0' ‖ raw spk (field 3); device seed 0x11*32",
         ));
-        // bundle sig KAT (§18.9.10): Ed25519 over DS-tag ‖ det_cbor(bundle ∖ {10}) (covers spk_sig).
+        // bundle sig KAT (§18.9.10): Ed25519 over DS-tag ‖ det_cbor(bundle ∖ {10}) (covers spk_sig,
+        // idk, and idk_sig).
         let body = prekey_bundle.signing_body();
         let sig = sk.sign_domain(DENIABLE_PREKEYS_DS, &body);
         vectors.push(v(
@@ -690,10 +774,15 @@ fn build_all() -> VectorFile {
             "§18-canonical integer-keyed CBOR of a deniable subsequent-message frame (auth = ratchet MAC, no sig)",
         ));
     }
-    // (c) DeniableInit frame (the X3DH first message, embedding the DeniableMessage; NO signature).
+    // (c) DeniableInit frame (the X3DH first message, embedding the DeniableMessage; NO content
+    //     signature). Carries the initiator's dedicated deniable-identity DH key idk_a (key 9) and
+    //     its certification idk_a_cert (key 10) — ik_a (key 2) is no longer a DH input (§18.3.9).
+    let deniable_idk_a = vec![0x44; 32];
     let deniable_init = DeniableInit {
         suite: Suite::Classical,
         ik_a: IdentityKey::from_seed(&SEED_A).public(),
+        idk_a: deniable_idk_a.clone(),
+        idk_a_cert: IdentityKey::from_seed(&SEED_A).sign_domain(DENIABLE_IDK_DS, &deniable_idk_a),
         ek_a: vec![0x33; 32],
         spk_ref: ContentId::of(b"responder-signed-prekey"),
         opk_ref: Some(ContentId::of(b"responder-one-time-prekey")),
@@ -707,9 +796,9 @@ fn build_all() -> VectorFile {
         vectors.push(v(
             "cbor_deniable_init",
             "cbor_encode",
-            json!({ "type": "DeniableFrame", "note": "DeniableInit (disc 1): ik_a seed 0x11*32, embeds the DeniableMessage; NO signature; §18.3.9 integer-keyed" }),
+            json!({ "type": "DeniableFrame", "note": "DeniableInit (disc 1): ik_a seed 0x11*32, idk_a = 0x44*32 (key 9) + idk_a_cert (key 10), embeds the DeniableMessage; NO content signature; §18.3.9 integer-keyed" }),
             json!({ "cbor_hex": hex(&bytes) }),
-            "§18-canonical integer-keyed CBOR of a deniable X3DH first-message frame (auth = ratchet MAC, no sig)",
+            "§18-canonical integer-keyed CBOR of a deniable X3DH first-message frame (auth = ratchet MAC, no content sig; idk_a is the DH input, ik_a only AD-binds)",
         ));
     }
     // (d) DeniablePayload — the ratchet plaintext (structural twin of Payload; NO signature field).
@@ -763,6 +852,197 @@ fn build_all() -> VectorFile {
             json!({ "chunk_hashes_hex": chunk_hexes }),
             json!({ "id_hex": hex(manifest.id.as_bytes()) }),
             "§18.9.5 Manifest.id = 0x1e ‖ MTH(chunks): leaf=BLAKE3(0x00‖h), node=BLAKE3(0x01‖l‖r), RFC 6962 split, 3 chunks",
+        ));
+    }
+
+    // === 12. Key-transparency objects (§18.4.9–.11, §18.9.13) ===============================
+    // (a) SignedTreeHead — signed by the LOG's own key (log_id = seed 0x11), RFC-6962 profile.
+    let sth = SignedTreeHead::issue(
+        &IdentityKey::from_seed(&SEED_A),
+        7,
+        1_700_000_000_000,
+        ContentId::of(b"kt-merkle-root"),
+    );
+    {
+        let bytes = sth.det_cbor();
+        vectors.push(v(
+            "cbor_signed_tree_head",
+            "cbor_encode",
+            json!({ "type": "SignedTreeHead", "note": "log_id seed 0x11*32; tree_size 7; root = content-addr of 'kt-merkle-root'; §18.4.9 integer-keyed" }),
+            json!({ "cbor_hex": hex(&bytes) }),
+            "§18-canonical integer-keyed CBOR of a log-signed SignedTreeHead (KT STH, RFC-6962 profile)",
+        ));
+        let sk = IdentityKey::from_seed(&SEED_A);
+        let body = sth.signing_body();
+        let sig = sk.sign_domain(KT_STH_DS, &body);
+        vectors.push(v(
+            "kt_sth_sig",
+            "ed25519_sign",
+            json!({ "seed_hex": hex(&SEED_A), "domain_hex": hex(KT_STH_DS), "msg_hex": hex(&body) }),
+            json!({ "pubkey_hex": hex(&sk.public_array()), "sig_hex": hex(&sig) }),
+            "§18.9.13 SignedTreeHead.sig: DS-tag 'DMTAP-v0/kt-sth\\0' ‖ det_cbor(STH ∖ {6}); signed by log_id seed 0x11*32",
+        ));
+        vectors.push(v(
+            "kt_sth_sig_verify",
+            "ed25519_verify",
+            json!({ "pubkey_hex": hex(&sk.public_array()), "domain_hex": hex(KT_STH_DS), "msg_hex": hex(&body), "sig_hex": hex(&sig) }),
+            json!({ "valid": true }),
+            "the STH signature above MUST verify under the pinned log_id (§18.4.9 key 2)",
+        ));
+    }
+    // (b) The Identity-entry leaf-hash rule (§18.4.9 / §18.9.13).
+    {
+        let leaf_ik = IdentityKey::from_seed(&SEED_B).public();
+        let identity_id = ContentId::of(b"alice-identity-object");
+        let leaf = identity_leaf_hash("alice@abc.com", &leaf_ik, 3, &identity_id);
+        vectors.push(v(
+            "kt_identity_leaf_hash",
+            "kt_leaf_hash",
+            json!({
+                "name": "alice@abc.com",
+                "ik_hex": hex(&leaf_ik),
+                "version": 3,
+                "identity_id_hex": hex(identity_id.as_bytes()),
+            }),
+            json!({ "leaf_hash_hex": hex(leaf.as_bytes()) }),
+            "§18.4.9 leaf_hash = 0x1e ‖ BLAKE3-256(0x00 ‖ det_cbor([name, ik, version, identity_id])); RFC-6962 leaf prefix 0x00",
+        ));
+    }
+    // (c) InclusionProof and ConsistencyProof (unsigned; verified against the STH root).
+    {
+        let proof = InclusionProof {
+            tree_size: 7,
+            leaf_index: 2,
+            leaf_hash: ContentId::of(b"kt-leaf"),
+            audit_path: vec![ContentId::of(b"sibling-0"), ContentId::of(b"sibling-1"), ContentId::of(b"sibling-2")],
+        };
+        vectors.push(v(
+            "cbor_inclusion_proof",
+            "cbor_encode",
+            json!({ "type": "InclusionProof", "note": "tree_size 7, leaf_index 2, 3-node audit path; unsigned (§18.4.10)" }),
+            json!({ "cbor_hex": hex(&proof.det_cbor()) }),
+            "§18-canonical integer-keyed CBOR of an RFC-6962 InclusionProof (audit path)",
+        ));
+        let cproof = ConsistencyProof {
+            first_size: 4,
+            second_size: 7,
+            proof_path: vec![ContentId::of(b"cons-0"), ContentId::of(b"cons-1")],
+        };
+        vectors.push(v(
+            "cbor_consistency_proof",
+            "cbor_encode",
+            json!({ "type": "ConsistencyProof", "note": "first_size 4, second_size 7, 2-node proof path; unsigned (§18.4.11)" }),
+            json!({ "cbor_hex": hex(&cproof.det_cbor()) }),
+            "§18-canonical integer-keyed CBOR of an RFC-6962 ConsistencyProof",
+        ));
+    }
+
+    // === 13. Delegated capability objects (§18.7.3, §18.9.14) ===============================
+    let cap_token = CapabilityToken::issue(
+        &IdentityKey::from_seed(&SEED_A),
+        IdentityKey::from_seed(&SEED_B).public(),
+        vec![
+            Capability {
+                resource: "mailbox:calendar".into(),
+                ability: "read".into(),
+                caveats: Some(Cv::TextMap(vec![("before".into(), Cv::U64(1_800_000_000_000))])),
+            },
+            Capability { resource: "domain:abc.com/members".into(), ability: "directory/write".into(), caveats: None },
+        ],
+        1_700_000_000_000,
+        1_700_000_600_000,
+        b"cap-nonce-01".to_vec(),
+        Some(ContentId::of(b"parent-capability-token")),
+    );
+    {
+        let bytes = cap_token.det_cbor();
+        vectors.push(v(
+            "cbor_capability_token",
+            "cbor_encode",
+            json!({ "type": "CapabilityToken", "note": "iss seed 0x11*32 → aud seed 0x22*32; two caps (one with caveats); prnt present; §18.7.3 integer-keyed (UCAN v1.0 profile)" }),
+            json!({ "cbor_hex": hex(&bytes) }),
+            "§18-canonical integer-keyed CBOR of an iss-signed CapabilityToken",
+        ));
+        let sk = IdentityKey::from_seed(&SEED_A);
+        let body = cap_token.signing_body();
+        let sig = sk.sign_domain(CAP_TOKEN_DS, &body);
+        vectors.push(v(
+            "cap_token_sig",
+            "ed25519_sign",
+            json!({ "seed_hex": hex(&SEED_A), "domain_hex": hex(CAP_TOKEN_DS), "msg_hex": hex(&body) }),
+            json!({ "pubkey_hex": hex(&sk.public_array()), "sig_hex": hex(&sig) }),
+            "§18.9.14 CapabilityToken.sig: DS-tag 'DMTAP-v0/cap-token\\0' ‖ det_cbor(token ∖ {9}); iss seed 0x11*32",
+        ));
+        vectors.push(v(
+            "cap_token_sig_verify",
+            "ed25519_verify",
+            json!({ "pubkey_hex": hex(&sk.public_array()), "domain_hex": hex(CAP_TOKEN_DS), "msg_hex": hex(&body), "sig_hex": hex(&sig) }),
+            json!({ "valid": true }),
+            "the CapabilityToken signature above MUST verify under iss (§18.7.3 key 2)",
+        ));
+    }
+    {
+        let revocation = CapabilityRevocation::issue(
+            &IdentityKey::from_seed(&SEED_A),
+            ContentId::of(b"revoked-capability-token"),
+            1_700_000_300_000,
+        );
+        let bytes = revocation.det_cbor();
+        vectors.push(v(
+            "cbor_capability_revocation",
+            "cbor_encode",
+            json!({ "type": "CapabilityRevocation", "note": "iss seed 0x11*32 revokes content-addr of 'revoked-capability-token'; §18.7.3 integer-keyed" }),
+            json!({ "cbor_hex": hex(&bytes) }),
+            "§18-canonical integer-keyed CBOR of an iss-signed CapabilityRevocation",
+        ));
+        let sk = IdentityKey::from_seed(&SEED_A);
+        let body = revocation.signing_body();
+        let sig = sk.sign_domain(CAP_REVOCATION_DS, &body);
+        vectors.push(v(
+            "cap_revocation_sig",
+            "ed25519_sign",
+            json!({ "seed_hex": hex(&SEED_A), "domain_hex": hex(CAP_REVOCATION_DS), "msg_hex": hex(&body) }),
+            json!({ "pubkey_hex": hex(&sk.public_array()), "sig_hex": hex(&sig) }),
+            "§18.9.14 CapabilityRevocation.sig: DS-tag 'DMTAP-v0/cap-revocation\\0' ‖ det_cbor(revocation ∖ {5}); iss seed 0x11*32",
+        ));
+    }
+
+    // === 14. Sphinx fixed-length byte layouts (§18.5.4; NOT CBOR) ===========================
+    // These are on the mixnet wire as constant-length binary, so they are pinned as byte layouts.
+    {
+        let rc = RoutingCommand { cmd: 0x00, flags: 0x01, delay_ms: 1234, next_hop: [0xab; 32] };
+        vectors.push(v(
+            "sphinx_routing_command",
+            "sphinx_encode",
+            json!({ "type": "RoutingCommand", "cmd": 0, "flags": 1, "delay_ms": 1234, "next_hop_hex": hex(&[0xab; 32]) }),
+            json!({ "bytes_hex": hex(&rc.to_bytes()), "len": rc.to_bytes().len() }),
+            "§18.5.4 RoutingCommand: 48 B = cmd(1) ‖ flags(1) ‖ delay_ms(4,BE) ‖ next_hop(32) ‖ reserved(10=0)",
+        ));
+        let surb = Surb { first_hop: [0x11; 32], header: vec![0x22; 288], key_seed: [0x33; 32] };
+        vectors.push(v(
+            "sphinx_surb",
+            "sphinx_encode",
+            json!({ "type": "Surb", "first_hop_hex": hex(&[0x11; 32]), "header_hex": hex(&vec![0x22u8; 288]), "key_seed_hex": hex(&[0x33; 32]) }),
+            json!({ "bytes_hex": hex(&surb.to_bytes()), "len": surb.to_bytes().len() }),
+            "§18.5.4 SURB: 352 B = first_hop(32) ‖ header(288 = α‖β‖γ) ‖ key_seed(32)",
+        ));
+        let fh = SphinxFragmentHeader { msg_id: [1, 2, 3, 4, 5, 6, 7, 8], frag_index: 3, frag_count: 16, total_len: 40000 };
+        vectors.push(v(
+            "sphinx_fragment_header",
+            "sphinx_encode",
+            json!({ "type": "SphinxFragmentHeader", "msg_id_hex": hex(&[1u8, 2, 3, 4, 5, 6, 7, 8]), "frag_index": 3, "frag_count": 16, "total_len": 40000 }),
+            json!({ "bytes_hex": hex(&fh.to_bytes()), "len": fh.to_bytes().len() }),
+            "§18.5.4 SphinxFragmentHeader: 16 B = msg_id(8) ‖ frag_index(2,BE) ‖ frag_count(2,BE) ‖ total_len(4,BE)",
+        ));
+        // A deterministic cell: alpha/beta/gamma fixed bytes; delta byte[i] = (i*31+7)&0xff.
+        let delta: Vec<u8> = (0..2048u32).map(|i| ((i.wrapping_mul(31).wrapping_add(7)) & 0xff) as u8).collect();
+        let cell = SphinxCell { alpha: [0x01; 32], beta: vec![0x02; 240], gamma: [0x03; 16], delta: delta.clone() };
+        vectors.push(v(
+            "sphinx_cell",
+            "sphinx_encode",
+            json!({ "type": "SphinxCell", "alpha_hex": hex(&[0x01; 32]), "beta_hex": hex(&vec![0x02u8; 240]), "gamma_hex": hex(&[0x03; 16]), "delta_hex": hex(&delta) }),
+            json!({ "bytes_hex": hex(&cell.to_bytes()), "len": cell.to_bytes().len() }),
+            "§18.5.4 SphinxCell: 2336 B = α(32) ‖ β(240) ‖ γ(16) ‖ δ(2048); delta[i]=(i*31+7)&0xff",
         ));
     }
 
@@ -846,6 +1126,18 @@ fn recheck_against_reference(vf: &VectorFile) {
                     suite: Suite::Classical,
                 };
                 assert_eq!(hex(m.merkle_root().as_bytes()), exp["id_hex"].as_str().unwrap(), "{}", vec.name);
+            }
+            "kt_leaf_hash" => {
+                let name = inp["name"].as_str().unwrap();
+                let ik = unhex(inp["ik_hex"].as_str().unwrap());
+                let version = inp["version"].as_u64().unwrap();
+                let id = ContentId(unhex(inp["identity_id_hex"].as_str().unwrap()));
+                let leaf = identity_leaf_hash(name, &ik, version, &id);
+                assert_eq!(hex(leaf.as_bytes()), exp["leaf_hash_hex"].as_str().unwrap(), "{}", vec.name);
+            }
+            "sphinx_encode" => {
+                let got = sphinx_encode_from_input(inp);
+                assert_eq!(hex(&got), exp["bytes_hex"].as_str().unwrap(), "{}", vec.name);
             }
             "cbor_encode" => { /* byte-exactness covered by whole-file equality + round-trip tests */ }
             other => panic!("unhandled operation in recheck: {other} ({})", vec.name),

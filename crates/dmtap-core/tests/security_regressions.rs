@@ -500,7 +500,7 @@ fn domain_directory_tamper_after_signing_fails_signature() {
 /// `spk_sig` too, depend on the untampered `spk`).
 #[test]
 fn deniable_prekey_bundle_tampered_spk_fails_verification() {
-    let mut b = DeniablePrekeyBundle::issue(&key(0x11), vec![0xab; 32], vec![], 1, 1);
+    let mut b = DeniablePrekeyBundle::issue(&key(0x11), vec![0xcd; 32], vec![0xab; 32], vec![], 1, 1);
     assert!(b.verify().is_ok());
     b.spk[0] ^= 0xff;
     assert_eq!(b.verify(), Err(IdentityError::BadSignature));

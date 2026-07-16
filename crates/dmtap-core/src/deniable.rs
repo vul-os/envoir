@@ -22,6 +22,10 @@ use crate::TimestampMs;
 /// §18.9.10 domain-separation tags (ASCII ‖ trailing `0x00`; `sign_domain` prepends them).
 pub const DENIABLE_PREKEYS_DS: &[u8] = b"DMTAP-v0/deniable-prekeys\x00";
 pub const DENIABLE_SPK_DS: &[u8] = b"DMTAP-v0/deniable-spk\x00";
+/// §18.9.10 DS-tag certifying the dedicated deniable-identity DH key (`idk` / `idk_a`) — the
+/// construction that **replaces the retired XEdDSA-from-`IK` derivation** (§5.2.1(a), §18.4.8).
+/// It signs a raw X25519 *public DH key*, never a message, so it is deniability-neutral.
+pub const DENIABLE_IDK_DS: &[u8] = b"DMTAP-v0/deniable-idk\x00";
 
 fn suite_from_cv(cv: Cv) -> Result<Suite, CborError> {
     let b = as_u8(cv)?;
@@ -33,10 +37,18 @@ fn suite_from_cv(cv: Cv) -> Result<Suite, CborError> {
 /// The published X3DH/PQXDH prekeys for the deniable mode (spec §5.2.1, §18.4.8). Two signatures:
 /// `spk_sig` (key 4) over the raw signed prekey, and `sig` (key 10) over the whole bundle — both
 /// by an `IK`-authorized device key (the reference uses `ik` itself as that key).
+///
+/// **Hardened deniable-identity DH key (§5.2.1 / §18.4.8).** `idk` (key 11) is a **dedicated
+/// long-term X25519 DH key**, NOT derived from `IK` — it is the X3DH/PQXDH long-term identity DH
+/// input, certified once by `idk_sig` (key 12) under an `IK`-authorized device key. `ik` (key 2)
+/// is the Ed25519 `IK` used only for AD binding and to authorize `idk`, never for DH. This
+/// replaces the retired XEdDSA-from-`IK` construction (§18.9.10).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeniablePrekeyBundle {
     pub suite: Suite,             // key 1 — 0x01 X3DH or 0x02 PQXDH
-    pub ik: Vec<u8>,              // key 2 — the identity these prekeys belong to
+    pub ik: Vec<u8>,              // key 2 — the identity these prekeys belong to (Ed25519 IK)
+    pub idk: Vec<u8>,             // key 11 — dedicated long-term deniable-identity DH key (X25519)
+    pub idk_sig: Vec<u8>,         // key 12 — device-key sig over `idk` (DS `DMTAP-v0/deniable-idk`)
     pub spk: Vec<u8>,             // key 3 — signed prekey (X25519 DH public)
     pub spk_sig: Vec<u8>,         // key 4 — device-key sig over `spk` (DS `DMTAP-v0/deniable-spk`)
     pub opks: Vec<Vec<u8>>,       // key 5 — one-time prekeys; MAY be empty
@@ -49,7 +61,7 @@ pub struct DeniablePrekeyBundle {
 
 impl DeniablePrekeyBundle {
     /// Integer-keyed canonical map (§18.4.8). `include_sig=false` omits key 10 for the §18.9.10
-    /// signing body (which still covers `spk_sig`, key 4).
+    /// signing body (which still covers `spk_sig` key 4, `idk` key 11, and `idk_sig` key 12).
     fn to_cv(&self, include_sig: bool) -> Cv {
         let mut m = vec![
             (1u64, Cv::U64(self.suite.as_u8() as u64)),
@@ -66,6 +78,8 @@ impl DeniablePrekeyBundle {
         }
         m.push((8, Cv::U64(self.version)));
         m.push((9, Cv::U64(self.ts)));
+        m.push((11, Cv::Bytes(self.idk.clone())));
+        m.push((12, Cv::Bytes(self.idk_sig.clone())));
         if include_sig {
             m.push((10, Cv::Bytes(self.sig.clone())));
         }
@@ -101,25 +115,33 @@ impl DeniablePrekeyBundle {
         let version = as_u64(f.req(8)?)?;
         let ts = as_u64(f.req(9)?)?;
         let sig = as_bytes(f.req(10)?)?;
+        let idk = as_bytes(f.req(11)?)?;
+        let idk_sig = as_bytes(f.req(12)?)?;
         f.deny_unknown()?;
         Ok(DeniablePrekeyBundle {
-            suite, ik, spk, spk_sig, opks, last_kem, okems, version, ts, sig,
+            suite, ik, idk, idk_sig, spk, spk_sig, opks, last_kem, okems, version, ts, sig,
         })
     }
 
-    /// Publish (sign) a classical bundle: the device key signs `spk` (`spk_sig`) and then the whole
-    /// body (`sig`) per §18.9.10. `ik` is set from the signer (an `IK` is `IK`-authorized).
+    /// Publish (sign) a classical bundle. The device key signs, over raw public keys only (never a
+    /// message): the dedicated deniable-identity DH key `idk` (`idk_sig`, §18.9.10), the signed
+    /// prekey `spk` (`spk_sig`), and then the whole body (`sig`). `ik` is set from the signer (an
+    /// `IK` is `IK`-authorized); `idk` is the separate X25519 DH key (NOT derived from `IK`).
     pub fn issue(
         device: &IdentityKey,
+        idk: Vec<u8>,
         spk: Vec<u8>,
         opks: Vec<Vec<u8>>,
         version: u64,
         ts: TimestampMs,
     ) -> DeniablePrekeyBundle {
+        let idk_sig = device.sign_domain(DENIABLE_IDK_DS, &idk);
         let spk_sig = device.sign_domain(DENIABLE_SPK_DS, &spk);
         let mut b = DeniablePrekeyBundle {
             suite: Suite::Classical,
             ik: device.public(),
+            idk,
+            idk_sig,
             spk,
             spk_sig,
             opks,
@@ -133,11 +155,13 @@ impl DeniablePrekeyBundle {
         b
     }
 
-    /// Verify both signatures under `ik` (§18.9.10): the bundle `sig` and the `spk_sig` over `spk`.
+    /// Verify all three signatures under `ik` (§18.9.10): the bundle `sig`, the `spk_sig` over the
+    /// raw `spk`, and the `idk_sig` certifying the dedicated deniable-identity DH key `idk`.
     pub fn verify(&self) -> Result<(), IdentityError> {
         if !self.suite.is_supported() {
             return Err(IdentityError::UnsupportedSuite(self.suite.as_u8()));
         }
+        verify_domain(&self.ik, DENIABLE_IDK_DS, &self.idk, &self.idk_sig)?;
         verify_domain(&self.ik, DENIABLE_SPK_DS, &self.spk, &self.spk_sig)?;
         verify_domain(&self.ik, DENIABLE_PREKEYS_DS, &self.signing_body(), &self.sig)
     }
@@ -188,11 +212,17 @@ impl DeniableMessage {
     }
 }
 
-/// The X3DH/PQXDH first message (§18.3.9, discriminator `1`). Carries **no signature**.
+/// The X3DH/PQXDH first message (§18.3.9, discriminator `1`). Carries **no signature** over any
+/// content — but it DOES carry the initiator's dedicated deniable-identity DH key `idk_a` (key 9)
+/// and its certification `idk_a_cert` (key 10), the same `DMTAP-v0/deniable-idk` certification the
+/// responder publishes in `DeniablePrekeyBundle.idk_sig`. `ik_a` (key 2) is the Ed25519 `IK`, used
+/// for AD binding and to authorize `idk_a` — it is **no longer a DH input** (§5.2.1 / §18.3.9).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeniableInit {
     pub suite: Suite,                // key 1 — 0x01 X3DH / 0x02 PQXDH
-    pub ik_a: Vec<u8>,               // key 2 — initiator IK
+    pub ik_a: Vec<u8>,               // key 2 — initiator Ed25519 IK (AD binding + authorizes idk_a)
+    pub idk_a: Vec<u8>,              // key 9 — initiator dedicated deniable-identity DH key (X25519)
+    pub idk_a_cert: Vec<u8>,         // key 10 — device-key sig over idk_a (DS DMTAP-v0/deniable-idk)
     pub ek_a: Vec<u8>,               // key 3 — initiator ephemeral X25519 public
     pub spk_ref: ContentId,          // key 4 — content-addr of the responder signed prekey consumed
     pub opk_ref: Option<ContentId>,  // key 5 — content-addr of the one-time prekey consumed
@@ -221,6 +251,8 @@ impl DeniableInit {
             m.push((7, Cv::Bytes(r.as_bytes().to_vec())));
         }
         m.push((8, self.msg.to_cv()));
+        m.push((9, Cv::Bytes(self.idk_a.clone())));
+        m.push((10, Cv::Bytes(self.idk_a_cert.clone())));
         Cv::Map(m)
     }
 
@@ -233,7 +265,9 @@ impl DeniableInit {
         let kem_ct = f.take(6).map(as_bytes).transpose()?;
         let kem_ref = f.take(7).map(as_bytes).transpose()?.map(ContentId);
         let msg = DeniableMessage::from_cv(f.req(8)?)?;
-        Ok(DeniableInit { suite, ik_a, ek_a, spk_ref, opk_ref, kem_ct, kem_ref, msg })
+        let idk_a = as_bytes(f.req(9)?)?;
+        let idk_a_cert = as_bytes(f.req(10)?)?;
+        Ok(DeniableInit { suite, ik_a, idk_a, idk_a_cert, ek_a, spk_ref, opk_ref, kem_ct, kem_ref, msg })
     }
 }
 
@@ -346,6 +380,7 @@ mod tests {
     fn prekey_bundle_signs_verifies_and_round_trips() {
         let b = DeniablePrekeyBundle::issue(
             &key(0x11),
+            vec![0xcd; 32], // idk — dedicated X25519 deniable-identity DH key
             vec![0xab; 32],
             vec![vec![1u8; 32], vec![2u8; 32]],
             3,
@@ -363,8 +398,15 @@ mod tests {
 
     #[test]
     fn tampered_bundle_fails_signature() {
-        let mut b = DeniablePrekeyBundle::issue(&key(0x11), vec![0xab; 32], vec![], 1, 1);
+        let mut b = DeniablePrekeyBundle::issue(&key(0x11), vec![0xcd; 32], vec![0xab; 32], vec![], 1, 1);
         b.spk[0] ^= 0xff; // invalidates both spk_sig and sig
+        assert_eq!(b.verify(), Err(IdentityError::BadSignature));
+    }
+
+    #[test]
+    fn tampered_idk_fails_certification() {
+        let mut b = DeniablePrekeyBundle::issue(&key(0x11), vec![0xcd; 32], vec![0xab; 32], vec![], 1, 1);
+        b.idk[0] ^= 0xff; // invalidates idk_sig (and the body sig)
         assert_eq!(b.verify(), Err(IdentityError::BadSignature));
     }
 
@@ -388,6 +430,8 @@ mod tests {
         let init = DeniableInit {
             suite: Suite::Classical,
             ik_a: key(0x11).public(),
+            idk_a: vec![0x44; 32],
+            idk_a_cert: key(0x11).sign_domain(DENIABLE_IDK_DS, &[0x44; 32]),
             ek_a: vec![0x33; 32],
             spk_ref: ContentId::of(b"responder-spk"),
             opk_ref: Some(ContentId::of(b"responder-opk")),

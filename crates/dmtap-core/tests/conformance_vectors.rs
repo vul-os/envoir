@@ -123,6 +123,29 @@ fn cbor_vectors_round_trip() {
                 assert_eq!(obj.id, obj.merkle_root(), "Manifest id must equal Merkle root: {}", vec.name);
                 assert_eq!(hex(&obj.det_cbor()), cbor_hex, "{}", vec.name);
             }
+            "SignedTreeHead" => {
+                let obj = dmtap_core::kt::SignedTreeHead::from_det_cbor(&bytes).unwrap();
+                assert!(obj.verify().is_ok(), "decoded SignedTreeHead must verify: {}", vec.name);
+                assert_eq!(hex(&obj.det_cbor()), cbor_hex, "{}", vec.name);
+            }
+            "InclusionProof" => {
+                let obj = dmtap_core::kt::InclusionProof::from_det_cbor(&bytes).unwrap();
+                assert_eq!(hex(&obj.det_cbor()), cbor_hex, "{}", vec.name);
+            }
+            "ConsistencyProof" => {
+                let obj = dmtap_core::kt::ConsistencyProof::from_det_cbor(&bytes).unwrap();
+                assert_eq!(hex(&obj.det_cbor()), cbor_hex, "{}", vec.name);
+            }
+            "CapabilityToken" => {
+                let obj = dmtap_core::capability::CapabilityToken::from_det_cbor(&bytes).unwrap();
+                assert!(obj.verify().is_ok(), "decoded CapabilityToken must verify: {}", vec.name);
+                assert_eq!(hex(&obj.det_cbor()), cbor_hex, "{}", vec.name);
+            }
+            "CapabilityRevocation" => {
+                let obj = dmtap_core::capability::CapabilityRevocation::from_det_cbor(&bytes).unwrap();
+                assert!(obj.verify().is_ok(), "decoded CapabilityRevocation must verify: {}", vec.name);
+                assert_eq!(hex(&obj.det_cbor()), cbor_hex, "{}", vec.name);
+            }
             other => panic!("unknown cbor type {other}"),
         }
     }

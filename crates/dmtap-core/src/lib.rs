@@ -24,21 +24,31 @@
 //!   §18.9.3.
 //! - [`deniable`] — the optional deniable 1:1 mode objects: `DeniablePrekeyBundle` (§18.4.8),
 //!   `DeniableFrame`/`DeniableInit`/`DeniableMessage` (§18.3.9), `DeniablePayload` (§18.3.10);
-//!   asymmetric signing per §18.9.10.
+//!   asymmetric signing per §18.9.10, incl. the dedicated deniable-identity DH key (`idk`).
+//! - [`kt`] — key-transparency objects: `SignedTreeHead` (§18.4.9, signed per §18.9.13),
+//!   `InclusionProof`/`ConsistencyProof` (§18.4.10/.11, unsigned RFC-6962 proofs) + the Identity
+//!   leaf-hash rule.
+//! - [`capability`] — delegated `CapabilityToken`/`Capability`/`CapabilityRevocation` (§18.7.3,
+//!   a UCAN v1.0 profile), signed per §18.9.14.
+//! - [`sphinx`] — the fixed-length Sphinx byte layouts `SphinxCell`/`RoutingCommand`/`Surb`/
+//!   `SphinxFragmentHeader` (§18.5.4) — the one mixnet wire object that is NOT CBOR.
 //!
 //! ## Crypto suite `0x01` (v0 REQUIRED)
 //! Ed25519 signatures, HPKE `DHKEM(X25519)/HKDF-SHA256/ChaCha20-Poly1305`, BLAKE3-256 hashing.
 //! Suite `0x02` (PQ) is reserved and **fails closed** everywhere it is offered.
 
+pub mod capability;
 pub mod cbor;
 pub mod deniable;
 pub mod directory;
 pub mod id;
 pub mod identity;
+pub mod kt;
 pub mod keyname;
 pub mod mixnet;
 pub mod mote;
 pub mod safety;
+pub mod sphinx;
 pub mod suite;
 
 pub use suite::Suite;

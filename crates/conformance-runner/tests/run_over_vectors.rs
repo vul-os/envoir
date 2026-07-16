@@ -80,15 +80,13 @@ fn suite_json_cross_reference_matches_known_state() {
         }
     }
 
-    // KNOWN GAPS as of this writing: dmtap-core's low-level `cbor::decode` does not yet enforce
-    // shortest-form integers / definite-length-only / ascending-map-key-order at decode time, so
-    // three self-contained MUST-reject cases currently observe an accept instead. This is a real,
-    // reproducible finding (not a runner bug) — see the conformance-runner binary's KNOWN GAPS
-    // report and the task handoff notes. Locking the exact ids here means:
-    //  - if dmtap-core's decoder is fixed, this assertion starts failing and MUST be updated
-    //    (the gap closed — good news, update the expected set down);
-    //  - if a NEW case starts failing, this assertion catches it immediately (regression).
-    let expected_gap_ids: Vec<&str> = vec!["DMTAP-CBOR-05", "DMTAP-CBOR-06", "DMTAP-CBOR-07"];
+    // GAPS CLOSED: dmtap-core's low-level `cbor::decode` now enforces the full §18.1.1 canonical
+    // ruleset on input — shortest-form integers/lengths, definite-length only, strictly ascending
+    // map-key order (by encoded bytes), no duplicates — so the three previously-failing
+    // self-contained MUST-reject cases (DMTAP-CBOR-05/06/07) now correctly REJECT and pass. The
+    // expected gap set is therefore empty; if a NEW case starts failing, this assertion catches it
+    // immediately as a regression.
+    let expected_gap_ids: Vec<&str> = vec![];
     let actual_gap_ids: Vec<&str> = fails.iter().map(|(id, _)| id.as_str()).collect();
     let mut sorted_actual = actual_gap_ids.clone();
     sorted_actual.sort_unstable();
