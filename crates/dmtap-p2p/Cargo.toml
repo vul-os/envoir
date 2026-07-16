@@ -1,0 +1,47 @@
+# dmtap-p2p — the real libp2p mesh transport (spec §4).
+#
+# This crate makes DMTAP reachability *real*: it implements the node's `Transport` trait
+# (defined in `envoir-node`) over a live libp2p swarm — TCP+QUIC, Noise+Yamux, Kademlia
+# (§4.2 key→location), request-response (carrying DMTAP `Frame` bytes), Identify, and
+# Circuit-Relay-v2 + DCUtR for NAT traversal (§4.1, §4.3).
+#
+# libp2p is async (tokio); the async runtime is CONTAINED inside the transport (a background
+# swarm task + channels), so the rest of the node keeps its synchronous `Transport` shape.
+# The heavy libp2p/tokio dependency graph lives here, NOT in `envoir-node`, so the mail /
+# gateway / core build paths stay lean.
+[package]
+name = "dmtap-p2p"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.83"
+license = "Apache-2.0 OR MIT"
+description = "Envoir libp2p mesh transport for DMTAP (spec §4): Kademlia, request-response, relay + DCUtR, over the node's Transport trait"
+repository = "https://example.invalid/envoir"
+
+[dependencies]
+# The node crate owns the `Transport` trait + `Frame` (spec §4); this crate implements it.
+envoir-node = { path = "../../node" }
+
+# The spec's chosen substrate (§4.1). Current 0.5x. Feature set = the §4 stack.
+libp2p = { version = "0.56", features = [
+    "tokio",
+    "tcp",
+    "quic",
+    "noise",
+    "yamux",
+    "kad",
+    "request-response",
+    "cbor",
+    "identify",
+    "relay",
+    "dcutr",
+    "ping",
+    "macros",
+] }
+
+# Async runtime, contained inside the transport (background swarm task).
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time"] }
+futures = "0.3"
+
+# Wire encoding for the request-response frame carrier.
+serde = { version = "1", features = ["derive"] }
