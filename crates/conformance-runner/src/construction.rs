@@ -13,6 +13,7 @@
 
 use std::collections::BTreeMap;
 
+use dmtap_core::attestation::{AttestationError, DeviceAttestation, KeyProtection, REATTEST_CADENCE_MS};
 use dmtap_core::capability::{Capability, CapabilityError, CapabilityToken};
 use dmtap_core::cbor::{self, CborError, Cv};
 use dmtap_core::deniable::{
@@ -33,6 +34,9 @@ use dmtap_core::mote::{
     MoteDraft, MoteError, Outcome, Payload, PayloadSeal, RecipientCtx, SealKeypair, ValidateError,
     ENVELOPE_SENDER_DS, MOTE_VERSION, PAYLOAD_SIG_DS,
 };
+use dmtap_core::policy::{CallerPolicy, PolicyError};
+use dmtap_core::profile::{Avatar, Profile, ProfileError};
+use dmtap_core::push::{provider, PushError, PushSubscription, WakePing};
 use dmtap_core::sphinx::{self, SphinxCell, SphinxError};
 use dmtap_core::suite::{Suite, SuiteRatchet, SuiteRatchetError};
 use dmtap_core::TimestampMs;
@@ -73,6 +77,16 @@ pub fn run_construction_case(case: &SuiteCase) -> CaseOutcome {
         "DMTAP-DENIABLE-01" => Some(deniable_payload_signature_field_rejected()),
         "DMTAP-DENIABLE-04" => Some(deniable_prekey_bundle_invalid_sig_rejected()),
         "DMTAP-DENIABLE-05" => Some(deniable_init_idk_cert_invalid_rejected()),
+        "DMTAP-PROFILE-01" => Some(profile_tampered_sig_rejected()),
+        "DMTAP-PROFILE-02" => Some(profile_avatar_hash_mismatch_rejected()),
+        "DMTAP-PUSH-01" => Some(wakeping_extra_key_rejected()),
+        "DMTAP-PUSH-02" => Some(push_subscription_tampered_sig_rejected()),
+        "DMTAP-VAL-09" => Some(val_from_pin_mismatch_rejected()),
+        "DMTAP-VAL-11" => Some(val_duplicate_id_dedup()),
+        "DMTAP-VAL-14" => Some(val_timestamp_skew_rejected()),
+        "DMTAP-VAL-15" => Some(val_expired_mote_rejected()),
+        "DMTAP-ATTEST-01" => Some(attest_gated_context_rejects_failing_root()),
+        "DMTAP-ATTEST-02" => Some(attest_stale_evidence_rejected()),
         _ => None,
     };
     match result {
@@ -92,25 +106,12 @@ fn skip_reason(id: &str, operation: &str) -> String {
             validity — its own doc comment states issuer-trust evaluation (ARC/PoW/postage grammar, §9) \
             is unimplemented and any *present* challenge is treated as meeting threshold, so a \
             tampered-but-present challenge cannot be made to fail closed against the current reference.",
-        "DMTAP-VAL-09" => "TOFU-pin / pinned-identity comparison at validate() step 8 is explicitly left \
-            to the caller per the function's own doc comment; mote.rs exposes no pinned-identity API to \
-            exercise from this harness.",
-        "DMTAP-VAL-11" => "duplicate-id detection (STATUS_DUPLICATE_ID / ACK_DEDUP) is a storage-layer \
-            concern; mote.rs's validate() has no id-store/dedup cache to exercise.",
-        "DMTAP-VAL-14" => "timestamp-skew enforcement is caller policy — validate()'s doc comment lists \
-            'expires/refs/kind semantics' as the caller's job after step 9; Envelope.ts has no skew check \
-            inside mote.rs.",
-        "DMTAP-VAL-15" => "Payload.expires enforcement is caller policy per validate()'s step-9 comment; \
-            mote.rs performs no expiry check itself.",
         "DMTAP-GRP-01" | "DMTAP-GRP-02" | "DMTAP-GRP-03" => "dmtap-core has no MLS/group-messaging \
             implementation in this crate (no group_event, committer-log, or group-epoch-decrypt types) — \
             group_event_verify/committer_log_check/group_decrypt are out of scope for the current reference.",
         "DMTAP-AUTH-01" | "DMTAP-AUTH-02" | "DMTAP-AUTH-03" | "DMTAP-AUTH-04" | "DMTAP-AUTH-05" =>
             "dmtap-core has no auth-assertion/session module (no Assertion/Challenge/cnf-bound-session \
             types) — device/browser authentication is not yet implemented in this crate.",
-        "DMTAP-ATTEST-01" | "DMTAP-ATTEST-02" => "dmtap-core has no device-attestation module (no \
-            platform-root/attestation-evidence types) — device_attestation_verify/freshness are out of \
-            scope for the current reference.",
         "DMTAP-LEG-01" | "DMTAP-LEG-02" => "dmtap-core has no legacy-gateway or DKIM-delegation module — \
             gateway_attestation_verify/dkim_delegation_verify live (if anywhere) outside this crate, not \
             in dmtap-core.",
@@ -151,12 +152,6 @@ fn skip_reason(id: &str, operation: &str) -> String {
             window/re-fetch-on-staleness policy over it (unlike MixDirectoryTracker's explicit \
             version-monotonicity gate) — 'older than the freshness window is stale and refreshed' is \
             caller-side clock/cache policy with no dmtap-core function to call.",
-        "DMTAP-PROFILE-01" | "DMTAP-PROFILE-02" => "dmtap-core has no Profile/avatar module (no \
-            profile_verify or profile_avatar_verify types) — the Profile object (§ profile) is not yet \
-            implemented in this crate.",
-        "DMTAP-PUSH-01" | "DMTAP-PUSH-02" => "dmtap-core has no push-wake module (no WakePing or \
-            PushSubscription types) — wakeping_decode/push_subscription_verify are not yet implemented \
-            in this crate.",
         "DMTAP-DENIABLE-02" => "deniable.rs has no session-establishment/capability-gating function; \
             CapabilityAnnouncement (capability.rs) advertises capability sets generically but nothing in \
             this crate ties 'peer has not advertised deniable-1:1' to a deniable-session refusal — that \
@@ -974,6 +969,293 @@ fn deniable_init_idk_cert_invalid_rejected() -> Result<(), String> {
     }
 }
 
+// ============================================================================================
+// PROFILE — self-asserted signed display data (§3.9.5, §18.4.12, §18.9.3)
+// ============================================================================================
+
+/// DMTAP-PROFILE-01: "a Profile with a tampered sig" — a `Profile.sig` that no longer verifies
+/// under the identity's `ik` is rejected; the prior pinned profile (or fallback ladder) is used.
+fn profile_tampered_sig_rejected() -> Result<(), String> {
+    let ik = IdentityKey::generate();
+    let mut p = Profile::create(&ik, 1, "Ada Lovelace", None, None, None, None, 1_700_000_000_000);
+    p.verify().map_err(|e| format!("sanity: freshly signed profile must verify: {e}"))?;
+    p.display_name = "Mallory".into(); // tamper AFTER signing
+    match p.verify() {
+        Err(ProfileError::ProfileSigInvalid) => {
+            let code = ProfileError::ProfileSigInvalid.code();
+            if code != 0x0119 {
+                return Err(format!("ERR_PROFILE_SIG_INVALID code mismatch: got {code:#06x}, want 0x0119"));
+            }
+            Ok(())
+        }
+        other => Err(format!("expected Err(ProfileSigInvalid), got {other:?}")),
+    }
+}
+
+/// DMTAP-PROFILE-02: "a Profile with avatar.hash present and tampered fetched avatar bytes" — the
+/// client MUST NOT display the fetched image and falls back down the §3.9.5 ladder.
+fn profile_avatar_hash_mismatch_rejected() -> Result<(), String> {
+    let ik = IdentityKey::generate();
+    let avatar = Avatar {
+        url: "https://example.invalid/a.png".into(),
+        hash: Some(ContentId::of(b"the-real-avatar-bytes")),
+    };
+    let p = Profile::create(&ik, 1, "Ada Lovelace", None, None, Some(avatar), None, 1_700_000_000_000);
+    p.verify().map_err(|e| format!("sanity: freshly signed profile must verify: {e}"))?;
+    p.verify_avatar(b"the-real-avatar-bytes")
+        .map_err(|e| format!("sanity: untampered avatar bytes must verify: {e}"))?;
+    match p.verify_avatar(b"a swapped-in malicious image") {
+        Err(ProfileError::AvatarHashMismatch) => {
+            let code = ProfileError::AvatarHashMismatch.code();
+            if code != 0x011A {
+                return Err(format!(
+                    "ERR_PROFILE_AVATAR_HASH_MISMATCH code mismatch: got {code:#06x}, want 0x011A"
+                ));
+            }
+            Ok(())
+        }
+        other => Err(format!("expected Err(AvatarHashMismatch), got {other:?}")),
+    }
+}
+
+// ============================================================================================
+// PUSH — content-free device wake-signaling (§4.9.1, §18.5.5/.6, §18.9.15)
+// ============================================================================================
+
+/// DMTAP-PUSH-01: "a WakePing with an extra map key ... alongside key 1" — a wake MUST be
+/// content-free and sender-blind; any additional field (here, a stray sender-shaped text field)
+/// is rejected rather than silently accepted as metadata.
+fn wakeping_extra_key_rejected() -> Result<(), String> {
+    let bytes = cbor::encode(&Cv::Map(vec![
+        (1, Cv::Bytes(vec![0xde, 0xad, 0xbe, 0xef])), // the opaque sealed token
+        (2, Cv::Text("sender@example".into())),       // forbidden: content alongside the token
+    ]));
+    match WakePing::from_det_cbor(&bytes) {
+        Err(PushError::WakePingContentPresent) => {
+            let code = PushError::WakePingContentPresent.code();
+            if code != 0x0313 {
+                return Err(format!(
+                    "ERR_WAKEPING_CONTENT_PRESENT code mismatch: got {code:#06x}, want 0x0313"
+                ));
+            }
+            Ok(())
+        }
+        other => Err(format!("expected Err(WakePingContentPresent), got {other:?}")),
+    }
+}
+
+/// DMTAP-PUSH-02: "a PushSubscription with a tampered sig" — a subscription not authenticated to
+/// the identity's device key MUST be rejected and never woken against.
+fn push_subscription_tampered_sig_rejected() -> Result<(), String> {
+    let device = IdentityKey::generate();
+    let mut sub = PushSubscription::create(
+        &device,
+        provider::WEB_PUSH,
+        "https://push.example.invalid/sub/abc",
+        vec![0x04; 65], // uncompressed P-256 point shape
+        vec![0xaa; 16], // 16-byte auth secret
+        1_700_000_000_000,
+    );
+    sub.verify().map_err(|e| format!("sanity: freshly signed subscription must verify: {e}"))?;
+    sub.endpoint = "https://evil.invalid/redirect".into(); // tamper AFTER signing
+    match sub.verify() {
+        Err(PushError::PushSubscriptionSigInvalid) => {
+            let code = PushError::PushSubscriptionSigInvalid.code();
+            if code != 0x0312 {
+                return Err(format!(
+                    "ERR_PUSH_SUBSCRIPTION_SIG_INVALID code mismatch: got {code:#06x}, want 0x0312"
+                ));
+            }
+            Ok(())
+        }
+        other => Err(format!("expected Err(PushSubscriptionSigInvalid), got {other:?}")),
+    }
+}
+
+// ============================================================================================
+// VAL (continued) — caller-policy predicates around mote::validate (§2.6/§2.7, §16.1)
+// ============================================================================================
+
+/// DMTAP-VAL-09: "known-contact Envelope whose Payload.from != pinned identity" — build and fully
+/// validate a REAL MOTE (so `Payload.from` is a genuine, cryptographically authenticated sender
+/// identity, not a hand-typed stand-in), then run the §2.7 step 8 / §3.4 pinned-identity check the
+/// caller MUST apply: a known contact whose authenticated `from` no longer matches the previously
+/// pinned key MUST NOT be silently repinned.
+fn val_from_pin_mismatch_rejected() -> Result<(), String> {
+    let fx = build_fixture(Kind::Mail);
+    let our_ik = fx.recipient.public();
+    let ctx = RecipientCtx { our_ik: &our_ik, seal_secret: fx.seal.secret(), sender_is_known: true };
+    let payload = match mote::validate(&Hpke, &fx.env, &ctx) {
+        Ok(Outcome::Accepted(p)) => p,
+        other => return Err(format!("expected Ok(Outcome::Accepted), got {other:?}")),
+    };
+    // A "known contact" already pinned to a DIFFERENT identity than the one this MOTE actually
+    // authenticates to — exactly the silent-repin attempt §3.4 forbids.
+    let pinned = IdentityKey::generate().public();
+    if pinned == payload.from {
+        return Err("sanity: pinned fixture must not accidentally equal the authenticated from".into());
+    }
+    match CallerPolicy::new().check_repin(Some(&pinned), &payload.from) {
+        Err(PolicyError::FromPinMismatch) => {
+            let code = PolicyError::FromPinMismatch.code();
+            if code != 0x0209 {
+                return Err(format!("ERR_FROM_PIN_MISMATCH code mismatch: got {code:#06x}, want 0x0209"));
+            }
+            Ok(())
+        }
+        other => Err(format!("expected Err(FromPinMismatch), got {other:?}")),
+    }
+}
+
+/// DMTAP-VAL-11: "re-deliver an already-stored id" — a duplicate `Envelope.id` already held by the
+/// recipient MUST be acked immediately without re-processing (`STATUS_DUPLICATE_ID`/`ACK_DEDUP`),
+/// never treated as a fresh delivery. Runs a REAL MOTE through `mote::validate` first (proving the
+/// object is genuinely well-formed and accepted), then exercises the caller-owned dedup set against
+/// its actual `Envelope.id` on a second, identical presentation.
+fn val_duplicate_id_dedup() -> Result<(), String> {
+    let fx = build_fixture(Kind::Chat);
+    let our_ik = fx.recipient.public();
+    let ctx = RecipientCtx { our_ik: &our_ik, seal_secret: fx.seal.secret(), sender_is_known: true };
+    match mote::validate(&Hpke, &fx.env, &ctx) {
+        Ok(Outcome::Accepted(_)) => {}
+        other => return Err(format!("expected Ok(Outcome::Accepted) on first delivery, got {other:?}")),
+    }
+    let mut pol = CallerPolicy::new();
+    pol.check_and_record(&fx.env.id)
+        .map_err(|e| format!("sanity: first sight of this id must record cleanly: {e:?}"))?;
+    // Re-deliver the IDENTICAL id — this is the duplicate the recipient already holds.
+    match pol.check_and_record(&fx.env.id) {
+        Err(PolicyError::DuplicateId) => {
+            let code = PolicyError::DuplicateId.code();
+            if code != 0x020E {
+                return Err(format!("STATUS_DUPLICATE_ID code mismatch: got {code:#06x}, want 0x020E"));
+            }
+            Ok(())
+        }
+        other => Err(format!("expected Err(DuplicateId) (ACK_DEDUP), got {other:?}")),
+    }
+}
+
+/// DMTAP-VAL-14: "Envelope.ts = now + 10 min" — a cold-sender timestamp outside the ±120 s skew
+/// tolerance is dropped. Uses a real MOTE's own `Envelope.ts` as the asserted sender timestamp and
+/// a receiver clock 10 minutes behind it — well outside `SKEW_TOLERANCE_MS`.
+fn val_timestamp_skew_rejected() -> Result<(), String> {
+    let fx = build_fixture(Kind::Mail);
+    let sender_ts = fx.env.ts;
+    let receiver_now = sender_ts.saturating_sub(10 * 60 * 1000); // sender is 10 min "in the future"
+    match CallerPolicy::new().check_skew(sender_ts, receiver_now) {
+        Err(PolicyError::TimestampOutOfSkew) => {
+            let code = PolicyError::TimestampOutOfSkew.code();
+            if code != 0x020C {
+                return Err(format!(
+                    "ERR_TIMESTAMP_OUT_OF_SKEW code mismatch: got {code:#06x}, want 0x020C"
+                ));
+            }
+            Ok(())
+        }
+        other => Err(format!("expected Err(TimestampOutOfSkew), got {other:?}")),
+    }
+}
+
+/// DMTAP-VAL-15: "Payload.expires in the past" — build a REAL MOTE whose `Payload.expires` is set
+/// (via `MoteDraft.expires`), validate it (proving it is genuinely well-formed and accepted), then
+/// apply the caller-side expiry check at a receipt time after that `expires` has passed.
+fn val_expired_mote_rejected() -> Result<(), String> {
+    let sender = IdentityKey::generate();
+    let ephemeral = IdentityKey::generate();
+    let recipient = IdentityKey::generate();
+    let seal = SealKeypair::generate();
+    let ts: TimestampMs = 1_700_000_000_000;
+    let mut draft = MoteDraft::new(Kind::Mail, ts, b"expiring-mote fixture".to_vec());
+    draft.expires = Some(ts + 1_000); // expires shortly after the send time
+    let env = build_mote(&Hpke, &sender, &ephemeral, &recipient.public(), seal.public(), draft)
+        .map_err(|e| format!("build_mote: {e}"))?;
+    let our_ik = recipient.public();
+    let ctx = RecipientCtx { our_ik: &our_ik, seal_secret: seal.secret(), sender_is_known: true };
+    let payload = match mote::validate(&Hpke, &env, &ctx) {
+        Ok(Outcome::Accepted(p)) => p,
+        other => return Err(format!("expected Ok(Outcome::Accepted), got {other:?}")),
+    };
+    let expires = payload.expires.ok_or("sanity: expected Payload.expires to be set")?;
+    let receipt_now = expires + 5_000; // receipt happens well after expiry
+    match CallerPolicy::new().check_expiry(Some(expires), receipt_now) {
+        Err(PolicyError::ExpiredMote) => {
+            let code = PolicyError::ExpiredMote.code();
+            if code != 0x020B {
+                return Err(format!("ERR_EXPIRED_MOTE code mismatch: got {code:#06x}, want 0x020B"));
+            }
+            Ok(())
+        }
+        other => Err(format!("expected Err(ExpiredMote), got {other:?}")),
+    }
+}
+
+// ============================================================================================
+// ATTEST — advisory device key-attestation gate (§1.2a, §18.4.2)
+// ============================================================================================
+
+/// DMTAP-ATTEST-01: "enter an attestation-gated context with attestation evidence absent or
+/// failing the platform root". Drives [`DeviceAttestation::evaluate`] with a stub root-verification
+/// closure that reports the evidence does NOT chain to the platform's disclosed vendor CA — the
+/// evaluator must fail closed (advisory-only: this never touches §1.4 KT authorization).
+fn attest_gated_context_rejects_failing_root() -> Result<(), String> {
+    let device_key = IdentityKey::generate().public();
+    let att = DeviceAttestation {
+        device_key: device_key.clone(),
+        key_protection: KeyProtection::StrongBox,
+        evidence: Some(vec![0xAB, 0xCD]),
+        issued_at: 1_700_000_000_000,
+        expires: None,
+    };
+    // Stub platform root: always reports the evidence does not verify (simulates a forged/
+    // mismatched attestation chain).
+    let root_always_fails = |_evidence: &[u8], _device_key: &[u8]| false;
+    match att.evaluate(true, 1_700_000_000_000, REATTEST_CADENCE_MS, false, root_always_fails) {
+        Err(AttestationError::AttestationInvalid) => {
+            let code = AttestationError::AttestationInvalid.code();
+            if code != 0x0116 {
+                return Err(format!(
+                    "ERR_DEVICE_ATTESTATION_INVALID code mismatch: got {code:#06x}, want 0x0116"
+                ));
+            }
+            Ok(())
+        }
+        other => Err(format!("expected Err(AttestationInvalid), got {other:?}")),
+    }
+}
+
+/// DMTAP-ATTEST-02: "present attestation evidence older than the 90-day cadence ... treated as
+/// expired". A stub root closure that ACCEPTS the evidence structurally, evaluated at a time past
+/// `REATTEST_CADENCE_MS` after issuance, must still be rejected as stale (re-attest required).
+fn attest_stale_evidence_rejected() -> Result<(), String> {
+    let device_key = IdentityKey::generate().public();
+    let issued_at: TimestampMs = 1_700_000_000_000;
+    let att = DeviceAttestation {
+        device_key: device_key.clone(),
+        key_protection: KeyProtection::SecureEnclave,
+        evidence: Some(vec![0x01, 0x02, 0x03]),
+        issued_at,
+        expires: None,
+    };
+    let root_always_ok = |_evidence: &[u8], dk: &[u8]| dk == device_key.as_slice();
+    // Sanity: fresh evidence (right at issuance) with a passing root check is accepted.
+    att.evaluate(true, issued_at, REATTEST_CADENCE_MS, false, root_always_ok)
+        .map_err(|e| format!("sanity: fresh evidence must be accepted: {e}"))?;
+    let now = issued_at + REATTEST_CADENCE_MS + 1; // one ms past the 90-day cadence
+    match att.evaluate(true, now, REATTEST_CADENCE_MS, false, root_always_ok) {
+        Err(AttestationError::AttestationExpired) => {
+            let code = AttestationError::AttestationExpired.code();
+            if code != 0x0118 {
+                return Err(format!(
+                    "ERR_DEVICE_ATTESTATION_EXPIRED code mismatch: got {code:#06x}, want 0x0118"
+                ));
+            }
+            Ok(())
+        }
+        other => Err(format!("expected Err(AttestationExpired), got {other:?}")),
+    }
+}
+
 /// Every `id` this dispatcher recognizes (used by tests to keep the executed-set and the reason
 /// table honest against each other and against `suite.json`).
 pub fn recognized_ids() -> BTreeMap<&'static str, ()> {
@@ -981,9 +1263,11 @@ pub fn recognized_ids() -> BTreeMap<&'static str, ()> {
         "DMTAP-CBOR-11", "DMTAP-CBOR-12", "DMTAP-IDENT-01", "DMTAP-IDENT-02", "DMTAP-IDENT-03",
         "DMTAP-IDENT-05", "DMTAP-PRIV-01", "DMTAP-PRIV-02", "DMTAP-FILE-01", "DMTAP-FILE-02",
         "DMTAP-FILE-03", "DMTAP-FILE-04", "DMTAP-VAL-01", "DMTAP-VAL-02", "DMTAP-VAL-03",
-        "DMTAP-VAL-04", "DMTAP-VAL-06", "DMTAP-VAL-07", "DMTAP-VAL-08", "DMTAP-VAL-10",
-        "DMTAP-VAL-12", "DMTAP-VAL-13", "DMTAP-ORG-04", "DMTAP-ORG-05", "DMTAP-KTV1-01",
-        "DMTAP-KTV1-04", "DMTAP-DENIABLE-01", "DMTAP-DENIABLE-04", "DMTAP-DENIABLE-05",
+        "DMTAP-VAL-04", "DMTAP-VAL-06", "DMTAP-VAL-07", "DMTAP-VAL-08", "DMTAP-VAL-09",
+        "DMTAP-VAL-10", "DMTAP-VAL-11", "DMTAP-VAL-12", "DMTAP-VAL-13", "DMTAP-VAL-14",
+        "DMTAP-VAL-15", "DMTAP-ORG-04", "DMTAP-ORG-05", "DMTAP-KTV1-01", "DMTAP-KTV1-04",
+        "DMTAP-DENIABLE-01", "DMTAP-DENIABLE-04", "DMTAP-DENIABLE-05", "DMTAP-PROFILE-01",
+        "DMTAP-PROFILE-02", "DMTAP-PUSH-01", "DMTAP-PUSH-02", "DMTAP-ATTEST-01", "DMTAP-ATTEST-02",
     ]
     .into_iter()
     .map(|id| (id, ()))
