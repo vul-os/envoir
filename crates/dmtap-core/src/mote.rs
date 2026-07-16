@@ -226,7 +226,11 @@ pub struct Attachment {
     pub size: u64,
     pub inline: Option<Vec<u8>>,
     pub manifest: Option<ManifestRef>,
-    pub key: Vec<u8>, // per-file content key
+    /// Per-file content key. It lives HERE, inside the sealed MOTE — never inside the
+    /// swarm-distributed `Manifest` object (§5.5/§18.3.8): a manifest is a content-addressed
+    /// blob any holder may serve, so an embedded key would leak the whole file. `ManifestRef`
+    /// (below) deliberately carries only id/size/chunk-count, no key.
+    pub key: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
