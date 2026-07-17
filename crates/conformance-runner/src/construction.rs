@@ -20,6 +20,7 @@ use dmtap_core::deniable::{
     DeniableFrame, DeniableInit, DeniableMessage, DeniablePayload, DeniablePrekeyBundle,
     DENIABLE_IDK_DS,
 };
+use dmtap_core::directory::{DomainDirectory, DomainDirectoryError, Visibility};
 use dmtap_core::id::ContentId;
 use dmtap_core::identity::{
     verify_domain, Cap, DeviceCert, Identity, IdentityError, IdentityKey, KeyPackageBundleRef,
@@ -28,18 +29,20 @@ use dmtap_core::kt::{
     identity_leaf_for, verify_consistency, ConsistencyProof, InclusionProof, KtError, MerkleTree,
     SignedTreeHead,
 };
-use dmtap_core::mixnet::{MixDirectory, MixKeyEntry, MixNodeDescriptor};
+use dmtap_core::mixnet::{MixDescriptorError, MixDirectory, MixKeyEntry, MixNodeDescriptor};
 use dmtap_core::mote::{
-    self, build_mote, check_file_available, file_tier, spool_admit, DeliveryTag, Durability,
-    DurabilityClass, Envelope, FileTier, Headers, Hpke, Kind, Manifest, ManifestRef, MoteDraft,
-    MoteError, Outcome, Payload, PayloadSeal, RecipientCtx, SealKeypair, ValidateError,
-    ENVELOPE_SENDER_DS, MOTE_VERSION, PAYLOAD_SIG_DS,
+    self, build_mote, check_file_available, file_tier, spool_admit, tier_enforce, DeliveryTag,
+    Durability, DurabilityClass, Envelope, FileTier, Headers, Hpke, Kind, Manifest, ManifestRef,
+    MoteDraft, MoteError, Outcome, Payload, PayloadSeal, RecipientCtx, SealKeypair, Tier,
+    TierEnforcementError, ValidateError, ENVELOPE_SENDER_DS, MOTE_VERSION, PAYLOAD_SIG_DS,
 };
 use dmtap_core::policy::{CallerPolicy, PolicyError};
 use dmtap_core::profile::{Avatar, Profile, ProfileError};
 use dmtap_core::push::{provider, PushError, PushSubscription, WakePing};
 use dmtap_core::sphinx::{self, SphinxCell, SphinxError};
-use dmtap_core::suite::{Suite, SuiteRatchet, SuiteRatchetError};
+use dmtap_core::suite::{
+    negotiate_suite, Suite, SuiteNegotiationError, SuiteRatchet, SuiteRatchetError,
+};
 use dmtap_core::TimestampMs;
 
 // Additional workspace crates (see `Cargo.toml` comment): the behavior a handful of
@@ -66,6 +69,7 @@ use dmtap_clustersync::{
     Hlc, JournalEntry, RangeFingerprint, SyncError, HLC_SKEW_MS, OP_LWW_SET, OP_SET_ADD,
     OP_SET_REMOVE,
 };
+use envoir_gateway::alias_map::{AliasTarget, GatewayAliasError, GatewayAliasMap};
 use envoir_gateway::attestation::{AttestationError as GwAttestationError, AttestationKey};
 use envoir_gateway::forwarded_addr::{self, ForwardedAddrError};
 use envoir_gateway::outbound::{
@@ -87,8 +91,13 @@ pub fn run_construction_case(case: &SuiteCase) -> CaseOutcome {
         "DMTAP-IDENT-02" => Some(ident_rollback_rejected()),
         "DMTAP-IDENT-03" => Some(ident_broken_prev_chain_rejected()),
         "DMTAP-IDENT-05" => Some(device_cert_tampered_sig_rejected()),
+        "DMTAP-IDENT-06" => Some(suite_negotiation_empty_intersection_rejected()),
         "DMTAP-PRIV-01" => Some(sphinx_off_ladder_length_rejected()),
         "DMTAP-PRIV-02" => Some(mix_directory_bad_authority_sig_rejected()),
+        "DMTAP-PRIV-04" => Some(tier_enforce_downgrade_refused()),
+        "DMTAP-PRIV-06" => Some(mix_descriptor_stale_rejected()),
+        "DMTAP-ORG-03" => Some(domain_directory_non_pinned_authority_rejected()),
+        "DMTAP-GWALIAS-02" => Some(gateway_alias_unmapped_rejected()),
         "DMTAP-FILE-01" => Some(manifest_root_order_sensitive()),
         "DMTAP-FILE-02" => Some(chunk_hash_mismatch_rejected()),
         "DMTAP-FILE-03" => Some(size_tier_mismatch_detected()),
@@ -192,21 +201,10 @@ fn skip_reason(id: &str, operation: &str) -> String {
             tests dmtap-mail's own JMAP-over-MIME fidelity, not 'a MOTE renders to/from the JMAP object \
             model without loss of §8-required fields' — a materially different property. Left an honest \
             skip rather than substituting a lookalike check.",
-        "DMTAP-IDENT-06" => "no suite-negotiation/intersection helper exists anywhere in this workspace \
-            (identity.rs/suite.rs in dmtap-core, nor dmtap-auth/dmtap-naming/dmtap-deniable/dmtap-mls) — \
-            sender/recipient suite-set intersection is caller logic with no function to call.",
         "DMTAP-PRIV-03" => "no per-epoch replay cache exists in dmtap-core (sphinx.rs is byte-layout only, \
             stateless) — mix-packet replay detection is caller/relay state.",
-        "DMTAP-PRIV-04" => "no tier-enforcement function exists (Tier is a plain enum in mote.rs with no \
-            downgrade-refusal logic) — tier_enforce is caller policy.",
         "DMTAP-PRIV-05" => "no active-attack/loop-cover detection exists in dmtap-core — \
             mix_active_attack_detect is out of scope for this crate.",
-        "DMTAP-PRIV-06" => "MixNodeDescriptor::verify() checks only its own signature; there is no \
-            freshness/expiry check against a re-attestation window in mixnet.rs. Note this is distinct \
-            from `MixDirectoryTracker` (mixnet.rs), which does now enforce whole-*directory* version \
-            monotonicity (`ERR_MIX_DIRECTORY_STALE`, 0x0311) — that is DMTAP-PRIV-02's territory (already \
-            executed) and a different granularity than THIS case's per-*descriptor* re-attestation window \
-            (`ERR_MIX_DESCRIPTOR_STALE`, 0x030C), which still has no dmtap-core function to call.",
         "DMTAP-PRIV-07" => "no capability-negotiation function exists in dmtap-core for high-security- \
             profile/PQ-Sphinx negotiation — capability_negotiate is caller/policy logic.",
         "DMTAP-ORG-01" => "DirEntry.custody (directory.rs) IS a required, structurally-enforced wire field \
@@ -218,30 +216,12 @@ fn skip_reason(id: &str, operation: &str) -> String {
             key); there is no identity_validate/cross-source check anywhere in this workspace that could \
             catch a lying-but-well-formed entry, so this stays an honest skip rather than substituting the \
             structurally-different 'missing field' case.",
-        "DMTAP-ORG-03" => "DomainDirectory::verify() checks only self-consistency (the embedded \
-            `authority` key matches its own signature); it takes no external pinned-authority parameter \
-            (unlike Identity::verify's `pinned` arg), so 'signed by a key other than the PINNED authority' \
-            cannot be made to fail inside dmtap-core alone. dmtap-naming's resolver/kt modules pin \
-            AUTHORITY keys for KT *logs*, not for a domain's `DomainDirectory`, so this gap is not closed \
-            by the crates this harness now depends on either.",
         "DMTAP-DENIABLE-02" => "dmtap-deniable's session.rs (now a dependency of this crate) has no \
             session-establishment/capability-gating function; CapabilityAnnouncement (dmtap-core's \
             capability.rs) advertises capability sets generically but nothing ties 'peer has not \
             advertised deniable-1:1' to a deniable-session refusal — a caller simply has no \
             `DeniablePrekeyBundle` to call `initiate()` with in that case, which is a structural absence \
             of input, not an executable 'refuse and notify' decision this crate makes.",
-        "DMTAP-GWALIAS-02" => "the SRS-style `envoir_gateway::forwarded_addr` module (now driven by \
-            DMTAP-GWALIAS-01/03) is a *stateless, deterministic* codec — it maps a legacy \
-            `(localpart, native_domain)` pair to/from the reversible `local.native_domain@gateway` \
-            form. GWALIAS-02 is a different concern: a *random-mode* alias (an opaque token with no \
-            recoverable native address) resolved through a stateful `GatewayAliasMap` row store whose \
-            row may be missing/expired/burned, answered `ERR_GATEWAY_ALIAS_UNMAPPED` (`0x0605`, \
-            RETURN_SENDER_SMTP). No such map-row store exists anywhere in this workspace (grepped \
-            envoir-gateway and `node` for `GatewayAliasMap`/random-mode alias state; the only hit is \
-            `authz.rs`'s `AliasAllocator`, the DMTAP-native vanity/key-derived LOCAL-part allocator, a \
-            different concern). `forwarded_addr` never returns `0x0605` and has no row lifecycle to \
-            drive, so this stays an honest skip rather than laundering the deterministic codec's \
-            `None`/`0x0606` refusal as the stateful-lookup `0x0605` the case names.",
         _ => {
             return format!(
                 "unrecognized construction-todo case (operation `{operation}`) — not yet triaged by \
@@ -507,6 +487,190 @@ fn mix_directory_bad_authority_sig_rejected() -> Result<(), String> {
     match dir.verify() {
         Err(IdentityError::BadSignature) => Ok(()),
         other => Err(format!("expected Err(BadSignature), got {other:?}")),
+    }
+}
+
+/// DMTAP-IDENT-06 (§1.3): sender/recipient supported-suite sets that do not intersect fail closed
+/// with `ERR_SUITE_INTERSECTION_EMPTY` (`0x0102`) — no silent downgrade. Positive control:
+/// overlapping sets negotiate the strongest suite both parties support.
+fn suite_negotiation_empty_intersection_rejected() -> Result<(), String> {
+    // Positive control: overlap picks the strongest (highest-byte) common suite.
+    match negotiate_suite(&[Suite::Classical, Suite::PqHybrid], &[Suite::Classical]) {
+        Ok(Suite::Classical) => {}
+        other => {
+            return Err(format!(
+                "positive control: partial overlap must negotiate the sole common suite (Classical), \
+                 got {other:?}"
+            ))
+        }
+    }
+    match negotiate_suite(&[Suite::Classical, Suite::PqHybrid], &[Suite::PqHybrid, Suite::Classical]) {
+        Ok(Suite::PqHybrid) => {}
+        other => {
+            return Err(format!(
+                "positive control: a both-migrated pair must negotiate the strongest common suite \
+                 (PqHybrid), got {other:?}"
+            ))
+        }
+    }
+    // Negative: disjoint sets → fail closed, no silent downgrade.
+    match negotiate_suite(&[Suite::Classical], &[Suite::PqHybrid]) {
+        Err(e) if e == SuiteNegotiationError::IntersectionEmpty => {
+            if e.code() == 0x0102 {
+                Ok(())
+            } else {
+                Err(format!("expected error code 0x0102, got 0x{:04x}", e.code()))
+            }
+        }
+        other => Err(format!("expected Err(IntersectionEmpty), got {other:?}")),
+    }
+}
+
+/// DMTAP-PRIV-04 (§4.4.9): a forced downgrade below the required privacy-tier floor
+/// (`private → fast`) fails closed with `ERR_PRIVATE_TIER_DOWNGRADE_REFUSED` (`0x0310`), never
+/// silently. Positive control: an equal or stronger offered tier is accepted.
+fn tier_enforce_downgrade_refused() -> Result<(), String> {
+    // Positive control: equal or stronger-than-required tiers are allowed.
+    if tier_enforce(Tier::Fast, Tier::Fast) != Ok(Tier::Fast) {
+        return Err("positive control: an equal (Fast) tier must be allowed".into());
+    }
+    if tier_enforce(Tier::Private, Tier::Private) != Ok(Tier::Private) {
+        return Err("positive control: an equal (Private) tier must be allowed".into());
+    }
+    if tier_enforce(Tier::Fast, Tier::Private) != Ok(Tier::Private) {
+        return Err("positive control: a stronger-than-required tier must be allowed".into());
+    }
+    // Negative: required Private, offered Fast → downgrade refused, fail closed.
+    match tier_enforce(Tier::Private, Tier::Fast) {
+        Err(e) if e == TierEnforcementError::DowngradeRefused => {
+            if e.code() == 0x0310 {
+                Ok(())
+            } else {
+                Err(format!("expected error code 0x0310, got 0x{:04x}", e.code()))
+            }
+        }
+        other => Err(format!("expected Err(DowngradeRefused), got {other:?}")),
+    }
+}
+
+/// DMTAP-PRIV-06 (§4.4.2, §4.4.4, §16.3): a `MixNodeDescriptor` past its freshness window (both
+/// past its re-attestation age and with no usable-epoch key) fails closed with
+/// `ERR_MIX_DESCRIPTOR_STALE` (`0x030C`). Positive control: a fresh descriptor passes. This is the
+/// per-*descriptor* re-attestation gate, distinct from the whole-*directory* freeze `0x0311`.
+fn mix_descriptor_stale_rejected() -> Result<(), String> {
+    let node = IdentityKey::generate();
+    let issued_at = 1_700_000_000_000u64;
+    let epoch_len = 3_600_000u64; // 1h re-attestation window / key epoch
+    let build = |valid_until: u64| {
+        MixNodeDescriptor::issue(
+            &node,
+            vec!["/ip4/198.51.100.9/udp/443/quic-v1".into()],
+            vec![MixKeyEntry { epoch: 1, mix_key: vec![9u8; 32], valid_until }],
+            1,
+            issued_at,
+            None,
+            None,
+        )
+    };
+    // Positive control: within the re-attestation window and with a still-valid epoch key → fresh.
+    let fresh = build(issued_at + epoch_len * 2);
+    if let Err(e) = fresh.check_fresh(issued_at + 60_000, epoch_len) {
+        return Err(format!("positive control: a fresh descriptor must pass check_fresh, got {e:?}"));
+    }
+    // Negative: past the re-attestation window and the sole epoch key already expired → Stale.
+    let stale = build(issued_at + epoch_len);
+    match stale.check_fresh(issued_at + epoch_len * 5, epoch_len) {
+        Err(e) if e == MixDescriptorError::Stale => {
+            if e.code() == 0x030C {
+                Ok(())
+            } else {
+                Err(format!("expected error code 0x030C, got 0x{:04x}", e.code()))
+            }
+        }
+        other => Err(format!("expected Err(Stale), got {other:?}")),
+    }
+}
+
+/// DMTAP-ORG-03 (§3.10.3, §18.4.7): a `DomainDirectory` validly signed by *some* authority but not
+/// the caller-**pinned** one fails closed with `ERR_DOMAIN_DIRECTORY_SIG_INVALID` (`0x0113`).
+/// Positive control: the directory verifies against its matching pinned authority.
+fn domain_directory_non_pinned_authority_rejected() -> Result<(), String> {
+    let real_authority = IdentityKey::generate();
+    let dir = DomainDirectory::issue(
+        &real_authority,
+        "example.com",
+        1,
+        Visibility::Public,
+        Vec::new(),
+        None,
+        1_700_000_000_000,
+    );
+    // Positive control: the matching pinned authority passes.
+    if let Err(e) = dir.verify_pinned(&real_authority.public()) {
+        return Err(format!(
+            "positive control: a directory must verify against its matching pinned authority, got {e:?}"
+        ));
+    }
+    // Negative: a valid-but-non-pinned signer (directory self-consistent, but signed by a key other
+    // than the pin) → fail closed.
+    let attacker_authority = IdentityKey::generate();
+    match dir.verify_pinned(&attacker_authority.public()) {
+        Err(e) if e == DomainDirectoryError::AuthorityMismatch => {
+            if e.code() == 0x0113 {
+                Ok(())
+            } else {
+                Err(format!("expected error code 0x0113, got 0x{:04x}", e.code()))
+            }
+        }
+        other => Err(format!("expected Err(AuthorityMismatch), got {other:?}")),
+    }
+}
+
+/// DMTAP-GWALIAS-02 (§7.10.3, §18.3.12): inbound legacy mail to a random-mode gateway alias whose
+/// `GatewayAliasMap` row is missing / expired / burned resolves to `ERR_GATEWAY_ALIAS_UNMAPPED`
+/// (`0x0605`, RETURN_SENDER_SMTP `550 5.1.1`) rather than being silently dropped. Positive control:
+/// a live row resolves to its bound native target.
+fn gateway_alias_unmapped_rejected() -> Result<(), String> {
+    let mut map = GatewayAliasMap::new();
+    let now = 1_700_000_000_000u64;
+    let target = AliasTarget::Native { local: "imran".into(), domain: "mydomain.com".into() };
+
+    // Positive control: a freshly-minted, live row resolves to its target.
+    let live = map.mint(target.clone());
+    match map.resolve(&live, now) {
+        Ok(t) if t == target => {}
+        other => {
+            return Err(format!("positive control: a live alias must resolve to its target, got {other:?}"))
+        }
+    }
+
+    // Negative (missing): a never-minted token has no row.
+    match map.resolve("nosuchaliastoken", now) {
+        Err(GatewayAliasError::Unmapped) => {}
+        other => return Err(format!("expected a missing alias to be Unmapped, got {other:?}")),
+    }
+
+    // Negative (expired): a TTL'd row resolved past its expiry.
+    let expiring = map.mint_with(target.clone(), None, Some(1_000), false, now);
+    match map.resolve(&expiring, now + 2_000) {
+        Err(GatewayAliasError::Unmapped) => {}
+        other => return Err(format!("expected an expired alias to be Unmapped, got {other:?}")),
+    }
+
+    // Negative (burned): an explicitly-burned row, checked for the exact wire code.
+    let burned = map.mint(target.clone());
+    if !map.burn(&burned) {
+        return Err("burn() must report that the minted row existed".into());
+    }
+    match map.resolve(&burned, now) {
+        Err(e) if e == GatewayAliasError::Unmapped => {
+            if e.code() == 0x0605 {
+                Ok(())
+            } else {
+                Err(format!("expected error code 0x0605, got 0x{:04x}", e.code()))
+            }
+        }
+        other => Err(format!("expected a burned alias to be Unmapped, got {other:?}")),
     }
 }
 
