@@ -1,8 +1,12 @@
-# Gateway — intended for its own repo (`envoir-gateway`)
+# envoir-gateway — the split-out legacy bridge
 
-**Status: lives in the `envoir` monorepo for now, by design — but it is intended to be split
-out into its own repository (`envoir-gateway`) once it earns it.** This note records that intent
-and the discipline that keeps the future split a clean lift rather than an untangling.
+**Status: SPLIT DONE (2026-07-17).** This is now its own repository, carved out of the `env-oir/envoir`
+monorepo with its history preserved (`git filter-repo`). It depends on the two shared libraries it
+needs — `dmtap-core` and `dmtap-mail` — pinned to the monorepo release tag **`v0.1.0`** (both via the
+*same* tag, so Cargo resolves a single `dmtap-core`), not path deps, so this repo builds standalone
+with no circular dependency. The gateway is gone from the monorepo; its conformance cases
+(`DMTAP-GWALIAS-*`, `DMTAP-LEG-*`) are executed here now. The notes below record why this component
+was the natural one to separate and the boundary discipline that kept the lift clean.
 
 ## Why the gateway is the natural thing to separate
 
