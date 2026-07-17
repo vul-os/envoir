@@ -86,6 +86,17 @@ const MAX_REQUEST_SIZE: u64 = 8 * 1024 * 1024;
 /// [`WireReceipt`] marker, so this is deliberately tiny — a peer sending anything larger is
 /// misbehaving, not merely slow.
 const MAX_RESPONSE_SIZE: u64 = 4 * 1024;
+/// Hard cap on the inbound-frame backlog. Frames arrive from attacker-controlled peers with an
+/// attacker-chosen `from`; without a bound one peer could enqueue frames forever and OOM the node.
+/// Past the cap we drop new frames (the sender's ack/retry machine, §20.1, tolerates a lost frame),
+/// mirroring the sibling raw-TCP transport's `MAX_INBOX_FRAMES` (`envoir_node::transport`).
+const MAX_INBOX_FRAMES: usize = 1024;
+/// Hard cap on the auto-learned peer book. The `from → PeerId` entries added on inbound frames are
+/// only a routing convenience (so an ack can go back over the same channel); an attacker forging a
+/// fresh `from` per frame must not be able to grow this map without bound. Explicit `add_peer`
+/// entries are operator-controlled and not subject to this cap. When the book is full we simply
+/// stop auto-learning new `from`s (existing entries and explicit adds still resolve).
+const MAX_AUTO_PEERS: usize = 4096;
 
 /// A boxed, thread-safe error for transport construction (libp2p builder + bind failures).
 pub type BuildError = Box<dyn std::error::Error + Send + Sync>;
@@ -529,6 +540,36 @@ fn handle_command(swarm: &mut Swarm<MeshBehaviour>, pending: &mut PendingKad, cm
     }
 }
 
+/// Enqueue one inbound frame and auto-learn its return path, both under hard caps (MED-2). `from`
+/// and the frame are attacker-controlled, so:
+///   * the peer book only learns a new `from` while it is below [`MAX_AUTO_PEERS`] (an already-known
+///     `from` still refreshes routing; explicit [`add_peer`](Libp2pTransport::add_peer)s are never
+///     gated here), and
+///   * the frame is dropped rather than enqueued once the inbox is at [`MAX_INBOX_FRAMES`].
+/// Neither structure can grow without bound no matter how many frames a hostile peer sends.
+fn enqueue_inbound(
+    inbox: &Arc<Mutex<VecDeque<InboundFrame>>>,
+    peers: &Arc<Mutex<HashMap<Vec<u8>, PeerId>>>,
+    from: Vec<u8>,
+    frame: Frame,
+    peer: PeerId,
+) {
+    {
+        let mut pb = peers.lock().unwrap();
+        if pb.contains_key(&from) || pb.len() < MAX_AUTO_PEERS {
+            pb.entry(from.clone()).or_insert(peer);
+        }
+        // Book full and `from` unknown: skip auto-learn (routing convenience only).
+    }
+    {
+        let mut ib = inbox.lock().unwrap();
+        if ib.len() < MAX_INBOX_FRAMES {
+            ib.push_back((from, frame));
+        }
+        // Backlog full: drop the frame; the sender's retry/ack machine (§20.1) re-delivers.
+    }
+}
+
 /// Handle one swarm event: record listen addrs, deliver inbound frames + auto-learn peers, and
 /// resolve pending Kademlia queries.
 fn handle_event(
@@ -554,8 +595,7 @@ fn handle_event(
                 // Auto-learn `dmtap_from → peer` so an ack can route back over this connection
                 // (§19.3.2 "back over the same channel"), then enqueue for the node to drain.
                 let (from, frame) = request.into_inbound();
-                peers.lock().unwrap().entry(from.clone()).or_insert(peer);
-                inbox.lock().unwrap().push_back((from, frame));
+                enqueue_inbound(inbox, peers, from, frame, peer);
                 // The response is a transport-level receipt; ignore a closed channel.
                 let _ = swarm.behaviour_mut().frame.send_response(channel, WireReceipt);
             }

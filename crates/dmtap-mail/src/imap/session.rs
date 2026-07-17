@@ -1659,32 +1659,32 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 /// IMAP LIST wildcard match: `*` matches across the hierarchy delimiter, `%` within one level
 /// (RFC 9051 §6.3.9). Delimiter is `/`.
 fn wildcard_match(pattern: &str, name: &str) -> bool {
-    fn rec(p: &[u8], n: &[u8]) -> bool {
-        if p.is_empty() {
-            return n.is_empty();
-        }
-        match p[0] {
-            b'*' => {
-                // Match zero or more of anything.
-                (0..=n.len()).any(|k| rec(&p[1..], &n[k..]))
-            }
-            b'%' => {
-                // Match zero or more non-delimiter chars.
-                let mut k = 0;
-                loop {
-                    if rec(&p[1..], &n[k..]) {
-                        return true;
-                    }
-                    if k >= n.len() || n[k] == b'/' {
-                        return false;
-                    }
-                    k += 1;
-                }
-            }
-            c => !n.is_empty() && n[0] == c && rec(&p[1..], &n[1..]),
+    // Bottom-up DP over `(p_idx, n_idx)` — `dp[pi][ni]` is "does `p[pi..]` match `n[ni..]`". This
+    // is O(len(p)·len(n)) and allocation-bounded, replacing the old naive recursion whose `*`
+    // branch (`(0..=n.len()).any(|k| rec(..))`) backtracked exponentially: a pattern with many
+    // `*`s against a long name was a pre-auth ReDoS. Match semantics are preserved exactly —
+    // `*` spans the `/` delimiter, `%` matches zero-or-more non-delimiter chars (RFC 9051 §6.3.9).
+    let p = pattern.as_bytes();
+    let n = name.as_bytes();
+    let (pl, nl) = (p.len(), n.len());
+
+    // dp[pi][ni]; row pl is the "pattern exhausted" base row (matches iff name also exhausted).
+    let mut dp = vec![vec![false; nl + 1]; pl + 1];
+    dp[pl][nl] = true;
+
+    for pi in (0..pl).rev() {
+        for ni in (0..=nl).rev() {
+            dp[pi][ni] = match p[pi] {
+                // `*`: skip it, or consume one arbitrary name byte and stay on `*`.
+                b'*' => dp[pi + 1][ni] || (ni < nl && dp[pi][ni + 1]),
+                // `%`: skip it, or consume one name byte provided it is not the `/` delimiter.
+                b'%' => dp[pi + 1][ni] || (ni < nl && n[ni] != b'/' && dp[pi][ni + 1]),
+                // Literal byte: must match exactly and advance both.
+                c => ni < nl && n[ni] == c && dp[pi + 1][ni + 1],
+            };
         }
     }
-    rec(pattern.as_bytes(), name.as_bytes())
+    dp[0][0]
 }
 
 #[cfg(test)]
@@ -1698,6 +1698,39 @@ mod tests {
         assert!(wildcard_match("%", "Sent"));
         assert!(!wildcard_match("%", "a/b"));
         assert!(wildcard_match("*", "a/b"));
+    }
+
+    #[test]
+    fn wildcard_semantics_preserved() {
+        // Broaden coverage of the semantics the DP rewrite must keep identical to the old matcher.
+        assert!(wildcard_match("", ""));
+        assert!(!wildcard_match("", "x"));
+        assert!(wildcard_match("*", ""));
+        assert!(wildcard_match("a*b", "aXYZb"));
+        assert!(wildcard_match("a*b", "ab"));
+        assert!(wildcard_match("a/*", "a/b/c")); // `*` crosses the delimiter
+        assert!(wildcard_match("a/%", "a/b"));
+        assert!(!wildcard_match("a/%", "a/b/c")); // `%` stops at the delimiter
+        assert!(wildcard_match("%/%", "a/b"));
+        assert!(wildcard_match("INBOX*", "INBOX"));
+        assert!(!wildcard_match("INBOX", "INBOXX"));
+        assert!(wildcard_match("*a*b*c*", "zazbzcz"));
+    }
+
+    #[test]
+    fn wildcard_redos_pattern_returns_quickly() {
+        // MED-1 regression: the old naive `*` recursion backtracked exponentially. A pattern of
+        // many `*a` groups against a long non-matching name would take effectively forever there;
+        // the DP matcher is O(len(p)·len(n)) and returns near-instantly. We assert both a wall-clock
+        // ceiling AND correctness (this pattern needs 20 `a`s, the name has none → no match).
+        let pattern = "*a".repeat(20) + "b"; // 20 `*a` groups then a `b`
+        let name = "a".repeat(1); // deliberately cannot satisfy 20 required `a`s + trailing `b`
+        let name = format!("{}c", "x".repeat(64)) + &name; // long, wrong tail
+        let start = std::time::Instant::now();
+        let matched = wildcard_match(&pattern, &name);
+        let elapsed = start.elapsed();
+        assert!(!matched);
+        assert!(elapsed < std::time::Duration::from_secs(1), "wildcard match took {elapsed:?} — ReDoS regression");
     }
 
     #[test]

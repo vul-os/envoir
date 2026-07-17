@@ -116,6 +116,11 @@ fn read_quoted(buf: &[u8], mut i: usize) -> Result<(String, usize), ParseError> 
     Err(ParseError::UnterminatedQuote)
 }
 
+/// Hard per-literal cap. A literal is only ever inlined from a buffer already held in memory, so
+/// the `n > buf.len()-i` bound already prevents over-reads; this additional ceiling rejects an
+/// absurd advertised length up front (defence in depth against a hostile `{N}` introducer).
+const MAX_LITERAL_LEN: usize = 64 * 1024 * 1024;
+
 fn read_literal(buf: &[u8], mut i: usize) -> Result<(Vec<u8>, usize), ParseError> {
     let start = i;
     while i < buf.len() && buf[i].is_ascii_digit() {
@@ -138,7 +143,10 @@ fn read_literal(buf: &[u8], mut i: usize) -> Result<(Vec<u8>, usize), ParseError
     if i < buf.len() && buf[i] == b'\n' {
         i += 1;
     }
-    if i + n > buf.len() {
+    // Bound `n` BEFORE any `i + n` arithmetic: an attacker-supplied length up to `usize::MAX`
+    // would otherwise overflow (panic in debug; wrap past the guard → out-of-bounds slice panic in
+    // release). `saturating_sub` can never overflow, so the check is fail-closed for any `n`.
+    if n > MAX_LITERAL_LEN || n > buf.len().saturating_sub(i) {
         return Err(ParseError::BadLiteral);
     }
     Ok((buf[i..i + n].to_vec(), i + n))
@@ -941,6 +949,27 @@ mod tests {
     fn tokenizes_quoted_and_parens() {
         let toks = tokenize(b"a LOGIN \"user name\" pass\r\n").unwrap();
         assert_eq!(toks[2], Token::Quoted("user name".into()));
+    }
+
+    #[test]
+    fn literal_length_overflow_is_rejected_not_panicked() {
+        // HIGH-1 regression: a non-trailing literal introducer with a huge advertised length must
+        // fail closed as `BadLiteral`, never overflow `i + n` (debug panic / release slice panic).
+        // `usize::MAX` is the exact adversarial value from the audit finding.
+        let max = usize::MAX.to_string();
+        let line = format!("a LOGIN {{{max}}}x\r\n");
+        assert_eq!(tokenize(line.as_bytes()), Err(ParseError::BadLiteral));
+
+        // Near-boundary values around the actual buffer length must also stay fail-closed rather
+        // than over-read, and can never panic.
+        for n in [usize::MAX - 1, usize::MAX / 2, 1_000_000usize] {
+            let line = format!("a LOGIN {{{n}}}\r\n");
+            assert_eq!(tokenize(line.as_bytes()), Err(ParseError::BadLiteral), "n={n}");
+        }
+
+        // A literal advertising exactly the available bytes still parses (guard is not off-by-one).
+        let ok = tokenize(b"a LOGIN {2}\r\nhi\r\n").unwrap();
+        assert_eq!(ok[2], Token::Literal(b"hi".to_vec()));
     }
 
     #[test]

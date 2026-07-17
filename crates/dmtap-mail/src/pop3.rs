@@ -154,7 +154,9 @@ impl<S: MailStore, A: Authenticator> Pop3Session<S, A> {
             None => return "-ERR [AUTH] APOP not available for this user\r\n".into(),
         };
         let expected = hex(&md5(format!("{}{}", self.banner, secret).as_bytes()));
-        if expected == digest.to_ascii_lowercase() {
+        // Constant-time compare: `String ==` short-circuits on the first differing byte, leaking a
+        // timing oracle on this secret-derived digest (LOW-1). `ct_eq` folds the whole length.
+        if auth::ct_eq(expected.as_bytes(), digest.to_ascii_lowercase().as_bytes()) {
             match self.auth.verify(&name, &secret) {
                 Some(id) => self.login_ok(id),
                 None => "-ERR [AUTH] APOP failed\r\n".into(),
@@ -364,6 +366,23 @@ mod tests {
         let digest = hex(&md5(format!("{}pw", s.banner).as_bytes()));
         assert!(s.feed_line(&format!("APOP alice {digest}")).starts_with("+OK"));
         assert!(s.is_authenticated());
+    }
+
+    #[test]
+    fn apop_rejects_wrong_digest() {
+        // LOW-1 regression: a correct digest still authenticates (via the constant-time compare) and
+        // a wrong digest is rejected without authenticating. Uppercase-hex must still match, since
+        // the digest is lowercased before the compare.
+        let mut s = session();
+        let good = hex(&md5(format!("{}pw", s.banner).as_bytes()));
+        assert!(s.feed_line(&format!("APOP alice {}", good.to_ascii_uppercase())).starts_with("+OK"));
+        assert!(s.is_authenticated());
+
+        let mut s = session();
+        // Same length as a real MD5-hex digest, but wrong contents.
+        let bad = "0".repeat(good.len());
+        assert!(s.feed_line(&format!("APOP alice {bad}")).contains("digest mismatch"));
+        assert!(!s.is_authenticated());
     }
 
     #[test]
