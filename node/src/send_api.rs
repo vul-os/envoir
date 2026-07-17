@@ -339,7 +339,10 @@ pub async fn run_loop_with_send_api<T: Transport>(
 /// Read one HTTP/1.1 request off `stream` into an [`HttpRequest`], bounded by [`MAX_REQUEST_BYTES`].
 /// Returns `Ok(None)` on a cleanly-empty connection. Only the request line, `Authorization`, and
 /// `Content-Length` are interpreted — everything else is ignored (this is a JSON POST endpoint).
-async fn read_request(stream: &mut TcpStream) -> io::Result<Option<HttpRequest>> {
+///
+/// Shared with the node-native JMAP listener ([`crate::jmap_api`]): both surfaces speak the same
+/// framework-free HTTP/1.1 framing over the daemon's own `!Send` task.
+pub(crate) async fn read_request(stream: &mut TcpStream) -> io::Result<Option<HttpRequest>> {
     let mut buf: Vec<u8> = Vec::with_capacity(1024);
     let mut tmp = [0u8; 4096];
     let header_end = loop {

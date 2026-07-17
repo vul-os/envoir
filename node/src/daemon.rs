@@ -23,9 +23,11 @@
 //!   that live DNS is not yet wired, rather than silently pretending to resolve. The
 //!   `daemon_resolves_and_delivers_by_name` integration test drives the whole path against a live,
 //!   running node.
-//! - **Gap (JMAP, §8.1):** the node's live store already renders JMAP views via
-//!   [`dmtap_mail::jmap`], but a bound node-native JMAP listener is not yet served here — a
-//!   follow-up (the mesh + Send API are the node's wired network surfaces today).
+//! - **Real (JMAP, §8.1):** the node's native + only client-sync surface. [`serve`] binds a
+//!   node-native JMAP listener ([`crate::jmap_api`]) behind [`NodeConfig::jmap_enabled`], serving
+//!   [`dmtap_mail::jmap`] over the node's **live** MOTE store (so a client sees actual delivered
+//!   mail) with app-password auth (fail-closed). It binds **loopback** by default; an off-localhost
+//!   bind is refused fail-closed (JMAP terminates TLS on the node, spec §8.2 — front it with TLS).
 
 use std::future::Future;
 use std::time::Duration;
@@ -57,6 +59,11 @@ pub enum DaemonError {
     Bind(std::io::Error),
     /// Resuming the durable journal failed.
     Journal(JournalError),
+    /// The JMAP listener was configured to bind an off-localhost interface without TLS. JMAP
+    /// terminates TLS on the node (spec §8.2) and this listener speaks plain HTTP, so a non-loopback
+    /// bind is refused fail-closed — front it with a TLS reverse proxy (and point `ENVOIR_JMAP_BASE_URL`
+    /// at it), or keep the default loopback bind.
+    JmapInsecureBind(String),
 }
 
 impl std::fmt::Display for DaemonError {
@@ -68,6 +75,11 @@ impl std::fmt::Display for DaemonError {
             DaemonError::Keystore(e) => write!(f, "{e}"),
             DaemonError::Bind(e) => write!(f, "bind failed: {e}"),
             DaemonError::Journal(e) => write!(f, "journal resume failed: {e}"),
+            DaemonError::JmapInsecureBind(bind) => write!(
+                f,
+                "refusing to serve JMAP on non-loopback bind {bind} without TLS (spec §8.2): \
+                 bind loopback (default 127.0.0.1:4700) or front it with a TLS reverse proxy"
+            ),
         }
     }
 }
@@ -194,18 +206,20 @@ pub async fn serve(config: NodeConfig) -> Result<LoopStats, DaemonError> {
     );
     eprintln!("envoir-node: running — SIGINT/SIGTERM to stop");
 
-    let stats = if config.send_api_enabled {
-        // The Envoir Send HTTP API (spec §13.5.1). Owner identity = this node's identity (reloaded
-        // from the same keystore), so a capability-authorized send seals a MOTE authenticated as from
-        // this node and enters the node's real §20.1 outbound path. Runs on this same task (a `Node`
-        // is not `Send`), interleaved with the delivery/retry tick.
+    // The Envoir Send HTTP API (spec §13.5.1), opt-in. Owner identity = this node's identity
+    // (reloaded from the same keystore), so a capability-authorized send seals a MOTE authenticated
+    // as from this node and enters the node's real §20.1 outbound path.
+    let mut send_api = if config.send_api_enabled {
         let owner_ik = {
             let ks = Keystore::load(&config.keystore_path(), config.passphrase.as_deref())?;
             ks.identity_key()
         };
-        let mut api = crate::send_api::SendApi::new(owner_ik, config.send_admin_token.clone());
-        let listener =
-            tokio::net::TcpListener::bind(&config.send_api_bind).await.map_err(DaemonError::Bind)?;
+        Some(crate::send_api::SendApi::new(owner_ik, config.send_admin_token.clone()))
+    } else {
+        None
+    };
+    let send_listener = if config.send_api_enabled {
+        let l = tokio::net::TcpListener::bind(&config.send_api_bind).await.map_err(DaemonError::Bind)?;
         eprintln!(
             "envoir-node: Envoir Send HTTP API on {} — POST /v1/send (capability Bearer); \
              key-management {}",
@@ -216,17 +230,55 @@ pub async fn serve(config: NodeConfig) -> Result<LoopStats, DaemonError> {
                 "DISABLED (no ENVOIR_SEND_ADMIN_TOKEN)"
             }
         );
-        crate::send_api::run_loop_with_send_api(
-            &mut node,
-            &mut api,
-            listener,
-            config.tick,
-            shutdown_signal(),
-        )
-        .await
+        Some(l)
     } else {
-        run_loop(&mut node, config.tick, shutdown_signal()).await
+        None
     };
+
+    // The node-native JMAP listener (spec §8.1) — the native, and only, client-sync surface, opt-in.
+    // Backed by the node's LIVE store (a client sees actual delivered mail), app-password
+    // authenticated (fail-closed). Bound loopback by default; an off-localhost bind without TLS is
+    // refused fail-closed BEFORE binding (§8.2).
+    let jmap_api = if config.jmap_enabled {
+        if !config.jmap_bind_is_loopback() {
+            return Err(DaemonError::JmapInsecureBind(config.jmap_bind.clone()));
+        }
+        let account_id = config.jmap_account_id(&addr);
+        let base_url = config.jmap_base_url_resolved();
+        let app_passwords = config.jmap_app_passwords_resolved(&account_id);
+        if app_passwords.is_empty() {
+            eprintln!(
+                "envoir-node: WARNING — JMAP enabled with NO app-passwords \
+                 (ENVOIR_JMAP_APP_PASSWORDS); no client can authenticate (fail-closed)"
+            );
+        }
+        Some(crate::jmap_api::JmapApi::new(account_id, base_url, addr.clone(), &app_passwords))
+    } else {
+        None
+    };
+    let jmap_listener = if config.jmap_enabled {
+        let l = tokio::net::TcpListener::bind(&config.jmap_bind).await.map_err(DaemonError::Bind)?;
+        eprintln!(
+            "envoir-node: JMAP listener on {} (account {}) — Basic app-password auth; \
+             Session at /jmap/session, API at /jmap/api/",
+            config.jmap_bind,
+            jmap_api.as_ref().map(crate::jmap_api::JmapApi::account_id).unwrap_or("")
+        );
+        Some(l)
+    } else {
+        None
+    };
+
+    let stats = crate::jmap_api::run_loop_with_apis(
+        &mut node,
+        send_api.as_mut(),
+        send_listener,
+        jmap_api.as_ref(),
+        jmap_listener,
+        config.tick,
+        shutdown_signal(),
+    )
+    .await;
     eprintln!(
         "envoir-node: shutdown after {} tick(s); final checkpoint {}",
         stats.ticks,

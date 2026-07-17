@@ -34,6 +34,7 @@ pub mod daemon;
 pub mod deniable;
 pub mod group;
 pub mod inbound;
+pub mod jmap_api;
 pub mod journal;
 pub mod keystore;
 pub mod mixdir;
@@ -60,6 +61,10 @@ pub use keystore::{Keystore, KeystoreError};
 // The Envoir Send HTTP API (spec §13.5.1): the capability-token send service exposed over a bound
 // HTTP listener, routing capability-authorized sends into the node's real §20.1 outbound path.
 pub use send_api::{run_loop_with_send_api, SendApi};
+
+// The node-native JMAP listener (spec §8.1): the node's native + only client-sync surface, serving
+// `dmtap_mail::jmap` over the node's LIVE MOTE store with app-password auth (fail-closed).
+pub use jmap_api::{run_loop_with_apis, JmapApi, JmapResponse};
 
 // Real MLS group messaging (spec §5): the node wraps the workspace-shared `dmtap-mls` crate
 // (openmls / RFC 9420) and re-exports its group types here as `dmtap::groups` for callers.

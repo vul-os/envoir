@@ -21,6 +21,11 @@
 //! | `ENVOIR_SEND_API`      | `send_api_enabled` | `false` (opt-in) |
 //! | `ENVOIR_SEND_API_BIND` | `send_api_bind` | `0.0.0.0:4610`     |
 //! | `ENVOIR_SEND_ADMIN_TOKEN` | `send_admin_token` | *(none ⇒ key-management disabled)* |
+//! | `ENVOIR_JMAP`          | `jmap_enabled`  | `false` (opt-in)   |
+//! | `ENVOIR_JMAP_BIND`     | `jmap_bind`     | `127.0.0.1:4700` (localhost — off-localhost requires TLS) |
+//! | `ENVOIR_JMAP_APP_PASSWORDS` | `jmap_app_passwords` | *(empty ⇒ no client can authenticate, fail-closed)* |
+//! | `ENVOIR_JMAP_ACCOUNT`  | `jmap_account`  | *(first name, else base64url(ik))* |
+//! | `ENVOIR_JMAP_BASE_URL` | `jmap_base_url` | *(derived from `jmap_bind`)* |
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -32,6 +37,11 @@ const DEFAULT_NODE_BIND: &str = "0.0.0.0:4600";
 const PLACEHOLDER_KT: &str = "https://kt.invalid/log";
 /// The default bind for the Envoir Send HTTP API (`ENVOIR_SEND_API_BIND`) — off unless enabled.
 const DEFAULT_SEND_API_BIND: &str = "0.0.0.0:4610";
+/// The default bind for the node-native JMAP listener (`ENVOIR_JMAP_BIND`). **Loopback** by default:
+/// JMAP terminates TLS on the node (spec §8.2), and this listener speaks plain HTTP, so a native
+/// client on the same machine (a Tauri app) reaches it over `127.0.0.1`; any off-localhost bind
+/// requires a TLS front (enforced fail-closed in the daemon).
+const DEFAULT_JMAP_BIND: &str = "127.0.0.1:4700";
 
 /// Fully-resolved daemon configuration.
 #[derive(Debug, Clone)]
@@ -59,6 +69,23 @@ pub struct NodeConfig {
     /// management is **disabled** (fail-closed): only `/v1/send` is served, so a misconfigured
     /// deployment can never mint/rotate/revoke keys without an explicitly-set secret.
     pub send_admin_token: Option<String>,
+    /// Whether to serve the node-native JMAP listener (spec §8.1 — the node's native, and only,
+    /// client-sync surface). **Off by default** — opt-in via `ENVOIR_JMAP`.
+    pub jmap_enabled: bool,
+    /// `host:port` the JMAP listener binds when [`jmap_enabled`](Self::jmap_enabled). Defaults to
+    /// loopback; an off-localhost bind requires a TLS front (enforced fail-closed in the daemon).
+    pub jmap_bind: String,
+    /// App-passwords (spec §8.2) that authenticate a JMAP client, as `(username, secret)` pairs. An
+    /// **empty** list means no client can authenticate (fail-closed). Parsed from
+    /// `ENVOIR_JMAP_APP_PASSWORDS` as a comma-separated list of `user:secret` (a bare `secret`
+    /// binds to the account username).
+    pub jmap_app_passwords: Vec<(String, String)>,
+    /// The JMAP `accountId`/`username` this node presents. `None` ⇒ derived (first name, else the
+    /// base64url of the identity key).
+    pub jmap_account: Option<String>,
+    /// The externally-reachable base URL advertised in the JMAP Session resource (its `apiUrl` /
+    /// `downloadUrl` / … are built from it). `None` ⇒ derived from [`jmap_bind`](Self::jmap_bind).
+    pub jmap_base_url: Option<String>,
 }
 
 impl Default for NodeConfig {
@@ -74,6 +101,11 @@ impl Default for NodeConfig {
             send_api_enabled: false,
             send_api_bind: DEFAULT_SEND_API_BIND.to_string(),
             send_admin_token: None,
+            jmap_enabled: false,
+            jmap_bind: DEFAULT_JMAP_BIND.to_string(),
+            jmap_app_passwords: Vec::new(),
+            jmap_account: None,
+            jmap_base_url: None,
         }
     }
 }
@@ -121,6 +153,19 @@ impl NodeConfig {
             }
         }
         c.send_admin_token = std::env::var("ENVOIR_SEND_ADMIN_TOKEN").ok().filter(|s| !s.is_empty());
+        if let Ok(v) = std::env::var("ENVOIR_JMAP") {
+            c.jmap_enabled = matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on");
+        }
+        if let Ok(v) = std::env::var("ENVOIR_JMAP_BIND") {
+            if !v.is_empty() {
+                c.jmap_bind = v;
+            }
+        }
+        if let Ok(v) = std::env::var("ENVOIR_JMAP_APP_PASSWORDS") {
+            c.jmap_app_passwords = parse_app_passwords(&v);
+        }
+        c.jmap_account = std::env::var("ENVOIR_JMAP_ACCOUNT").ok().filter(|s| !s.is_empty());
+        c.jmap_base_url = std::env::var("ENVOIR_JMAP_BASE_URL").ok().filter(|s| !s.is_empty());
         c
     }
 
@@ -133,6 +178,72 @@ impl NodeConfig {
     pub fn journal_path(&self) -> PathBuf {
         self.data_dir.join("journal.json")
     }
+
+    /// Whether the JMAP bind host is a loopback address (`127.0.0.0/8`, `::1`, `localhost`). Only a
+    /// loopback bind is served over plain HTTP; an off-localhost bind requires a TLS front and is
+    /// refused fail-closed by the daemon (JMAP terminates TLS on the node, spec §8.2).
+    pub fn jmap_bind_is_loopback(&self) -> bool {
+        host_is_loopback(&self.jmap_bind)
+    }
+
+    /// The resolved JMAP `accountId`/`username` for this node: the configured account, else the
+    /// first claimed name, else the base64url of the identity public key (`ik_public`).
+    pub fn jmap_account_id(&self, ik_public: &[u8]) -> String {
+        if let Some(a) = self.jmap_account.as_ref().filter(|s| !s.is_empty()) {
+            return a.clone();
+        }
+        if let Some(n) = self.names.first().filter(|s| !s.is_empty()) {
+            return n.clone();
+        }
+        dmtap_naming::base64url::encode(ik_public)
+    }
+
+    /// The resolved JMAP Session base URL: the configured value, else `http://<jmap_bind>` (plain
+    /// HTTP is only ever used on loopback; an off-localhost deployment sets the TLS front's URL).
+    pub fn jmap_base_url_resolved(&self) -> String {
+        self.jmap_base_url.clone().unwrap_or_else(|| format!("http://{}", self.jmap_bind))
+    }
+
+    /// The JMAP app-passwords with any bare-secret entry's username resolved to `account_id`.
+    pub fn jmap_app_passwords_resolved(&self, account_id: &str) -> Vec<(String, String)> {
+        self.jmap_app_passwords
+            .iter()
+            .map(|(u, s)| {
+                let user = if u.is_empty() { account_id.to_string() } else { u.clone() };
+                (user, s.clone())
+            })
+            .collect()
+    }
+}
+
+/// Parse `ENVOIR_JMAP_APP_PASSWORDS`: a comma-separated list of `user:secret` (a bare `secret` has
+/// an empty username, later resolved to the account id). Empty entries are dropped.
+fn parse_app_passwords(v: &str) -> Vec<(String, String)> {
+    v.split(',')
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .map(|e| match e.split_once(':') {
+            Some((u, s)) => (u.trim().to_string(), s.to_string()),
+            None => (String::new(), e.to_string()),
+        })
+        .filter(|(_, s)| !s.is_empty())
+        .collect()
+}
+
+/// Whether `bind` names a loopback interface. Accepts `host:port` (`127.0.0.1:4700`,
+/// `[::1]:4700`, `localhost:4700`) and a bare host/IP (`::1`, `127.0.0.1`, `localhost`).
+fn host_is_loopback(bind: &str) -> bool {
+    // A full socket address (handles `127.0.0.1:80` and the bracketed `[::1]:80`).
+    if let Ok(sa) = bind.parse::<std::net::SocketAddr>() {
+        return sa.ip().is_loopback();
+    }
+    // A bare IP literal (`::1`, `127.0.0.1`).
+    if let Ok(ip) = bind.parse::<std::net::IpAddr>() {
+        return ip.is_loopback();
+    }
+    // A `host:port` (or bare host) with a non-IP host — only `localhost` is loopback.
+    let host = bind.rsplit_once(':').map(|(h, _)| h).unwrap_or(bind);
+    host.eq_ignore_ascii_case("localhost")
 }
 
 fn split_csv(v: &str) -> Vec<String> {
@@ -166,5 +277,65 @@ mod tests {
     fn csv_parsing_trims_and_drops_empties() {
         assert_eq!(split_csv("a, b ,,c"), vec!["a", "b", "c"]);
         assert!(split_csv("  ,  ").is_empty());
+    }
+
+    #[test]
+    fn jmap_is_off_by_default_and_binds_loopback() {
+        let c = NodeConfig::default();
+        // The JMAP surface is opt-in, and its default bind is loopback (no cleartext off-host).
+        assert!(!c.jmap_enabled);
+        assert_eq!(c.jmap_bind, "127.0.0.1:4700");
+        assert!(c.jmap_bind_is_loopback());
+        // No app-passwords by default ⇒ no client can authenticate (fail-closed).
+        assert!(c.jmap_app_passwords.is_empty());
+    }
+
+    #[test]
+    fn loopback_detection() {
+        assert!(host_is_loopback("127.0.0.1:4700"));
+        assert!(host_is_loopback("127.5.5.5:80"));
+        assert!(host_is_loopback("localhost:4700"));
+        assert!(host_is_loopback("[::1]:4700"));
+        assert!(host_is_loopback("::1"));
+        assert!(!host_is_loopback("0.0.0.0:4700"));
+        assert!(!host_is_loopback("192.168.1.9:4700"));
+        assert!(!host_is_loopback("example.com:4700"));
+    }
+
+    #[test]
+    fn app_password_parsing() {
+        // `user:secret`, bare `secret` (empty user), trims and drops empties.
+        let p = parse_app_passwords("alice@dmtap.local:s3cret, plainsecret ,, :dangling");
+        assert_eq!(
+            p,
+            vec![
+                ("alice@dmtap.local".to_string(), "s3cret".to_string()),
+                (String::new(), "plainsecret".to_string()),
+                (String::new(), "dangling".to_string()),
+            ]
+        );
+        // A bare secret resolves its username to the account id.
+        let c = NodeConfig { jmap_app_passwords: p, ..NodeConfig::default() };
+        let resolved = c.jmap_app_passwords_resolved("bob@dmtap.local");
+        assert_eq!(resolved[1], ("bob@dmtap.local".to_string(), "plainsecret".to_string()));
+        assert_eq!(resolved[0].0, "alice@dmtap.local");
+    }
+
+    #[test]
+    fn jmap_account_and_base_url_resolution() {
+        let mut c = NodeConfig::default();
+        // No name, no account ⇒ base64url(ik).
+        let ik = vec![1u8, 2, 3, 4];
+        assert_eq!(c.jmap_account_id(&ik), dmtap_naming::base64url::encode(&ik));
+        // A claimed name is used when no explicit account.
+        c.names = vec!["me@dmtap.local".to_string()];
+        assert_eq!(c.jmap_account_id(&ik), "me@dmtap.local");
+        // An explicit account wins.
+        c.jmap_account = Some("primary@dmtap.local".to_string());
+        assert_eq!(c.jmap_account_id(&ik), "primary@dmtap.local");
+        // Base URL derives from the bind unless set.
+        assert_eq!(c.jmap_base_url_resolved(), "http://127.0.0.1:4700");
+        c.jmap_base_url = Some("https://mail.example".to_string());
+        assert_eq!(c.jmap_base_url_resolved(), "https://mail.example");
     }
 }
