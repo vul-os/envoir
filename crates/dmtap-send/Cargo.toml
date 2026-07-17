@@ -1,0 +1,20 @@
+[package]
+name = "dmtap-send"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+description = "Envoir Send — a Resend-style programmatic mail-send API built on DMTAP capability tokens: an API key IS a scoped, rotatable, revocable UCAN-style capability (spec §13.5.1), and a send builds + seals a real MOTE to the resolved recipient (spec §2). A sovereign/private Resend."
+repository = "https://example.invalid/envoir"
+
+[dependencies]
+# The DMTAP core primitives: the capability token (§13.5/§18.7.3), the identity key (§1),
+# the MOTE object + HPKE sealing (§2), and content addressing (§2.2). All real crypto.
+dmtap-core = { path = "../dmtap-core" }
+# The thin HTTP surface (`POST /v1/send`) parses a JSON request body — no web framework.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# High-entropy API-key secret generation (OS CSPRNG) — same RNG family as dmtap-core.
+rand_core = { version = "0.6", features = ["getrandom"] }
+# Ergonomic error enums (already in the workspace lock via dmtap-core).
+thiserror = "1"

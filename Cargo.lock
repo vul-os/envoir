@@ -818,6 +818,17 @@ name = "dmtap-seam"
 version = "0.0.1"
 
 [[package]]
+name = "dmtap-send"
+version = "0.0.1"
+dependencies = [
+ "dmtap-core",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "downgrade-tests"
 version = "0.0.1"
 dependencies = [
