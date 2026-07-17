@@ -224,11 +224,7 @@ impl GatewayAliasMap {
     /// **expired** (TTL elapsed), or **burned** (explicitly revoked or already one-time-consumed).
     /// A successful resolve of a `one_time` row **burns** it, so a second resolve of the same
     /// one-time token is `Unmapped`.
-    pub fn resolve(
-        &mut self,
-        alias: &str,
-        now_ms: u64,
-    ) -> Result<AliasTarget, GatewayAliasError> {
+    pub fn resolve(&mut self, alias: &str, now_ms: u64) -> Result<AliasTarget, GatewayAliasError> {
         let row = self.rows.get_mut(alias).ok_or(GatewayAliasError::Unmapped)?;
         if row.burned || row.is_expired(now_ms) {
             return Err(GatewayAliasError::Unmapped);
@@ -405,8 +401,13 @@ mod tests {
     #[test]
     fn correspondent_scope_is_recorded_and_hidden_when_dead() {
         let mut map = GatewayAliasMap::new();
-        let alias =
-            map.mint_with(native("imran", "mydomain.com"), Some("bob@gmail.com".into()), None, false, 0);
+        let alias = map.mint_with(
+            native("imran", "mydomain.com"),
+            Some("bob@gmail.com".into()),
+            None,
+            false,
+            0,
+        );
         assert_eq!(map.correspondent_of(&alias, 0), Some("bob@gmail.com"));
         // Once burned, the scope is no longer surfaced (row is dead).
         map.burn(&alias);

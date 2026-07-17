@@ -37,9 +37,7 @@ use std::sync::{Arc, Mutex};
 use dmtap_core::identity::verify_domain;
 use dmtap_core::{ContentId, TimestampMs};
 
-use crate::provenance::{
-    AuthzDecision, BridgeDirection, GatewayAuthz, GatewayMeter, MeterEvent,
-};
+use crate::provenance::{AuthzDecision, BridgeDirection, GatewayAuthz, GatewayMeter, MeterEvent};
 
 // ── Authorization modes (§7.9, §12.2) ─────────────────────────────────────────────────────────
 
@@ -48,19 +46,14 @@ use crate::provenance::{
 /// The default is [`AuthzMode::KeyRegistered`]. **[`AuthzMode::OpenPublic`] is a spam magnet**: an
 /// open outbound relay is what gets a gateway's IP blacklisted and an open inbound relay drowns its
 /// recipients — run it only on a trusted, firewalled network segment, never on the public internet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AuthzMode {
     /// Anyone may relay — no key proof required. A documented spam risk; not the default.
     OpenPublic,
     /// A sender must prove control of a **registered** DMTAP key (challenge–response) to be admitted.
     /// The safe default.
+    #[default]
     KeyRegistered,
-}
-
-impl Default for AuthzMode {
-    fn default() -> Self {
-        AuthzMode::KeyRegistered
-    }
 }
 
 // ── Challenge–response admission (§9, DMTAP-Auth style) ────────────────────────────────────────
@@ -301,8 +294,11 @@ impl IdentityRegistry {
         // window by presenting a later timestamp. When we have no record (a never-issued nonce) we
         // fall back to the presented value so the request still flows to the single-use consume gate
         // below, which rejects it fail-closed rather than silently admitting it.
-        let effective_issued_at = self.peek_issued_at(&challenge.nonce).unwrap_or(challenge.issued_at);
-        if now < effective_issued_at || now.saturating_sub(effective_issued_at) > self.challenge_ttl_ms {
+        let effective_issued_at =
+            self.peek_issued_at(&challenge.nonce).unwrap_or(challenge.issued_at);
+        if now < effective_issued_at
+            || now.saturating_sub(effective_issued_at) > self.challenge_ttl_ms
+        {
             return Err(AdmissionError::ChallengeExpired);
         }
         // Proof of key control: the signature MUST verify under the presented key. A forged answer
@@ -380,7 +376,12 @@ pub struct Quota {
 
 impl Quota {
     /// A message-count + byte quota with matching free/cap on each axis.
-    pub fn new(free_messages: u64, hard_cap_messages: u64, free_bytes: u64, hard_cap_bytes: u64) -> Self {
+    pub fn new(
+        free_messages: u64,
+        hard_cap_messages: u64,
+        free_bytes: u64,
+        hard_cap_bytes: u64,
+    ) -> Self {
         Quota { free_messages, hard_cap_messages, free_bytes, hard_cap_bytes }
     }
 
@@ -467,7 +468,10 @@ impl QuotaLedger {
 
         let next_messages = cur.messages.saturating_add(1);
         if quota.hard_cap_messages != 0 && next_messages > quota.hard_cap_messages {
-            return Err(QuotaError::MessageCapExceeded(account.to_string(), quota.hard_cap_messages));
+            return Err(QuotaError::MessageCapExceeded(
+                account.to_string(),
+                quota.hard_cap_messages,
+            ));
         }
         let next_bytes = cur.bytes.saturating_add(msg_bytes);
         if quota.hard_cap_bytes != 0 && next_bytes > quota.hard_cap_bytes {
@@ -579,7 +583,9 @@ pub enum AliasError {
     /// Rule 3 (RESERVED-PREFIX / auto-derived namespace): the local-part would shadow or parse as an
     /// auto-derived alias — it begins with [`RESERVED_ALIAS_PREFIX`] or matches the `k<base32>`
     /// key-derived shape ([`is_key_derived_form`]).
-    #[error("vanity local-part {0:?} collides with the reserved auto-derived (key-derived) namespace")]
+    #[error(
+        "vanity local-part {0:?} collides with the reserved auto-derived (key-derived) namespace"
+    )]
     ReservedCollision(String),
     /// Rule 5 (NETWORK-NAME non-shadow): the local-part is already claimed by one of the operator's
     /// own directory identities on this same gateway domain, so a vanity may not shadow the real
@@ -889,14 +895,14 @@ mod tests {
     #[test]
     fn admission_challenge_expiry_is_enforced_fail_closed() {
         let alice = IdentityKey::generate();
-        let reg = IdentityRegistry::key_registered()
-            .with_challenge_ttl(60_000)
-            .register(RegisteredIdentity {
+        let reg = IdentityRegistry::key_registered().with_challenge_ttl(60_000).register(
+            RegisteredIdentity {
                 public_key: alice.public(),
                 account: "a".into(),
                 domain: "a.net".into(),
                 quota: Quota::messages(10, 10),
-            });
+            },
+        );
         let ch = reg.issue_challenge([1u8; 32], 1_000_000);
         let sig = signed_answer(&alice, &ch);
 
@@ -1043,7 +1049,10 @@ mod tests {
         // Even open-public still requires a real proof of key control (forgery rejected).
         let evil = IdentityKey::generate();
         let forged = signed_answer(&evil, &ch);
-        assert_eq!(reg.admit(&ch, &bob.public(), &forged, 5_050), Err(AdmissionError::BadSignature));
+        assert_eq!(
+            reg.admit(&ch, &bob.public(), &forged, 5_050),
+            Err(AdmissionError::BadSignature)
+        );
     }
 
     #[test]
@@ -1085,7 +1094,8 @@ mod tests {
         assert_eq!(meter.count(), 2);
 
         // The third charge is AT the cap → refused fail-closed, usage NOT advanced, NOT metered.
-        let denied = ledger.charge_and_meter("acct", "x.net", BridgeDirection::Outbound, rfc, 5, &meter);
+        let denied =
+            ledger.charge_and_meter("acct", "x.net", BridgeDirection::Outbound, rfc, 5, &meter);
         assert_eq!(denied, Err(QuotaError::MessageCapExceeded("acct".into(), 2)));
         assert_eq!(ledger.usage("acct").messages, 2, "refused charge did not advance usage");
         assert_eq!(meter.count(), 2, "refused charge did not meter");
@@ -1096,9 +1106,11 @@ mod tests {
         let meter = CountingMeter::new();
         let ledger = QuotaLedger::new().set_quota("acct", Quota::new(100, 100, 50, 100));
         // 60 bytes is fine; another 60 would exceed the 100-byte cap → refused, nothing metered.
-        ledger.charge_and_meter("acct", "d", BridgeDirection::Inbound, &vec![0u8; 60], 1, &meter).unwrap();
+        ledger
+            .charge_and_meter("acct", "d", BridgeDirection::Inbound, &[0u8; 60], 1, &meter)
+            .unwrap();
         let denied =
-            ledger.charge_and_meter("acct", "d", BridgeDirection::Inbound, &vec![0u8; 60], 2, &meter);
+            ledger.charge_and_meter("acct", "d", BridgeDirection::Inbound, &[0u8; 60], 2, &meter);
         assert_eq!(denied, Err(QuotaError::VolumeCapExceeded("acct".into(), 100)));
         assert_eq!(meter.count(), 1);
     }
@@ -1107,10 +1119,7 @@ mod tests {
     fn unregistered_account_is_denied_a_charge_fail_closed() {
         let meter = NullMeterDouble;
         let ledger = QuotaLedger::new();
-        assert_eq!(
-            ledger.try_charge("nobody", 1),
-            Err(QuotaError::Unregistered("nobody".into()))
-        );
+        assert_eq!(ledger.try_charge("nobody", 1), Err(QuotaError::Unregistered("nobody".into())));
         // And through the meter path it still refuses and never meters.
         assert!(ledger
             .charge_and_meter("nobody", "d", BridgeDirection::Outbound, b"x", 0, &meter)
@@ -1163,7 +1172,11 @@ mod tests {
 
         // allocate_vanity returns the FQ address, not a bare handle.
         let fq = alloc.allocate_vanity(&k.public(), "Alice").unwrap();
-        assert_eq!(fq, format!("alice@{GW}"), "the stored/returned form is fully-qualified (lowercased)");
+        assert_eq!(
+            fq,
+            format!("alice@{GW}"),
+            "the stored/returned form is fully-qualified (lowercased)"
+        );
         // alias_for presents the FQ vanity.
         assert_eq!(alloc.alias_for(&k.public()), format!("alice@{GW}"));
 
@@ -1205,7 +1218,10 @@ mod tests {
             );
         }
         // And nothing was silently allocated as a side effect.
-        assert_eq!(alloc.alias_for(&k.public()), format!("{}@{GW}", key_derived_localpart(&k.public())));
+        assert_eq!(
+            alloc.alias_for(&k.public()),
+            format!("{}@{GW}", key_derived_localpart(&k.public()))
+        );
     }
 
     // ── Rule 3: reserved-prefix / auto-derived namespace guard ───────────────────────────────────
@@ -1256,7 +1272,10 @@ mod tests {
         // Re-allocating the same name to the SAME key is idempotent and returns the FQ form.
         assert_eq!(alloc.allocate_vanity(&a.public(), "team").unwrap(), format!("team@{GW}"));
         // The name still resolves to the first-comer, not the challenger.
-        assert_eq!(alloc.resolve(&format!("team@{GW}"), &[a.public(), b.public()]), Some(a.public()));
+        assert_eq!(
+            alloc.resolve(&format!("team@{GW}"), &[a.public(), b.public()]),
+            Some(a.public())
+        );
     }
 
     #[test]
@@ -1272,12 +1291,18 @@ mod tests {
         // a releases (revokes) the registration — the freed FQ name is returned.
         assert_eq!(alloc.release_vanity(&a.public()), Some(format!("team@{GW}")));
         // a now falls back to its key-derived default; the vanity no longer resolves to anyone until reclaimed.
-        assert_eq!(alloc.alias_for(&a.public()), format!("{}@{GW}", key_derived_localpart(&a.public())));
+        assert_eq!(
+            alloc.alias_for(&a.public()),
+            format!("{}@{GW}", key_derived_localpart(&a.public()))
+        );
         assert_eq!(alloc.resolve(&format!("team@{GW}"), &[a.public(), b.public()]), None);
 
         // Now b can claim the freed name ("yours only as long as you hold the registration").
         assert_eq!(alloc.allocate_vanity(&b.public(), "team").unwrap(), format!("team@{GW}"));
-        assert_eq!(alloc.resolve(&format!("team@{GW}"), &[a.public(), b.public()]), Some(b.public()));
+        assert_eq!(
+            alloc.resolve(&format!("team@{GW}"), &[a.public(), b.public()]),
+            Some(b.public())
+        );
 
         // Releasing a key that holds no vanity is a no-op.
         let c = IdentityKey::generate();
@@ -1307,7 +1332,10 @@ mod tests {
             Err(AliasError::ShadowsDirectoryIdentity(_))
         ));
         // A non-colliding vanity is still fine.
-        assert_eq!(alloc.allocate_vanity(&a.public(), "founderx").unwrap(), format!("founderx@{GW}"));
+        assert_eq!(
+            alloc.allocate_vanity(&a.public(), "founderx").unwrap(),
+            format!("founderx@{GW}")
+        );
     }
 
     #[test]
@@ -1337,23 +1365,29 @@ mod tests {
         let mut alloc = AliasAllocator::for_domain(GW).unwrap();
         let long = "a".repeat(65);
         for bad in [
-            "",            // empty
-            " ",           // whitespace only
-            "with space",  // embedded whitespace
+            "",              // empty
+            " ",             // whitespace only
+            "with space",    // embedded whitespace
             "line\r\nbreak", // CRLF injection
-            "nul\0byte",   // NUL
-            "tab\tchar",   // control
-            "bad!name",    // out-of-charset punctuation
-            "emoji😀",     // non-ASCII
-            long.as_str(), // over the 64-octet cap
+            "nul\0byte",     // NUL
+            "tab\tchar",     // control
+            "bad!name",      // out-of-charset punctuation
+            "emoji😀",       // non-ASCII
+            long.as_str(),   // over the 64-octet cap
         ] {
             assert!(
-                matches!(alloc.allocate_vanity(&k.public(), bad), Err(AliasError::InvalidLocalPart(_))),
+                matches!(
+                    alloc.allocate_vanity(&k.public(), bad),
+                    Err(AliasError::InvalidLocalPart(_))
+                ),
                 "hygiene must reject {bad:?}"
             );
         }
         // A clean dot-free dot-atom is accepted (letters/digits/-/_/+).
-        assert_eq!(alloc.allocate_vanity(&k.public(), "user_name-01+tag").unwrap(), format!("user_name-01+tag@{GW}"));
+        assert_eq!(
+            alloc.allocate_vanity(&k.public(), "user_name-01+tag").unwrap(),
+            format!("user_name-01+tag@{GW}")
+        );
     }
 
     #[test]

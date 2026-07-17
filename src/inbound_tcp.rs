@@ -55,7 +55,10 @@ pub struct MxListener {
 impl MxListener {
     /// Bind an MX listener. `tls = Some(cfg)` advertises and terminates STARTTLS; `None` is a
     /// plaintext dev listener (no STARTTLS offered).
-    pub fn bind(addr: impl std::net::ToSocketAddrs, tls: Option<Arc<ServerConfig>>) -> io::Result<Self> {
+    pub fn bind(
+        addr: impl std::net::ToSocketAddrs,
+        tls: Option<Arc<ServerConfig>>,
+    ) -> io::Result<Self> {
         Ok(MxListener { listener: TcpListener::bind(addr)?, tls })
     }
 
@@ -163,12 +166,8 @@ fn handle_connection(
     let mut in_data = false;
     let mut secured = false;
 
-    loop {
-        let line = match read_line(&mut conn)? {
-            Some(l) => l,
-            None => break, // peer disconnected
-        };
-
+    // `read_line` yields `None` on peer disconnect, which ends the session.
+    while let Some(line) = read_line(&mut conn)? {
         if in_data {
             // Everything is message content until the terminating '.'; feed straight through.
             let reply = session.feed_line(&line);
@@ -201,7 +200,10 @@ fn handle_connection(
                     write_all(&mut conn, &SmtpReply::new(503, "5.5.1 already secured").wire())?;
                 }
                 (None, _) => {
-                    write_all(&mut conn, &SmtpReply::new(502, "5.5.1 STARTTLS not available").wire())?;
+                    write_all(
+                        &mut conn,
+                        &SmtpReply::new(502, "5.5.1 STARTTLS not available").wire(),
+                    )?;
                 }
             },
             "QUIT" => {
@@ -241,11 +243,10 @@ impl ServerStream {
             ServerStream::Plain(t) => t,
             other => {
                 *self = other;
-                return Err(io::Error::new(io::ErrorKind::Other, "already TLS"));
+                return Err(io::Error::other("already TLS"));
             }
         };
-        let conn =
-            ServerConnection::new(config).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let conn = ServerConnection::new(config).map_err(io::Error::other)?;
         let mut tls = StreamOwned::new(conn, tcp);
         tls.conn.complete_io(&mut tls.sock)?;
         *self = ServerStream::Tls(Box::new(tls));
@@ -258,7 +259,7 @@ impl Read for ServerStream {
         match self {
             ServerStream::Plain(t) => t.read(buf),
             ServerStream::Tls(s) => s.read(buf),
-            ServerStream::Taken => Err(io::Error::new(io::ErrorKind::Other, "stream in transition")),
+            ServerStream::Taken => Err(io::Error::other("stream in transition")),
         }
     }
 }
@@ -267,7 +268,7 @@ impl Write for ServerStream {
         match self {
             ServerStream::Plain(t) => t.write(buf),
             ServerStream::Tls(s) => s.write(buf),
-            ServerStream::Taken => Err(io::Error::new(io::ErrorKind::Other, "stream in transition")),
+            ServerStream::Taken => Err(io::Error::other("stream in transition")),
         }
     }
     fn flush(&mut self) -> io::Result<()> {

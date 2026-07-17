@@ -4,8 +4,15 @@ The **optional** legacy bridge between DMTAP and the SMTP world — and it can b
 your own email**. The only component that speaks SMTP and the only one not content-blind (the legacy
 leg is unavoidably plaintext).
 
-See the DMTAP spec repo, [`../dmtap/07-gateway.md`](../dmtap/07-gateway.md) (normative). A node with no legacy
-correspondents never uses a gateway; at full DMTAP adoption it is unnecessary.
+This is the **standalone** gateway repository, split out of the `env-oir/envoir` monorepo (see
+[`SEPARATION.md`](SEPARATION.md) for the split rationale). It builds on its own: the two shared
+libraries it needs, `dmtap-core` and `dmtap-mail`, are pinned as git-tag dependencies of the monorepo
+(both to the **same** tag — see [`Cargo.toml`](Cargo.toml)), so there is no circular dependency and no
+sibling-path checkout required.
+
+See the normative DMTAP spec, §7 "Gateway", in the spec repo:
+[`env-oir/dmtap` → `07-gateway.md`](https://github.com/env-oir/dmtap/blob/main/07-gateway.md). A node
+with no legacy correspondents never uses a gateway; at full DMTAP adoption it is unnecessary.
 
 ## Quickstart — a personal gateway for your own domain (2 commands)
 
@@ -29,7 +36,7 @@ retries — never a silent drop).
 Prefer containers?
 
 ```sh
-cd gateway
+# from this repo root:
 mkdir -p config && cp examples/personal.toml examples/recipients.directory config/   # then edit them
 docker compose up --build
 ```
@@ -133,5 +140,28 @@ Both `personal` and `run` are **real long-running daemons** that bind the MX lis
 
 ## Repo split
 
-This component is intended to become its own `envoir-gateway` repository. The precise, mechanical
-extraction runbook (and the precondition that must hold first) lives in [`SEPARATION.md`](SEPARATION.md).
+This is the split-out `envoir-gateway` repository. It was extracted from the `env-oir/envoir`
+monorepo; the mechanical extraction runbook and the precondition that had to hold first (a published
+monorepo tag for the shared crates) are recorded in [`SEPARATION.md`](SEPARATION.md) for history. The
+gateway now depends on `dmtap-core` / `dmtap-mail` via a git tag rather than sibling path deps.
+
+## Build & test
+
+```sh
+cargo build            # fetches the git-tag dmtap-core / dmtap-mail deps, then builds
+cargo test             # ~220 tests, all in-process (no sockets, no network)
+```
+
+If your environment restricts anonymous git fetches, set `CARGO_NET_GIT_FETCH_WITH_CLI=true` so cargo
+uses the git CLI (the monorepo is public, so plain https works).
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([`LICENSE-APACHE`](LICENSE-APACHE))
+- MIT license ([`LICENSE-MIT`](LICENSE-MIT))
+
+at your option. Unless you explicitly state otherwise, any contribution intentionally submitted for
+inclusion in this crate by you, as defined in the Apache-2.0 license, shall be dual licensed as above,
+without any additional terms or conditions.

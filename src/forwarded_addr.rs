@@ -216,8 +216,7 @@ fn is_valid_local(lp: &str) -> bool {
     {
         return false;
     }
-    lp.bytes()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'-' | b'_' | b'+'))
+    lp.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'-' | b'_' | b'+'))
 }
 
 /// A conservative RFC 1035 / RFC 5321 domain check: one or more dot-separated labels, each 1..=63
@@ -324,8 +323,16 @@ mod tests {
             for d in domains {
                 let enc = encode(l, d).expect("valid pair encodes");
                 let (dl, dd) = decode(&enc).expect("encoded form decodes");
-                assert_eq!(dl, l.to_ascii_lowercase(), "local mismatch for ({l:?},{d:?}) enc={enc:?}");
-                assert_eq!(dd, d.to_ascii_lowercase(), "domain mismatch for ({l:?},{d:?}) enc={enc:?}");
+                assert_eq!(
+                    dl,
+                    l.to_ascii_lowercase(),
+                    "local mismatch for ({l:?},{d:?}) enc={enc:?}"
+                );
+                assert_eq!(
+                    dd,
+                    d.to_ascii_lowercase(),
+                    "domain mismatch for ({l:?},{d:?}) enc={enc:?}"
+                );
                 // The encoded form must be a legal SMTP local-part length.
                 assert!(enc.len() <= MAX_LOCALPART_LEN);
             }
@@ -361,7 +368,10 @@ mod tests {
                 let enc = encode(l, d).unwrap();
                 let pair = (l.to_ascii_lowercase(), d.to_ascii_lowercase());
                 if let Some(prev) = seen.insert(enc.clone(), pair.clone()) {
-                    assert_eq!(prev, pair, "distinct pairs {prev:?} and {pair:?} collided to {enc:?}");
+                    assert_eq!(
+                        prev, pair,
+                        "distinct pairs {prev:?} and {pair:?} collided to {enc:?}"
+                    );
                 }
             }
         }
@@ -378,7 +388,11 @@ mod tests {
             let want = (local.to_ascii_lowercase(), domain.to_ascii_lowercase());
             // Decode still yields the lowercased pair no matter how the wire case-folded it.
             for folded in case_variants(&enc) {
-                assert_eq!(decode(&folded), Some(want.clone()), "case variant {folded:?} must decode");
+                assert_eq!(
+                    decode(&folded),
+                    Some(want.clone()),
+                    "case variant {folded:?} must decode"
+                );
             }
         }
     }
@@ -418,15 +432,24 @@ mod tests {
         // Local-part failures.
         assert!(matches!(encode("", "example.com"), Err(ForwardedAddrError::InvalidLocal(_))));
         assert!(matches!(encode(".lead", "example.com"), Err(ForwardedAddrError::InvalidLocal(_))));
-        assert!(matches!(encode("trail.", "example.com"), Err(ForwardedAddrError::InvalidLocal(_))));
+        assert!(matches!(
+            encode("trail.", "example.com"),
+            Err(ForwardedAddrError::InvalidLocal(_))
+        ));
         assert!(matches!(encode("a..b", "example.com"), Err(ForwardedAddrError::InvalidLocal(_))));
-        assert!(matches!(encode("bad space", "example.com"), Err(ForwardedAddrError::InvalidLocal(_))));
+        assert!(matches!(
+            encode("bad space", "example.com"),
+            Err(ForwardedAddrError::InvalidLocal(_))
+        ));
         // Domain failures.
         assert!(matches!(encode("a", ""), Err(ForwardedAddrError::InvalidDomain(_))));
         assert!(matches!(encode("a", "example..com"), Err(ForwardedAddrError::InvalidDomain(_))));
         assert!(matches!(encode("a", "-lead.com"), Err(ForwardedAddrError::InvalidDomain(_))));
         assert!(matches!(encode("a", "trail-.com"), Err(ForwardedAddrError::InvalidDomain(_))));
-        assert!(matches!(encode("a", "under_score.com"), Err(ForwardedAddrError::InvalidDomain(_))));
+        assert!(matches!(
+            encode("a", "under_score.com"),
+            Err(ForwardedAddrError::InvalidDomain(_))
+        ));
     }
 
     #[test]

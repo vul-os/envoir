@@ -42,10 +42,8 @@ impl InMemoryMxResolver {
 
     /// Publish MX records for `domain` (order given does not matter; `resolve_mx` sorts).
     pub fn with_mx(mut self, domain: &str, hosts: &[(&str, u16)]) -> Self {
-        let entries = hosts
-            .iter()
-            .map(|(h, p)| MxHost { host: (*h).to_string(), preference: *p })
-            .collect();
+        let entries =
+            hosts.iter().map(|(h, p)| MxHost { host: (*h).to_string(), preference: *p }).collect();
         self.records.insert(domain.to_ascii_lowercase(), entries);
         self
     }
@@ -123,7 +121,11 @@ mod tests {
     fn multi_mx_preference_order_lowest_first() {
         let resolver = InMemoryMxResolver::new().with_mx(
             "example.org",
-            &[("mx-backup.example.org", 20), ("mx-primary.example.org", 10), ("mx-tertiary.example.org", 30)],
+            &[
+                ("mx-backup.example.org", 20),
+                ("mx-primary.example.org", 10),
+                ("mx-tertiary.example.org", 30),
+            ],
         );
         let hosts = resolver.resolve_mx("example.org");
         assert_eq!(
@@ -159,7 +161,8 @@ mod tests {
 
     #[test]
     fn a_lone_mx_record_still_resolves() {
-        let resolver = InMemoryMxResolver::new().with_mx("single.example", &[("mx1.single.example", 5)]);
+        let resolver =
+            InMemoryMxResolver::new().with_mx("single.example", &[("mx1.single.example", 5)]);
         assert_eq!(
             resolver.resolve_mx("single.example"),
             vec![MxHost { host: "mx1.single.example".into(), preference: 5 }]

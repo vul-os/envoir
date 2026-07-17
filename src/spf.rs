@@ -91,6 +91,10 @@ impl SpfOutcome {
 /// [`DnsSpfResolver`] is the real DNS-backed implementation. See the module docs for why lookup
 /// failure (`Err`) is distinguished from NODATA (`Ok(vec![])`) here, unlike this crate's other
 /// resolver traits.
+// The `()` error is deliberate: a resolution failure here carries no detail the SPF evaluator
+// acts on — it maps uniformly to `SpfResult::TempError` — and is intentionally distinct from
+// NODATA (`Ok(vec![])`). See the module docs. So the unit error is by design, not laziness.
+#[allow(clippy::result_unit_err)]
 pub trait SpfResolver {
     /// TXT records for `name` (RFC 7208 §3: candidates are filtered to `v=spf1` records by the
     /// caller). `Err` is a genuine resolution failure (timeout, SERVFAIL, malformed reply).
@@ -182,7 +186,12 @@ impl SpfResolver for DnsSpfResolver {
     }
     fn lookup_a(&self, name: &str) -> Result<Vec<Ipv4Addr>, ()> {
         let msg = self.client.query(name, TYPE_A).map_err(|_| ())?;
-        Ok(msg.answers.iter().filter(|rr| rr.rtype == TYPE_A).filter_map(dns::parse_a_rdata).collect())
+        Ok(msg
+            .answers
+            .iter()
+            .filter(|rr| rr.rtype == TYPE_A)
+            .filter_map(dns::parse_a_rdata)
+            .collect())
     }
     fn lookup_mx(&self, name: &str) -> Result<Vec<String>, ()> {
         let (packet, msg) = self.client.query_raw(name, TYPE_MX).map_err(|_| ())?;
@@ -291,7 +300,7 @@ fn parse_mechanism(s: &str) -> Result<Mechanism, ()> {
     if s.is_empty() {
         return Err(());
     }
-    let split_at = s.find(|c| c == ':' || c == '/').unwrap_or(s.len());
+    let split_at = s.find([':', '/']).unwrap_or(s.len());
     let keyword = &s[..split_at];
     let rest = &s[split_at..];
     match keyword.to_ascii_lowercase().as_str() {
@@ -458,7 +467,9 @@ fn is_spf1_record(t: &str) -> bool {
 fn mechanism_has_macro(m: &Mechanism) -> bool {
     match m {
         Mechanism::Include(d) | Mechanism::Exists(d) => d.contains('%'),
-        Mechanism::A { domain: Some(d), .. } | Mechanism::Mx { domain: Some(d), .. } => d.contains('%'),
+        Mechanism::A { domain: Some(d), .. } | Mechanism::Mx { domain: Some(d), .. } => {
+            d.contains('%')
+        }
         _ => false,
     }
 }
@@ -565,11 +576,15 @@ impl<'r> Evaluator<'r> {
                 }
                 match self.check_host(target, ip, sender, depth + 1) {
                     SpfResult::Pass => MechOutcome::Match,
-                    SpfResult::Fail | SpfResult::SoftFail | SpfResult::Neutral => MechOutcome::NoMatch,
+                    SpfResult::Fail | SpfResult::SoftFail | SpfResult::Neutral => {
+                        MechOutcome::NoMatch
+                    }
                     SpfResult::TempError => MechOutcome::Abort(SpfResult::TempError),
                     // RFC 7208 §5.2: an included domain with no record ("None") is itself a syntax
                     // problem for the including record — treated as PermError, never silently skipped.
-                    SpfResult::None | SpfResult::PermError => MechOutcome::Abort(SpfResult::PermError),
+                    SpfResult::None | SpfResult::PermError => {
+                        MechOutcome::Abort(SpfResult::PermError)
+                    }
                 }
             }
             Mechanism::Ip4 { net, cidr } => match ip {
@@ -749,9 +764,16 @@ mod tests {
 
     #[test]
     fn ip4_mechanism_pass_and_implicit_neutral() {
-        let r = InMemorySpfResolver::new().with_txt("example.org", &["v=spf1 ip4:203.0.113.0/24 -all"]);
-        assert_eq!(check_host(&r, v4("203.0.113.9"), "example.org", "a@example.org"), SpfResult::Pass);
-        assert_eq!(check_host(&r, v4("198.51.100.9"), "example.org", "a@example.org"), SpfResult::Fail);
+        let r =
+            InMemorySpfResolver::new().with_txt("example.org", &["v=spf1 ip4:203.0.113.0/24 -all"]);
+        assert_eq!(
+            check_host(&r, v4("203.0.113.9"), "example.org", "a@example.org"),
+            SpfResult::Pass
+        );
+        assert_eq!(
+            check_host(&r, v4("198.51.100.9"), "example.org", "a@example.org"),
+            SpfResult::Fail
+        );
     }
 
     #[test]
@@ -774,8 +796,7 @@ mod tests {
 
     #[test]
     fn multiple_spf_records_is_permerror() {
-        let r = InMemorySpfResolver::new()
-            .with_txt("dup.example", &["v=spf1 -all", "v=spf1 +all"]);
+        let r = InMemorySpfResolver::new().with_txt("dup.example", &["v=spf1 -all", "v=spf1 +all"]);
         assert_eq!(check_host(&r, v4("1.2.3.4"), "dup.example", "a@x"), SpfResult::PermError);
     }
 
@@ -807,7 +828,8 @@ mod tests {
         assert_eq!(check_host(&r, v4("9.9.9.9"), "top.example", "a@x"), SpfResult::Fail);
 
         // Included domain publishes no record at all → PermError (RFC 7208 §5.2), not silently NoMatch.
-        let r2 = InMemorySpfResolver::new().with_txt("top2.example", &["v=spf1 include:ghost.example -all"]);
+        let r2 = InMemorySpfResolver::new()
+            .with_txt("top2.example", &["v=spf1 include:ghost.example -all"]);
         assert_eq!(check_host(&r2, v4("1.1.1.1"), "top2.example", "a@x"), SpfResult::PermError);
     }
 
@@ -842,7 +864,8 @@ mod tests {
 
     #[test]
     fn ip6_mechanism_matches_ipv6_senders_directly_no_dns() {
-        let r = InMemorySpfResolver::new().with_txt("v6.example", &["v=spf1 ip6:2001:db8::/32 -all"]);
+        let r =
+            InMemorySpfResolver::new().with_txt("v6.example", &["v=spf1 ip6:2001:db8::/32 -all"]);
         assert_eq!(check_host(&r, v6("2001:db8::9"), "v6.example", "a@x"), SpfResult::Pass);
         assert_eq!(check_host(&r, v6("2001:dead::9"), "v6.example", "a@x"), SpfResult::Fail);
     }
@@ -853,7 +876,8 @@ mod tests {
             .with_txt("ex.example", &["v=spf1 exists:gate.ex.example -all"])
             .with_a("gate.ex.example", &[Ipv4Addr::new(1, 2, 3, 4)]);
         assert_eq!(check_host(&r, v4("9.9.9.9"), "ex.example", "a@x"), SpfResult::Pass);
-        let r2 = InMemorySpfResolver::new().with_txt("ex2.example", &["v=spf1 exists:missing.example -all"]);
+        let r2 = InMemorySpfResolver::new()
+            .with_txt("ex2.example", &["v=spf1 exists:missing.example -all"]);
         assert_eq!(check_host(&r2, v4("9.9.9.9"), "ex2.example", "a@x"), SpfResult::Fail);
     }
 
@@ -890,7 +914,8 @@ mod tests {
     fn exceeding_the_lookup_budget_is_permerror_not_infinite_recursion() {
         // A record that includes itself would recurse forever without a guard; the shared lookup
         // budget (and the depth guard) must terminate it as PermError, never hang or panic.
-        let r = InMemorySpfResolver::new().with_txt("cyclic.example", &["v=spf1 include:cyclic.example -all"]);
+        let r = InMemorySpfResolver::new()
+            .with_txt("cyclic.example", &["v=spf1 include:cyclic.example -all"]);
         assert_eq!(check_host(&r, v4("1.2.3.4"), "cyclic.example", "a@x"), SpfResult::PermError);
     }
 
@@ -935,7 +960,8 @@ mod tests {
 
     #[test]
     fn evaluate_falls_back_to_helo_domain_for_null_reverse_path() {
-        let r = InMemorySpfResolver::new().with_txt("bounce-mx.example", &["v=spf1 ip4:203.0.113.0/24 -all"]);
+        let r = InMemorySpfResolver::new()
+            .with_txt("bounce-mx.example", &["v=spf1 ip4:203.0.113.0/24 -all"]);
         let outcome = evaluate(&r, v4("203.0.113.7"), "<>", Some("bounce-mx.example"));
         assert_eq!(outcome.result, SpfResult::Pass);
         assert_eq!(outcome.domain, "bounce-mx.example");
@@ -943,8 +969,10 @@ mod tests {
 
     #[test]
     fn evaluate_uses_mail_from_domain_when_present() {
-        let r = InMemorySpfResolver::new().with_txt("sender.example", &["v=spf1 ip4:203.0.113.0/24 -all"]);
-        let outcome = evaluate(&r, v4("203.0.113.7"), "alice@sender.example", Some("irrelevant.example"));
+        let r = InMemorySpfResolver::new()
+            .with_txt("sender.example", &["v=spf1 ip4:203.0.113.0/24 -all"]);
+        let outcome =
+            evaluate(&r, v4("203.0.113.7"), "alice@sender.example", Some("irrelevant.example"));
         assert_eq!(outcome.result, SpfResult::Pass);
         assert_eq!(outcome.domain, "sender.example");
     }
@@ -960,7 +988,10 @@ mod tests {
     fn cidr_boundaries() {
         assert!(ipv4_in_cidr(Ipv4Addr::new(10, 0, 0, 5), Ipv4Addr::new(10, 0, 0, 0), 24));
         assert!(!ipv4_in_cidr(Ipv4Addr::new(10, 0, 1, 5), Ipv4Addr::new(10, 0, 0, 0), 24));
-        assert!(ipv4_in_cidr(Ipv4Addr::new(1, 2, 3, 4), Ipv4Addr::new(9, 9, 9, 9), 0), "/0 matches anything");
+        assert!(
+            ipv4_in_cidr(Ipv4Addr::new(1, 2, 3, 4), Ipv4Addr::new(9, 9, 9, 9), 0),
+            "/0 matches anything"
+        );
         let a: Ipv6Addr = "2001:db8::1".parse().unwrap();
         let net: Ipv6Addr = "2001:db8::".parse().unwrap();
         assert!(ipv6_in_cidr(a, net, 32));

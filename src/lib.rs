@@ -90,17 +90,18 @@ pub use authz::{
     AuthzMode, Challenge, IdentityRegistry, Quota, QuotaError, QuotaLedger, RegisteredIdentity,
     Usage, RESERVED_ALIAS_PREFIX,
 };
+pub use directory::{DirectoryError, FileDirectory, InMemoryDirectory};
 pub use dkim::{
     parse_public_key_txt, signing_domain_selector, verify_with_resolver, DkimError, DkimKey,
     DkimKeyResolver, DkimVerdict, DnsDkimKeyResolver, StaticDkimKeys,
 };
-pub use directory::{DirectoryError, FileDirectory, InMemoryDirectory};
-pub use forwarded_addr::{decode as decode_forwarded, encode as encode_forwarded, ForwardedAddrError};
 pub use dmarc::{
     organizational_domain, DmarcDisposition, DmarcPolicy, DmarcRecord, DmarcTxtResolver,
     DmarcVerdict, DnsDmarcResolver, InMemoryDmarcResolver,
 };
-pub use mesh::{HttpMeshDelivery, MeshConfigError, NullMesh};
+pub use forwarded_addr::{
+    decode as decode_forwarded, encode as encode_forwarded, ForwardedAddrError,
+};
 pub use inbound::{
     AbuseDecision, AllowAllAbuse, AntiAbuse, Clock, ColdSenderGate, DeliveryOutcome, DkimPolicy,
     DmarcHandling, InboundBridged, InboundError, InboundGateway, KeyDirectory, MeshDelivery,
@@ -109,9 +110,10 @@ pub use inbound::{
 pub use inbound_tcp::{
     load_certs, load_private_key, server_config, server_config_from_pem, MxListener,
 };
+pub use mesh::{HttpMeshDelivery, MeshConfigError, NullMesh};
 pub use mta_sts::{
-    DnsTxtResolver, HttpsPolicyFetcher, InMemoryPolicyFetcher, InMemoryTxtResolver, MtaStsTlsPolicy,
-    PolicyFetcher, PolicyMode, StsParseError, StsPolicy, TxtResolver,
+    DnsTxtResolver, HttpsPolicyFetcher, InMemoryPolicyFetcher, InMemoryTxtResolver,
+    MtaStsTlsPolicy, PolicyFetcher, PolicyMode, StsParseError, StsPolicy, TxtResolver,
 };
 pub use mx::{DnsMxResolver, InMemoryMxResolver, MxHost, MxResolver};
 pub use outbound::{
@@ -119,11 +121,11 @@ pub use outbound::{
     OutboundTransport, TlsPolicy, TlsRequirement, TransportResult,
 };
 pub use outbound_guard::{OutboundSenderGuard, SenderVerdict};
+pub use outbound_tcp::SmtpTcpTransport;
 pub use personal::{ConfigError, DirectorySource, PersonalConfig};
 pub use provenance::{
     chain_append, msg_digest, AuthzDecision, Bridge, BridgeDirection, BridgeError, CountingMeter,
     GatewayAttestation, GatewayAuthz, GatewayMeter, MeterEvent, NullMeter, Origin, Profile,
     ProvenanceError, ProvenanceRecord, StaticGatewayAuthz, Tier,
 };
-pub use outbound_tcp::SmtpTcpTransport;
 pub use spf::{DnsSpfResolver, InMemorySpfResolver, SpfOutcome, SpfResolver, SpfResult};

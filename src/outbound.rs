@@ -226,10 +226,8 @@ impl OutboundGateway {
         };
 
         // Enforce TLS via the MTA-STS/DANE policy hook (§7.3 step 4).
-        let require_tls = matches!(
-            self.tls_policy.requirement_for(&dest_domain),
-            TlsRequirement::Required
-        );
+        let require_tls =
+            matches!(self.tls_policy.requirement_for(&dest_domain), TlsRequirement::Required);
         let allowed_patterns = self.tls_policy.allowed_mx_patterns(&dest_domain);
 
         // Resolve the destination's MX candidates (RFC 5321 §5.1: sorted by preference, falling
@@ -248,7 +246,8 @@ impl OutboundGateway {
         let dial_host = match eligible.first() {
             Some(h) => h.host.clone(),
             None if !allowed_patterns.is_empty() => {
-                let candidate_hosts: Vec<String> = candidates.iter().map(|h| h.host.clone()).collect();
+                let candidate_hosts: Vec<String> =
+                    candidates.iter().map(|h| h.host.clone()).collect();
                 return OutboundReport::Failed(OutboundError::NoMxMatchesPolicy(
                     dest_domain,
                     allowed_patterns,
@@ -297,7 +296,8 @@ impl OutboundGateway {
     ) -> GovernedSend {
         let Some(guard) = &self.sender_guard else {
             return GovernedSend::Blocked(SenderVerdict::Refuse {
-                reason: "5.7.1 outbound relay denied: no sender guard configured (fail-closed)".into(),
+                reason: "5.7.1 outbound relay denied: no sender guard configured (fail-closed)"
+                    .into(),
             });
         };
         match guard.authorize_send(account) {
@@ -339,14 +339,11 @@ pub fn render_rfc5322(
     no_inject(to_addr, "To")?;
     let subject = payload.headers.subject.clone().unwrap_or_default();
     no_inject(&subject, "Subject")?;
-    let mime = payload
-        .headers
-        .mime
-        .clone()
-        .unwrap_or_else(|| "text/plain; charset=utf-8".into());
+    let mime = payload.headers.mime.clone().unwrap_or_else(|| "text/plain; charset=utf-8".into());
     no_inject(&mime, "Content-Type")?;
     let date = format_rfc5322_date(ts);
-    let mid = format!("<{}@{}>", b64_id(&payload.body), domain_of(from_addr).unwrap_or("dmtap.local"));
+    let mid =
+        format!("<{}@{}>", b64_id(&payload.body), domain_of(from_addr).unwrap_or("dmtap.local"));
 
     let mut msg = String::new();
     msg.push_str(&format!("From: {from_addr}\r\n"));

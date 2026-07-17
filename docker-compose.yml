@@ -1,9 +1,9 @@
 # envoir-gateway — personal single-operator gateway.
 #
-#   cd gateway && docker compose up --build
+#   docker compose up --build
 #
-# The build context is `..` (the repo root) because the gateway depends on the sibling
-# dmtap-core / dmtap-mail crates by path while it lives in the monorepo (see Dockerfile).
+# The build context is this repo root; dmtap-core / dmtap-mail are git-tag deps fetched
+# during the build (see Dockerfile / Cargo.toml).
 #
 # Put your config next to this file in ./config/:
 #   ./config/personal.toml        (copy from examples/personal.toml, set your domain)
@@ -13,8 +13,8 @@
 services:
   gateway:
     build:
-      context: ..
-      dockerfile: gateway/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     image: envoir-gateway
     restart: unless-stopped
     # Map the privileged host MX port 25 onto the container's unprivileged 2525 so the

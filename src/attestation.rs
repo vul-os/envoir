@@ -199,7 +199,12 @@ impl StaticGwKeys {
     }
 
     /// Publish `key` at `<selector>._dmtap-gw.<domain>`.
-    pub fn publish(mut self, domain: impl Into<String>, selector: impl Into<String>, key: Vec<u8>) -> Self {
+    pub fn publish(
+        mut self,
+        domain: impl Into<String>,
+        selector: impl Into<String>,
+        key: Vec<u8>,
+    ) -> Self {
         self.entries.push((domain.into(), selector.into(), key));
         self
     }

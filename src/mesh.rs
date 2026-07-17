@@ -124,10 +124,9 @@ impl HttpMeshDelivery {
     /// failure is a `NoAck` (never a false ack): the silent-loss-avoidance rule then yields `451`.
     fn post(&self, env: &Envelope, att: &Attestation) -> std::io::Result<bool> {
         let body = env.det_cbor();
-        let addr = (self.host.as_str(), self.port)
-            .to_socket_addrs()?
-            .next()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no address for mesh ingest host"))?;
+        let addr = (self.host.as_str(), self.port).to_socket_addrs()?.next().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "no address for mesh ingest host")
+        })?;
         let mut tcp = TcpStream::connect_timeout(&addr, self.connect_timeout)?;
         tcp.set_read_timeout(Some(self.io_timeout))?;
         tcp.set_write_timeout(Some(self.io_timeout))?;
@@ -161,13 +160,10 @@ impl HttpMeshDelivery {
         tcp.flush()?;
 
         // Only the status line matters for the ack decision.
-        let status = read_line(&mut tcp)?
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "no HTTP status line"))?;
-        let code_ok = status
-            .split_whitespace()
-            .nth(1)
-            .map(|c| c.starts_with('2'))
-            .unwrap_or(false);
+        let status = read_line(&mut tcp)?.ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "no HTTP status line")
+        })?;
+        let code_ok = status.split_whitespace().nth(1).map(|c| c.starts_with('2')).unwrap_or(false);
         Ok(code_ok)
     }
 }
@@ -260,7 +256,7 @@ mod tests {
 
     fn sample_envelope() -> Envelope {
         use dmtap_core::identity::IdentityKey;
-        use dmtap_core::mote::{build_mote, Hpke, MoteDraft, Kind, SealKeypair};
+        use dmtap_core::mote::{build_mote, Hpke, Kind, MoteDraft, SealKeypair};
         let gw = IdentityKey::generate();
         let eph = IdentityKey::generate();
         let recip_ik = IdentityKey::generate();

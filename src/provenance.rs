@@ -151,7 +151,16 @@ impl GatewayAttestation {
         let seq = f.take(6).map(as_u8).transpose()?;
         let sig = as_bytes(f.req(7)?)?;
         f.deny_unknown()?;
-        Ok(GatewayAttestation { disc, domain, selector, recv_at, msg_digest, legacy_from, seq, sig })
+        Ok(GatewayAttestation {
+            disc,
+            domain,
+            selector,
+            recv_at,
+            msg_digest,
+            legacy_from,
+            seq,
+            sig,
+        })
     }
 
     /// Verify this attestation (§18.9.11, §7.2a) — **fail-closed**. `expected_domain` is the domain
@@ -331,12 +340,16 @@ impl ProvenanceRecord {
         observed_at: Option<TimestampMs>,
         verified_gateways: Vec<GatewayAttestation>,
     ) -> ProvenanceRecord {
-        let origin = if verified_gateways.is_empty() {
-            Origin::PureMesh
-        } else {
-            Origin::GatewayTouched
-        };
-        ProvenanceRecord { tier, profile, origin, gateways: verified_gateways, min_hops, observed_at }
+        let origin =
+            if verified_gateways.is_empty() { Origin::PureMesh } else { Origin::GatewayTouched };
+        ProvenanceRecord {
+            tier,
+            profile,
+            origin,
+            gateways: verified_gateways,
+            min_hops,
+            observed_at,
+        }
     }
 
     /// True iff this message is **provably pure-mesh** — never plaintext at any gateway (§7.8.1(b)).
@@ -653,7 +666,10 @@ mod tests {
         // (a) flipped signature byte.
         let mut bad_sig = att.clone();
         bad_sig.sig[0] ^= 0xff;
-        assert_eq!(bad_sig.verify("host.net", Some(&k.public()), RFC), Err(ProvenanceError::Invalid));
+        assert_eq!(
+            bad_sig.verify("host.net", Some(&k.public()), RFC),
+            Err(ProvenanceError::Invalid)
+        );
 
         // (b) attestation lifted onto different content — digest no longer binds.
         assert_eq!(
@@ -664,12 +680,18 @@ mod tests {
         // (c) a mutated signed field (recv_at) invalidates the signature.
         let mut bad_field = att.clone();
         bad_field.recv_at = 999;
-        assert_eq!(bad_field.verify("host.net", Some(&k.public()), RFC), Err(ProvenanceError::Invalid));
+        assert_eq!(
+            bad_field.verify("host.net", Some(&k.public()), RFC),
+            Err(ProvenanceError::Invalid)
+        );
 
         // (d) unknown discriminator is rejected outright, never silently accepted.
         let mut bad_disc = att.clone();
         bad_disc.disc = 7;
-        assert_eq!(bad_disc.verify("host.net", Some(&k.public()), RFC), Err(ProvenanceError::Invalid));
+        assert_eq!(
+            bad_disc.verify("host.net", Some(&k.public()), RFC),
+            Err(ProvenanceError::Invalid)
+        );
     }
 
     #[test]
@@ -683,7 +705,10 @@ mod tests {
 
         // A different domain's key does not verify this entry (domain matches, key is wrong).
         let other = key("evil.example");
-        assert_eq!(att.verify("host.net", Some(&other.public()), RFC), Err(ProvenanceError::Invalid));
+        assert_eq!(
+            att.verify("host.net", Some(&other.public()), RFC),
+            Err(ProvenanceError::Invalid)
+        );
     }
 
     #[test]
@@ -730,7 +755,7 @@ mod tests {
         let cv = Cv::Map(vec![
             (1, Cv::U64(2)),
             (2, Cv::U64(0)),
-            (3, Cv::U64(0)), // origin = pure-mesh
+            (3, Cv::U64(0)),                       // origin = pure-mesh
             (4, Cv::Array(vec![att.to_cv(true)])), // ...but a gateway is present
         ]);
         let bytes = cbor::encode(&cv);
@@ -754,7 +779,10 @@ mod tests {
         chain[0].verify("relay.example", Some(&g1.public()), RFC).unwrap();
         chain[1].verify("host.net", Some(&g2.public()), RFC).unwrap();
         // Cross-check: entry 1 does NOT verify under g1's key (wrong signing key, right domain).
-        assert_eq!(chain[1].verify("host.net", Some(&g1.public()), RFC), Err(ProvenanceError::Invalid));
+        assert_eq!(
+            chain[1].verify("host.net", Some(&g1.public()), RFC),
+            Err(ProvenanceError::Invalid)
+        );
     }
 
     #[test]
@@ -784,7 +812,8 @@ mod tests {
         assert_eq!(ev.direction, BridgeDirection::Inbound);
 
         // A denied relay (unauthorized domain) meters NOTHING — the count stays at 1.
-        let denied = bridge.bridge(BridgeDirection::Outbound, "someone-else.net", RFC, None, 8, &[]);
+        let denied =
+            bridge.bridge(BridgeDirection::Outbound, "someone-else.net", RFC, None, 8, &[]);
         assert!(matches!(denied, Err(BridgeError::NotAuthorized(_))));
         assert_eq!(meter.count(), 1);
     }
@@ -809,13 +838,9 @@ mod tests {
             Box::new(StaticGatewayAuthz::new().allow("host.net", "acct")),
             Box::new(NullMeter),
         );
-        let a0 = bridge
-            .bridge(BridgeDirection::Inbound, "host.net", RFC, None, 1, &[])
-            .unwrap();
+        let a0 = bridge.bridge(BridgeDirection::Inbound, "host.net", RFC, None, 1, &[]).unwrap();
         let chain = chain_append(&[], a0);
-        let a1 = bridge
-            .bridge(BridgeDirection::Inbound, "host.net", RFC, None, 2, &chain)
-            .unwrap();
+        let a1 = bridge.bridge(BridgeDirection::Inbound, "host.net", RFC, None, 2, &chain).unwrap();
         assert_eq!(a1.seq, Some(1));
     }
 }

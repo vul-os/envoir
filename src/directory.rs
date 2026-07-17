@@ -90,20 +90,30 @@ impl InMemoryDirectory {
             }
             let mut fields = line.split_whitespace();
             let lineno = idx + 1;
-            let email = fields.next().ok_or(DirectoryError::MissingField { line: lineno, field: "email" })?;
-            let ik_b64 = fields.next().ok_or(DirectoryError::MissingField { line: lineno, field: "ik" })?;
-            let seal_b64 =
-                fields.next().ok_or(DirectoryError::MissingField { line: lineno, field: "seal" })?;
+            let email = fields
+                .next()
+                .ok_or(DirectoryError::MissingField { line: lineno, field: "email" })?;
+            let ik_b64 =
+                fields.next().ok_or(DirectoryError::MissingField { line: lineno, field: "ik" })?;
+            let seal_b64 = fields
+                .next()
+                .ok_or(DirectoryError::MissingField { line: lineno, field: "seal" })?;
             if fields.next().is_some() {
                 return Err(DirectoryError::TrailingData { line: lineno });
             }
             if !email.contains('@') {
                 return Err(DirectoryError::BadAddress { line: lineno, addr: email.to_string() });
             }
-            let ik = b64::decode(ik_b64)
-                .map_err(|e| DirectoryError::BadBase64 { line: lineno, field: "ik", reason: e })?;
-            let seal_pub = b64::decode(seal_b64)
-                .map_err(|e| DirectoryError::BadBase64 { line: lineno, field: "seal", reason: e })?;
+            let ik = b64::decode(ik_b64).map_err(|e| DirectoryError::BadBase64 {
+                line: lineno,
+                field: "ik",
+                reason: e,
+            })?;
+            let seal_pub = b64::decode(seal_b64).map_err(|e| DirectoryError::BadBase64 {
+                line: lineno,
+                field: "seal",
+                reason: e,
+            })?;
             dir.insert(email, RecipientKey { ik, seal_pub });
         }
         Ok(dir)
@@ -130,8 +140,10 @@ impl FileDirectory {
     /// Load and parse the directory file at `path`.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, DirectoryError> {
         let path = path.as_ref();
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| DirectoryError::Io { path: path.display().to_string(), reason: e.to_string() })?;
+        let text = std::fs::read_to_string(path).map_err(|e| DirectoryError::Io {
+            path: path.display().to_string(),
+            reason: e.to_string(),
+        })?;
         Ok(FileDirectory { inner: InMemoryDirectory::parse(&text)? })
     }
 
@@ -183,7 +195,8 @@ mod tests {
 
     #[test]
     fn in_memory_resolves_case_insensitively() {
-        let dir = InMemoryDirectory::new().with_recipient("Alice@Example.ORG", key(&[1, 2, 3], &[4, 5, 6]));
+        let dir = InMemoryDirectory::new()
+            .with_recipient("Alice@Example.ORG", key(&[1, 2, 3], &[4, 5, 6]));
         assert_eq!(dir.resolve("alice@example.org"), Some(key(&[1, 2, 3], &[4, 5, 6])));
         assert_eq!(dir.resolve("ALICE@EXAMPLE.ORG"), Some(key(&[1, 2, 3], &[4, 5, 6])));
         assert_eq!(dir.resolve(" alice@example.org "), Some(key(&[1, 2, 3], &[4, 5, 6])));
@@ -235,10 +248,7 @@ mod tests {
 
         // Trailing junk.
         let text = format!("alice@example.org {ik} {seal} extra-token\n");
-        assert_eq!(
-            InMemoryDirectory::parse(&text),
-            Err(DirectoryError::TrailingData { line: 1 })
-        );
+        assert_eq!(InMemoryDirectory::parse(&text), Err(DirectoryError::TrailingData { line: 1 }));
     }
 
     #[test]

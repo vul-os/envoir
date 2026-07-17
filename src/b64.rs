@@ -13,16 +13,8 @@ pub fn encode(input: &[u8]) -> String {
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(ALPHABET[((n >> 18) & 0x3f) as usize] as char);
         out.push(ALPHABET[((n >> 12) & 0x3f) as usize] as char);
-        out.push(if chunk.len() > 1 {
-            ALPHABET[((n >> 6) & 0x3f) as usize] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            ALPHABET[(n & 0x3f) as usize] as char
-        } else {
-            '='
-        });
+        out.push(if chunk.len() > 1 { ALPHABET[((n >> 6) & 0x3f) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { ALPHABET[(n & 0x3f) as usize] as char } else { '=' });
     }
     out
 }

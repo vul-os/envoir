@@ -30,8 +30,16 @@ pub struct DkimKey {
 
 impl DkimKey {
     /// Build from a 32-byte Ed25519 seed.
-    pub fn from_seed(domain: impl Into<String>, selector: impl Into<String>, seed: &[u8; 32]) -> Self {
-        DkimKey { domain: domain.into(), selector: selector.into(), signing: SigningKey::from_bytes(seed) }
+    pub fn from_seed(
+        domain: impl Into<String>,
+        selector: impl Into<String>,
+        seed: &[u8; 32],
+    ) -> Self {
+        DkimKey {
+            domain: domain.into(),
+            selector: selector.into(),
+            signing: SigningKey::from_bytes(seed),
+        }
     }
 
     /// The DKIM public key to publish (base64, as it appears in the `p=` tag of the DNS record).
@@ -72,11 +80,8 @@ pub fn sign(key: &DkimKey, message: &[u8], t: u64) -> String {
     //    thereby binds not just the present From but the ABSENCE of any second From — an attacker who
     //    appends another From then fails verification, since the extra h= entry now resolves to their
     //    added header instead of the null string it was signed over.
-    let mut h_names: Vec<&str> = SIGNED_HEADERS
-        .iter()
-        .copied()
-        .filter(|h| find_header(&headers, h).is_some())
-        .collect();
+    let mut h_names: Vec<&str> =
+        SIGNED_HEADERS.iter().copied().filter(|h| find_header(&headers, h).is_some()).collect();
     h_names.push("from");
     let h_tag = h_names.join(":");
 
@@ -110,7 +115,7 @@ pub fn verify(message: &[u8], public_key: &[u8]) -> Result<(), DkimError> {
     let (headers, body) = split_headers_body(message);
     let (_dkim_name, dkim_value) =
         find_header(&headers, "dkim-signature").ok_or(DkimError::NoSignature)?;
-    let tags = parse_tags(&dkim_value);
+    let tags = parse_tags(dkim_value);
 
     let get = |k: &str| tags.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
     if get("a").as_deref() != Some("ed25519-sha256") {
@@ -144,18 +149,17 @@ pub fn verify(message: &[u8], public_key: &[u8]) -> Result<(), DkimError> {
     // `assemble_signed_headers` for the oversigning-correct semantics), then the DKIM-Signature
     // header with b= emptied.
     let mut signing_input = assemble_signed_headers(&headers, &h_names);
-    let dkim_emptied = empty_b_value(&dkim_value);
+    let dkim_emptied = empty_b_value(dkim_value);
     signing_input.extend_from_slice(
-        canonicalize_header("DKIM-Signature", &dkim_emptied)
-            .trim_end_matches("\r\n")
-            .as_bytes(),
+        canonicalize_header("DKIM-Signature", &dkim_emptied).trim_end_matches("\r\n").as_bytes(),
     );
 
     // Verify Ed25519 over SHA-256(signing_input).
     let vk_bytes: [u8; 32] = public_key.try_into().map_err(|_| DkimError::BadPublicKey)?;
     let vk = VerifyingKey::from_bytes(&vk_bytes).map_err(|_| DkimError::BadPublicKey)?;
     let sig_bytes = b64::decode(&b_tag).map_err(|_| DkimError::MalformedSignature)?;
-    let sig_arr: [u8; 64] = sig_bytes.as_slice().try_into().map_err(|_| DkimError::MalformedSignature)?;
+    let sig_arr: [u8; 64] =
+        sig_bytes.as_slice().try_into().map_err(|_| DkimError::MalformedSignature)?;
     let sig = Signature::from_bytes(&sig_arr);
     let digest = Sha256::digest(&signing_input);
     vk.verify(&digest, &sig).map_err(|_| DkimError::SignatureInvalid)
@@ -186,7 +190,12 @@ impl StaticDkimKeys {
         Self::default()
     }
     /// Publish `key` at `<selector>._domainkey.<domain>`.
-    pub fn publish(mut self, domain: impl Into<String>, selector: impl Into<String>, key: Vec<u8>) -> Self {
+    pub fn publish(
+        mut self,
+        domain: impl Into<String>,
+        selector: impl Into<String>,
+        key: Vec<u8>,
+    ) -> Self {
         self.entries.push((domain.into(), selector.into(), key));
         self
     }
@@ -382,8 +391,11 @@ fn assemble_signed_headers(headers: &[(String, String)], h_names: &[&str]) -> Ve
         let occurrence = h_names[..k].iter().filter(|m| m.trim().eq_ignore_ascii_case(key)).count();
         // The `occurrence`-th instance of `key` counting from the BOTTOM of the message (§5.4.2);
         // `None` (fewer instances than h= entries) ⇒ the null string, contributing nothing.
-        let instance =
-            headers.iter().rev().filter(|(n, _)| n.trim().eq_ignore_ascii_case(key)).nth(occurrence);
+        let instance = headers
+            .iter()
+            .rev()
+            .filter(|(n, _)| n.trim().eq_ignore_ascii_case(key))
+            .nth(occurrence);
         if let Some((n, v)) = instance {
             out.extend_from_slice(canonicalize_header(n, v).as_bytes());
         }
@@ -475,14 +487,13 @@ fn empty_b_value(value: &str) -> String {
     let bytes = value.as_bytes();
     while i < bytes.len() {
         // Match a `b` tag at a token boundary: start-of-string or right after ';' (+ optional WSP).
-        let at_boundary = i == 0
-            || {
-                let mut j = i;
-                while j > 0 && (bytes[j - 1] == b' ' || bytes[j - 1] == b'\t') {
-                    j -= 1;
-                }
-                j > 0 && bytes[j - 1] == b';'
-            };
+        let at_boundary = i == 0 || {
+            let mut j = i;
+            while j > 0 && (bytes[j - 1] == b' ' || bytes[j - 1] == b'\t') {
+                j -= 1;
+            }
+            j > 0 && bytes[j - 1] == b';'
+        };
         if at_boundary && bytes[i] == b'b' {
             // Ensure it is exactly tag `b`, not `bh`: next non-WSP char must be '='.
             let mut k = i + 1;

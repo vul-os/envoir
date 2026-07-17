@@ -56,7 +56,7 @@ pub struct DnsMessage {
 fn random_txn_id() -> io::Result<u16> {
     let mut b = [0u8; 2];
     getrandom::getrandom(&mut b)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("CSPRNG unavailable: {e}")))?;
+        .map_err(|e| io::Error::other(format!("CSPRNG unavailable: {e}")))?;
     Ok(u16::from_be_bytes(b))
 }
 
@@ -319,7 +319,8 @@ mod tests {
 
     #[test]
     fn round_trips_a_single_mx_record() {
-        let packet = build_response("example.org", TYPE_MX, &[(TYPE_MX, mx_rdata(10, "mail.example.org"))]);
+        let packet =
+            build_response("example.org", TYPE_MX, &[(TYPE_MX, mx_rdata(10, "mail.example.org"))]);
         let msg = parse_response(&packet).expect("parses");
         assert_eq!(msg.rcode, 0);
         assert_eq!(msg.answers.len(), 1);
@@ -376,7 +377,11 @@ mod tests {
         let (p1, e1) = parse_mx_rdata(&buf, &msg.answers[0]).unwrap();
         let (p2, e2) = parse_mx_rdata(&buf, &msg.answers[1]).unwrap();
         assert_eq!((p1, e1.as_str()), (20, "mx-a.example.org"));
-        assert_eq!((p2, e2.as_str()), (5, "mx-b.example.org"), "pointer-compressed exchange name resolves");
+        assert_eq!(
+            (p2, e2.as_str()),
+            (5, "mx-b.example.org"),
+            "pointer-compressed exchange name resolves"
+        );
     }
 
     #[test]
@@ -418,7 +423,8 @@ mod tests {
     #[test]
     fn truncated_packet_is_a_dns_error_not_a_panic() {
         assert_eq!(parse_response(&[0u8; 4]), Err(DnsError::Truncated));
-        let packet = build_response("example.org", TYPE_MX, &[(TYPE_MX, mx_rdata(10, "mail.example.org"))]);
+        let packet =
+            build_response("example.org", TYPE_MX, &[(TYPE_MX, mx_rdata(10, "mail.example.org"))]);
         // Chop the packet mid-rdata.
         assert!(parse_response(&packet[..packet.len() - 3]).is_err());
     }

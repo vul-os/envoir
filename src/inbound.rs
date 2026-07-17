@@ -10,8 +10,8 @@
 //! All network effects are behind traits ([`KeyDirectory`], [`MeshDelivery`], [`AntiAbuse`]) so the
 //! whole transaction is driven in-process by tests; a real deployment supplies socket-backed impls.
 
-use dmtap_core::mote::{build_mote, Envelope, Hpke};
 use dmtap_core::identity::IdentityKey;
+use dmtap_core::mote::{build_mote, Envelope, Hpke};
 use dmtap_core::TimestampMs;
 use dmtap_mail::smtp::build_mote_draft;
 
@@ -73,7 +73,10 @@ pub enum AbuseDecision {
     Accept,
     /// Refuse before DATA. `code` is the SMTP status (a 5xx hard-reject or 4xx greylist defer) and
     /// `reason` the enhanced text.
-    Reject { code: u16, reason: String },
+    Reject {
+        code: u16,
+        reason: String,
+    },
 }
 
 /// A permissive anti-abuse policy that accepts everything — the self-host default (you are the only
@@ -211,12 +214,12 @@ impl ColdSenderGate {
     fn is_known(&self, peer_ip: &str, from: &str) -> bool {
         let from_l = from.to_ascii_lowercase();
         self.known_ip_prefixes.iter().any(|p| peer_ip.starts_with(p.as_str()))
-            || self.known_senders.iter().any(|s| *s == from_l)
+            || self.known_senders.contains(&from_l)
     }
     fn is_blocked(&self, peer_ip: &str, from: &str) -> bool {
         let from_l = from.to_ascii_lowercase();
         self.blocked_ip_prefixes.iter().any(|p| peer_ip.starts_with(p.as_str()))
-            || self.blocked_senders.iter().any(|s| *s == from_l)
+            || self.blocked_senders.contains(&from_l)
     }
 }
 
@@ -230,7 +233,10 @@ impl AntiAbuse for ColdSenderGate {
     fn check(&self, peer_ip: &str, mail_from: &str) -> AbuseDecision {
         // 1. Explicit block wins (RBL-style hard reject).
         if self.is_blocked(peer_ip, mail_from) {
-            return AbuseDecision::Reject { code: 554, reason: "5.7.1 sender blocked by policy".into() };
+            return AbuseDecision::Reject {
+                code: 554,
+                reason: "5.7.1 sender blocked by policy".into(),
+            };
         }
         // 2. Known contacts are free (§9.1) — no greylist, no rate cost.
         if self.is_known(peer_ip, mail_from) {
@@ -266,7 +272,8 @@ impl AntiAbuse for ColdSenderGate {
             st.greylist.insert(key, now);
             return AbuseDecision::Reject {
                 code: 451,
-                reason: "4.7.1 greylisted — please retry shortly (cost for cold contact, §9)".into(),
+                reason: "4.7.1 greylisted — please retry shortly (cost for cold contact, §9)"
+                    .into(),
             };
         }
         // Seen before: enforce the minimum retry delay so an instant re-send does not pass.
@@ -432,7 +439,11 @@ impl InboundGateway {
 
     /// Enable inbound DMARC verification (spec item 2, RFC 7489): resolve `_dmarc` policy via
     /// `resolver` and apply `policy` to the combined SPF+DKIM alignment verdict.
-    pub fn with_dmarc(mut self, resolver: Box<dyn DmarcTxtResolver>, policy: DmarcHandling) -> Self {
+    pub fn with_dmarc(
+        mut self,
+        resolver: Box<dyn DmarcTxtResolver>,
+        policy: DmarcHandling,
+    ) -> Self {
         self.dmarc_resolver = Some(resolver);
         self.dmarc_policy = policy;
         self
@@ -511,7 +522,12 @@ impl InboundGateway {
     /// `_dmarc` policy published for the message's `RFC5322.From` domain. Exposed publicly
     /// (mirroring [`Self::verify_inbound_dkim`]) so a caller can inspect the raw verdict regardless
     /// of [`DmarcHandling`] policy.
-    pub fn evaluate_dmarc(&self, data: &[u8], spf: Option<&SpfOutcome>, mail_from: &str) -> DmarcVerdict {
+    pub fn evaluate_dmarc(
+        &self,
+        data: &[u8],
+        spf: Option<&SpfOutcome>,
+        mail_from: &str,
+    ) -> DmarcVerdict {
         let dkim_verdict = self.verify_inbound_dkim(data);
         self.dmarc_verdict_with_dkim(data, spf, &dkim_verdict, mail_from)
     }
@@ -543,7 +559,13 @@ impl InboundGateway {
             }
         };
         let envelope_domain = domain_of(mail_from).unwrap_or("").to_string();
-        dmarc::evaluate(resolver, &header_domain, &envelope_domain, spf.map(|o| o.result), dkim_verdict)
+        dmarc::evaluate(
+            resolver,
+            &header_domain,
+            &envelope_domain,
+            spf.map(|o| o.result),
+            dkim_verdict,
+        )
     }
 
     /// Apply the DMARC policy (spec item 2) as a pre-delivery gate. Only `p=reject`/`sp=reject`
@@ -628,8 +650,7 @@ impl InboundGateway {
         // gateway hop, gateway-touched origin (never pure-mesh). Legacy delivery arrives fast/direct
         // (not off the mixnet), so tier=Fast / profile=NotApplicable; min_hops/observed_at are
         // recipient-node observations, left unset by the gateway.
-        let gateway_attestation =
-            GatewayAttestation::sign(att_key, data, Some(mail_from), now, 0);
+        let gateway_attestation = GatewayAttestation::sign(att_key, data, Some(mail_from), now, 0);
         let provenance = ProvenanceRecord::assemble(
             Tier::Fast,
             Profile::NotApplicable,
@@ -712,7 +733,8 @@ impl InboundGateway {
     /// Whether a `RCPT TO` resolves to a known DMTAP recipient AND the gateway can attest for its
     /// domain — evaluated at `RCPT TO`, before `DATA` (so a bad recipient is refused early).
     fn rcpt_acceptable(&self, rcpt: &str) -> Result<(), SmtpReply> {
-        let domain = domain_of(rcpt).ok_or_else(|| SmtpReply::new(501, "5.1.3 bad recipient address"))?;
+        let domain =
+            domain_of(rcpt).ok_or_else(|| SmtpReply::new(501, "5.1.3 bad recipient address"))?;
         if self.directory.resolve(rcpt).is_none() {
             return Err(SmtpReply::new(550, "5.1.1 no such user here"));
         }

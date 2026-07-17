@@ -95,7 +95,8 @@ fn spawn_ingest(ack: bool) -> (SocketAddr, Arc<Mutex<Option<Captured>>>, thread:
 
         let status = if ack { "200 OK" } else { "503 Service Unavailable" };
         let _ = w.write_all(
-            format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes(),
+            format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
         );
         let _ = w.flush();
     });
@@ -113,7 +114,11 @@ struct TestRecipient {
 }
 impl TestRecipient {
     fn new(email: &str) -> Self {
-        TestRecipient { email: email.into(), ik: IdentityKey::generate(), seal: SealKeypair::generate() }
+        TestRecipient {
+            email: email.into(),
+            ik: IdentityKey::generate(),
+            seal: SealKeypair::generate(),
+        }
     }
 }
 
@@ -169,8 +174,8 @@ fn e2e_inbound_bridge_directory_mesh_and_provenance() {
 
     // Real SPF / DKIM / DMARC resolvers so all three checks are genuinely evaluated (annotate mode).
     let (signed, dkim_pub) = dkim_signed_message(&recip.email);
-    let spf = InMemorySpfResolver::new()
-        .with_txt(SENDER_DOMAIN, &["v=spf1 ip4:203.0.113.0/24 -all"]);
+    let spf =
+        InMemorySpfResolver::new().with_txt(SENDER_DOMAIN, &["v=spf1 ip4:203.0.113.0/24 -all"]);
     let dkim = StaticDkimKeys::new().publish(SENDER_DOMAIN, "s1", dkim_pub.to_vec());
     let dmarc = InMemoryDmarcResolver::new()
         .with_txt(&format!("_dmarc.{SENDER_DOMAIN}"), &["v=DMARC1; p=none"]);
@@ -192,7 +197,10 @@ fn e2e_inbound_bridge_directory_mesh_and_provenance() {
     let mail_from = format!("alice@{SENDER_DOMAIN}");
     let spf_outcome = gw.evaluate_spf(PEER_IP, &mail_from, Some(SENDER_DOMAIN));
     assert_eq!(spf_outcome.result, SpfResult::Pass, "SPF genuinely passes for the authorized IP");
-    assert!(matches!(gw.verify_inbound_dkim(&signed), DkimVerdict::Pass { .. }), "DKIM genuinely verifies");
+    assert!(
+        matches!(gw.verify_inbound_dkim(&signed), DkimVerdict::Pass { .. }),
+        "DKIM genuinely verifies"
+    );
     assert!(
         matches!(gw.evaluate_dmarc(&signed, Some(&spf_outcome), &mail_from), DmarcVerdict::Pass),
         "DMARC aligns (SPF + DKIM) for the header-from domain"
@@ -207,7 +215,11 @@ fn e2e_inbound_bridge_directory_mesh_and_provenance() {
         .verify(GW_DOMAIN, gw_key.as_deref(), &signed)
         .expect("gateway attestation verifies over the exact legacy bytes");
     assert_eq!(bridged.provenance.origin, Origin::GatewayTouched);
-    assert_eq!(bridged.provenance.gateway_hops(), 1, "exactly one gateway hop in the provenance chain");
+    assert_eq!(
+        bridged.provenance.gateway_hops(),
+        1,
+        "exactly one gateway hop in the provenance chain"
+    );
     assert!(!bridged.provenance.is_pure_mesh());
 
     // Drive the full inbound SMTP transaction; the terminating '.' converts + POSTs to the node.
@@ -215,7 +227,11 @@ fn e2e_inbound_bridge_directory_mesh_and_provenance() {
     assert_eq!(s.greeting().code, 220);
     assert_eq!(s.feed_line(&format!("EHLO {SENDER_DOMAIN}")).code, 250);
     assert_eq!(s.feed_line(&format!("MAIL FROM:<{mail_from}>")).code, 250);
-    assert_eq!(s.feed_line(&format!("RCPT TO:<{}>", recip.email)).code, 250, "directory RESOLVED the recipient");
+    assert_eq!(
+        s.feed_line(&format!("RCPT TO:<{}>", recip.email)).code,
+        250,
+        "directory RESOLVED the recipient"
+    );
     assert_eq!(s.feed_line("DATA").code, 354);
     for line in String::from_utf8(signed.clone()).unwrap().split("\r\n") {
         // dot-stuffing not needed for this content; feed each line as-is.
@@ -234,11 +250,22 @@ fn e2e_inbound_bridge_directory_mesh_and_provenance() {
     // The POST body is the canonical MOTE, sealed to the DIRECTORY-resolved recipient key, and it
     // decrypts to the original legacy body — the whole bridge, over the real mesh adapter.
     let env = Envelope::from_det_cbor(&cap.body).expect("body is a valid MOTE envelope");
-    assert_eq!(cap.mote_id_hdr.as_deref(), Some(b64::encode(env.id.as_bytes()).as_str()), "mote-id header binds the body");
+    assert_eq!(
+        cap.mote_id_hdr.as_deref(),
+        Some(b64::encode(env.id.as_bytes()).as_str()),
+        "mote-id header binds the body"
+    );
     assert_eq!(env.kind, Kind::Mail);
-    assert!(env.to.resolves_to_key(&recip.ik.public()), "MOTE sealed to the directory recipient key");
+    assert!(
+        env.to.resolves_to_key(&recip.ik.public()),
+        "MOTE sealed to the directory recipient key"
+    );
 
-    let ctx = RecipientCtx { our_ik: &recip.ik.public(), seal_secret: recip.seal.secret(), sender_is_known: true };
+    let ctx = RecipientCtx {
+        our_ik: &recip.ik.public(),
+        seal_secret: recip.seal.secret(),
+        sender_is_known: true,
+    };
     let payload = match validate(&Hpke, &env, &ctx).expect("validate") {
         Outcome::Accepted(p) => *p,
         Outcome::Deferred => panic!("known-contact MOTE must be accepted"),

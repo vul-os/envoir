@@ -1,21 +1,24 @@
 # envoir-gateway — personal DMTAP <-> legacy SMTP bridge.
 #
-# NOTE ON BUILD CONTEXT: while the gateway lives in the envoir monorepo it depends on the
-# sibling crates dmtap-core / dmtap-mail by PATH, so the Docker build context must be the
-# REPO ROOT, not gateway/:
+# This is the standalone repo: dmtap-core / dmtap-mail are pulled as git-tag dependencies
+# (see Cargo.toml), not path deps, so the build context is just this repo root:
 #
-#     docker build -f gateway/Dockerfile -t envoir-gateway .
+#     docker build -t envoir-gateway .
 #
-# (docker-compose.yml already sets `context: ..` so `docker compose up` does this for you.)
-# Once the gateway is split into its own `envoir-gateway` repo (see SEPARATION.md), the path
-# deps become a versioned crates.io / git dependency and the context collapses back to `.`.
+# (docker-compose.yml sets `context: .` so `docker compose up` does this for you.)
 
 # ---- builder ----------------------------------------------------------------------------
 FROM rust:1-slim-bookworm AS builder
+# git + CA roots so cargo can fetch the git-tag dmtap-core / dmtap-mail deps over https.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+# Fetch git deps via the git CLI (plain https; the monorepo is public).
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 WORKDIR /src
-# Copy the whole workspace (path deps + Cargo.lock for a reproducible build).
+# Copy the crate (sources + Cargo.lock for a reproducible build).
 COPY . .
-RUN cargo build --release -p envoir-gateway --bin envoir-gateway
+RUN cargo build --release --locked --bin envoir-gateway
 
 # ---- runtime ----------------------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime

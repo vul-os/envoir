@@ -129,7 +129,8 @@ impl InMemoryDmarcResolver {
         Self::default()
     }
     pub fn with_txt(mut self, name: &str, values: &[&str]) -> Self {
-        self.records.insert(name.to_ascii_lowercase(), values.iter().map(|v| v.to_string()).collect());
+        self.records
+            .insert(name.to_ascii_lowercase(), values.iter().map(|v| v.to_string()).collect());
         self
     }
 }
@@ -159,7 +160,12 @@ impl DnsDmarcResolver {
 impl DmarcTxtResolver for DnsDmarcResolver {
     fn lookup_txt(&self, name: &str) -> Vec<String> {
         match self.client.query(name, TYPE_TXT) {
-            Ok(msg) => msg.answers.iter().filter(|rr| rr.rtype == TYPE_TXT).map(dns::parse_txt_rdata).collect(),
+            Ok(msg) => msg
+                .answers
+                .iter()
+                .filter(|rr| rr.rtype == TYPE_TXT)
+                .map(dns::parse_txt_rdata)
+                .collect(),
             Err(_) => Vec::new(),
         }
     }
@@ -266,7 +272,13 @@ fn parse_record(txt: &str) -> Result<DmarcRecord, ()> {
         return Err(());
     }
     let policy = policy.ok_or(())?;
-    Ok(DmarcRecord { policy, subdomain_policy: sp, dkim_strict: adkim_strict, spf_strict: aspf_strict, pct })
+    Ok(DmarcRecord {
+        policy,
+        subdomain_policy: sp,
+        dkim_strict: adkim_strict,
+        spf_strict: aspf_strict,
+        pct,
+    })
 }
 
 enum Discovery {
@@ -341,8 +353,11 @@ pub enum HeaderFrom {
 /// oversigning or a downstream client renders differently).
 pub fn header_from(data: &[u8]) -> HeaderFrom {
     let headers = dmtap_mail::mime::headers_only(data);
-    let froms: Vec<&String> =
-        headers.iter().filter(|(n, _)| n.trim().eq_ignore_ascii_case("from")).map(|(_, v)| v).collect();
+    let froms: Vec<&String> = headers
+        .iter()
+        .filter(|(n, _)| n.trim().eq_ignore_ascii_case("from"))
+        .map(|(_, v)| v)
+        .collect();
     let value = match froms.as_slice() {
         [] => return HeaderFrom::Unusable,
         [only] => *only,
@@ -463,14 +478,16 @@ mod tests {
         let v = evaluate(&r, "victim.co.uk", "attacker.co.uk", Some(SpfResult::Fail), &dkim);
         assert_eq!(v, DmarcVerdict::Fail { disposition: DmarcDisposition::Reject });
         // The same registrant (a subdomain) DOES align.
-        let dkim_ok = DkimVerdict::Pass { domain: "mail.victim.co.uk".into(), selector: "s1".into() };
+        let dkim_ok =
+            DkimVerdict::Pass { domain: "mail.victim.co.uk".into(), selector: "s1".into() };
         let v_ok = evaluate(&r, "victim.co.uk", "x", Some(SpfResult::Fail), &dkim_ok);
         assert_eq!(v_ok, DmarcVerdict::Pass);
     }
 
     #[test]
     fn header_from_domain_extracts_from_header() {
-        let msg = b"From: Alice <alice@example.org>\r\nTo: bob@host.net\r\nSubject: hi\r\n\r\nbody\r\n";
+        let msg =
+            b"From: Alice <alice@example.org>\r\nTo: bob@host.net\r\nSubject: hi\r\n\r\nbody\r\n";
         assert_eq!(header_from_domain(msg), Some("example.org".to_string()));
         let bare = b"From: alice@bare.example\r\n\r\nbody\r\n";
         assert_eq!(header_from_domain(bare), Some("bare.example".to_string()));
@@ -494,7 +511,8 @@ mod tests {
         assert_eq!(header_from_domain(two_headers), None);
 
         // A single From bearing two addresses ⇒ Ambiguous.
-        let two_addrs = b"From: alice@example.org, eve@attacker.example\r\nTo: bob@host.net\r\n\r\nbody\r\n";
+        let two_addrs =
+            b"From: alice@example.org, eve@attacker.example\r\nTo: bob@host.net\r\n\r\nbody\r\n";
         assert_eq!(header_from(two_addrs), HeaderFrom::Ambiguous);
         assert_eq!(header_from_domain(two_addrs), None);
 
@@ -528,14 +546,26 @@ mod tests {
         let r = dmarc_txt("example.org", "v=DMARC1; p=reject; aspf=r");
         // Envelope domain is a subdomain of the header-from's organizational domain — relaxed
         // alignment (the default) still passes.
-        let v = evaluate(&r, "example.org", "bounce.example.org", Some(SpfResult::Pass), &DkimVerdict::NoSignature);
+        let v = evaluate(
+            &r,
+            "example.org",
+            "bounce.example.org",
+            Some(SpfResult::Pass),
+            &DkimVerdict::NoSignature,
+        );
         assert_eq!(v, DmarcVerdict::Pass);
     }
 
     #[test]
     fn strict_alignment_rejects_a_mere_organizational_match() {
         let r = dmarc_txt("example.org", "v=DMARC1; p=reject; aspf=s");
-        let v = evaluate(&r, "example.org", "bounce.example.org", Some(SpfResult::Pass), &DkimVerdict::NoSignature);
+        let v = evaluate(
+            &r,
+            "example.org",
+            "bounce.example.org",
+            Some(SpfResult::Pass),
+            &DkimVerdict::NoSignature,
+        );
         assert_eq!(v, DmarcVerdict::Fail { disposition: DmarcDisposition::Reject });
     }
 
@@ -550,7 +580,13 @@ mod tests {
     #[test]
     fn no_record_at_all_is_nopolicy() {
         let r = InMemoryDmarcResolver::new();
-        let v = evaluate(&r, "nowhere.example", "nowhere.example", Some(SpfResult::Pass), &DkimVerdict::NoSignature);
+        let v = evaluate(
+            &r,
+            "nowhere.example",
+            "nowhere.example",
+            Some(SpfResult::Pass),
+            &DkimVerdict::NoSignature,
+        );
         assert_eq!(v, DmarcVerdict::NoPolicy);
     }
 
@@ -589,12 +625,18 @@ mod tests {
         for body in [
             "v=DMARC1", // missing mandatory p=
             "v=DMARC1; p=bogus-policy",
-            "v=DMARC1; pct=200",         // out of range
+            "v=DMARC1; pct=200",           // out of range
             "v=DMARC1; p=reject; adkim=x", // bad alignment mode value
             "v=DMARC1; garbage-no-equals",
         ] {
             let r = dmarc_txt("bad.example", body);
-            let v = evaluate(&r, "bad.example", "bad.example", Some(SpfResult::Pass), &DkimVerdict::NoSignature);
+            let v = evaluate(
+                &r,
+                "bad.example",
+                "bad.example",
+                Some(SpfResult::Pass),
+                &DkimVerdict::NoSignature,
+            );
             assert_eq!(v, DmarcVerdict::PermError, "case {body:?}");
         }
     }
@@ -604,7 +646,13 @@ mod tests {
         // A record lacking the "v=DMARC1" prefix entirely is not recognized as a DMARC record at
         // all (indistinguishable from no record being published) — NoPolicy, not PermError.
         let r = dmarc_txt("bad.example", "p=reject");
-        let v = evaluate(&r, "bad.example", "bad.example", Some(SpfResult::Pass), &DkimVerdict::NoSignature);
+        let v = evaluate(
+            &r,
+            "bad.example",
+            "bad.example",
+            Some(SpfResult::Pass),
+            &DkimVerdict::NoSignature,
+        );
         assert_eq!(v, DmarcVerdict::NoPolicy);
     }
 
@@ -612,7 +660,13 @@ mod tests {
     fn multiple_records_at_the_same_name_is_permerror() {
         let r = InMemoryDmarcResolver::new()
             .with_txt("_dmarc.dup.example", &["v=DMARC1; p=reject", "v=DMARC1; p=none"]);
-        let v = evaluate(&r, "dup.example", "dup.example", Some(SpfResult::Pass), &DkimVerdict::NoSignature);
+        let v = evaluate(
+            &r,
+            "dup.example",
+            "dup.example",
+            Some(SpfResult::Pass),
+            &DkimVerdict::NoSignature,
+        );
         assert_eq!(v, DmarcVerdict::PermError);
     }
 

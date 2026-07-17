@@ -26,9 +26,9 @@ use rustls::ServerConfig;
 
 use crate::attestation::AttestationKey;
 use crate::authz::{AuthzMode, IdentityRegistry, Quota, QuotaLedger, RegisteredIdentity};
+use crate::directory::FileDirectory;
 use crate::dkim::DnsDkimKeyResolver;
 use crate::dmarc::DnsDmarcResolver;
-use crate::directory::FileDirectory;
 use crate::inbound::{
     AllowAllAbuse, DkimPolicy, DmarcHandling, InboundGateway, KeyDirectory, MeshDelivery, SpfPolicy,
 };
@@ -181,12 +181,27 @@ impl PersonalConfig {
             "mesh_endpoint" => self.mesh_endpoint = non_empty(value),
             "tls_cert" => self.tls_cert = non_empty(value),
             "tls_key" => self.tls_key = non_empty(value),
-            "authz_mode" => self.authz_mode = parse_authz_mode(&value).ok_or_else(|| bad("expected \"key-registered\" or \"open-public\""))?,
-            "dkim_enforce" => self.dkim_enforce = parse_bool(&value).ok_or_else(|| bad("expected true/false"))?,
-            "spf_enforce" => self.spf_enforce = parse_bool(&value).ok_or_else(|| bad("expected true/false"))?,
-            "dmarc_enforce" => self.dmarc_enforce = parse_bool(&value).ok_or_else(|| bad("expected true/false"))?,
-            "quota_messages" => self.quota_messages = value.parse().map_err(|_| bad("expected a non-negative integer"))?,
-            "quota_bytes" => self.quota_bytes = value.parse().map_err(|_| bad("expected a non-negative integer"))?,
+            "authz_mode" => {
+                self.authz_mode = parse_authz_mode(&value)
+                    .ok_or_else(|| bad("expected \"key-registered\" or \"open-public\""))?
+            }
+            "dkim_enforce" => {
+                self.dkim_enforce = parse_bool(&value).ok_or_else(|| bad("expected true/false"))?
+            }
+            "spf_enforce" => {
+                self.spf_enforce = parse_bool(&value).ok_or_else(|| bad("expected true/false"))?
+            }
+            "dmarc_enforce" => {
+                self.dmarc_enforce = parse_bool(&value).ok_or_else(|| bad("expected true/false"))?
+            }
+            "quota_messages" => {
+                self.quota_messages =
+                    value.parse().map_err(|_| bad("expected a non-negative integer"))?
+            }
+            "quota_bytes" => {
+                self.quota_bytes =
+                    value.parse().map_err(|_| bad("expected a non-negative integer"))?
+            }
             other => return Err(ConfigError::UnknownKey { line, key: other.to_string() }),
         }
         Ok(())
@@ -213,7 +228,8 @@ impl PersonalConfig {
         cfg.mesh_endpoint = std::env::var("GATEWAY_MESH_ENDPOINT").ok().and_then(non_empty);
         cfg.tls_cert = std::env::var("GATEWAY_TLS_CERT").ok().and_then(non_empty);
         cfg.tls_key = std::env::var("GATEWAY_TLS_KEY").ok().and_then(non_empty);
-        if let Some(m) = std::env::var("GATEWAY_AUTHZ_MODE").ok().and_then(|v| parse_authz_mode(&v)) {
+        if let Some(m) = std::env::var("GATEWAY_AUTHZ_MODE").ok().and_then(|v| parse_authz_mode(&v))
+        {
             cfg.authz_mode = m;
         }
         cfg.dkim_enforce = env_flag("GATEWAY_DKIM_ENFORCE");
@@ -289,8 +305,13 @@ impl PersonalConfig {
 
     /// Build the inbound gateway (§7.2): gateway identity + domain-anchored attestation key + the
     /// operator seams + real DNS-backed DKIM/SPF/DMARC at the configured policy.
-    fn build_inbound(&self, directory: Box<dyn KeyDirectory>, mesh: Box<dyn MeshDelivery>) -> InboundGateway {
-        let dkim_policy = if self.dkim_enforce { DkimPolicy::Enforce } else { DkimPolicy::Annotate };
+    fn build_inbound(
+        &self,
+        directory: Box<dyn KeyDirectory>,
+        mesh: Box<dyn MeshDelivery>,
+    ) -> InboundGateway {
+        let dkim_policy =
+            if self.dkim_enforce { DkimPolicy::Enforce } else { DkimPolicy::Annotate };
         let spf_policy = if self.spf_enforce { SpfPolicy::Enforce } else { SpfPolicy::Annotate };
         let dmarc_policy =
             if self.dmarc_enforce { DmarcHandling::Enforce } else { DmarcHandling::Annotate };
@@ -365,7 +386,9 @@ impl PersonalConfig {
 
         let mesh = self.build_mesh()?;
         match &self.mesh_endpoint {
-            Some(e) => eprintln!("gateway[personal]: mesh delivery → {e} (2xx = durable ack → 250)"),
+            Some(e) => {
+                eprintln!("gateway[personal]: mesh delivery → {e} (2xx = durable ack → 250)")
+            }
             None => eprintln!(
                 "gateway[personal]: no mesh_endpoint — NullMesh (inbound → 451, sender retries). \
                  Point mesh_endpoint at your node's ingest URL to deliver."
@@ -393,7 +416,9 @@ impl PersonalConfig {
         if tls.is_some() {
             eprintln!("gateway[personal]: STARTTLS enabled");
         } else {
-            eprintln!("gateway[personal]: STARTTLS NOT offered (no tls_cert/tls_key) — plaintext MX");
+            eprintln!(
+                "gateway[personal]: STARTTLS NOT offered (no tls_cert/tls_key) — plaintext MX"
+            );
         }
 
         let directory: Box<dyn KeyDirectory> = dir_source.into_boxed();
@@ -407,7 +432,9 @@ impl PersonalConfig {
         let bound = listener.local_addr()?;
         eprintln!("gateway[personal]: inbound MX listening on {bound} for {} — up (SIGINT/SIGTERM to stop)", self.domain);
         listener.serve_until(&gw, shutdown)?;
-        eprintln!("gateway[personal]: shutdown signal received — stopped accepting, exiting cleanly");
+        eprintln!(
+            "gateway[personal]: shutdown signal received — stopped accepting, exiting cleanly"
+        );
         Ok(())
     }
 }
@@ -516,7 +543,9 @@ fn env_flag(name: &str) -> bool {
 fn describe_quota(quota: Option<Quota>) -> String {
     match quota {
         None => "unlimited".to_string(),
-        Some(q) => format!("cap {} msgs / {} bytes per identity", q.hard_cap_messages, q.hard_cap_bytes),
+        Some(q) => {
+            format!("cap {} msgs / {} bytes per identity", q.hard_cap_messages, q.hard_cap_bytes)
+        }
     }
 }
 
@@ -529,7 +558,10 @@ mod tests {
     fn default_config_is_safe_and_fail_closed() {
         let cfg = PersonalConfig::default();
         assert_eq!(cfg.authz_mode, AuthzMode::KeyRegistered, "default is NOT an open relay");
-        assert!(!cfg.dkim_enforce && !cfg.spf_enforce && !cfg.dmarc_enforce, "checks annotate by default");
+        assert!(
+            !cfg.dkim_enforce && !cfg.spf_enforce && !cfg.dmarc_enforce,
+            "checks annotate by default"
+        );
         assert!(cfg.directory.is_none(), "resolves nobody until configured");
         assert!(cfg.quota().is_none(), "unlimited until a cap is set");
     }
@@ -600,7 +632,8 @@ mod tests {
 
     #[test]
     fn comments_and_blanks_are_ignored_but_hash_in_a_value_is_kept() {
-        let cfg = PersonalConfig::parse("\n# full-line comment\n  selector = sel1  # trailing\n").unwrap();
+        let cfg = PersonalConfig::parse("\n# full-line comment\n  selector = sel1  # trailing\n")
+            .unwrap();
         assert_eq!(cfg.selector, "sel1");
         // A '#' not preceded by whitespace inside a value is preserved.
         let cfg2 = PersonalConfig::parse("mesh_endpoint = http://h/p#frag\n").unwrap();
@@ -616,7 +649,11 @@ mod tests {
         path.push(format!("envoir-gw-personal-{}.txt", std::process::id()));
         std::fs::write(
             &path,
-            format!("me@example.org {} {}\n", b64::encode(&ik.public()), b64::encode(seal.public())),
+            format!(
+                "me@example.org {} {}\n",
+                b64::encode(&ik.public()),
+                b64::encode(seal.public())
+            ),
         )
         .unwrap();
 
@@ -634,7 +671,8 @@ mod tests {
         // The operator's own key admits (challenge–response) and is bound to its directory account.
         let ch = reg.issue_challenge([3u8; 32], 1_000_000);
         let sig = ik.sign_domain(crate::authz::ADMISSION_DS, &ch.signing_body());
-        let adm = reg.admit(&ch, &ik.public(), &sig, 1_000_050).expect("operator identity admitted");
+        let adm =
+            reg.admit(&ch, &ik.public(), &sig, 1_000_050).expect("operator identity admitted");
         assert_eq!(adm.account, "me@example.org");
         assert_eq!(adm.domain, "example.org");
 

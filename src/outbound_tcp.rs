@@ -124,7 +124,9 @@ impl SmtpTcpTransport {
         match self.try_run(dest_domain, message, require_tls) {
             Ok(result) => result,
             Err(TransportAbort::Tls) => TransportResult::TlsUnavailable,
-            Err(TransportAbort::Permanent { code, text }) => TransportResult::Permanent { code, text },
+            Err(TransportAbort::Permanent { code, text }) => {
+                TransportResult::Permanent { code, text }
+            }
             Err(TransportAbort::Io(e)) => {
                 TransportResult::Transient { code: 421, text: format!("4.4.0 {e}") }
             }
@@ -172,8 +174,9 @@ impl SmtpTcpTransport {
 
         // Envelope is derived from the rendered message headers (the trait carries only the bytes).
         let mail_from = header_addr(message, "from").unwrap_or_else(|| "<>".to_string());
-        let rcpt_to = header_addr(message, "to")
-            .ok_or_else(|| TransportAbort::Io(io::Error::new(io::ErrorKind::InvalidInput, "no To: header")))?;
+        let rcpt_to = header_addr(message, "to").ok_or_else(|| {
+            TransportAbort::Io(io::Error::new(io::ErrorKind::InvalidInput, "no To: header"))
+        })?;
 
         write_all(&mut stream, &format!("MAIL FROM:<{mail_from}>\r\n"))?;
         expect_2xx(read_reply(&mut stream)?)?;
@@ -277,7 +280,7 @@ fn is_forbidden_v6(v6: Ipv6Addr) -> bool {
     v6.is_loopback()                     // ::1
         || v6.is_unspecified()           // ::
         || (seg[0] & 0xffc0) == 0xfe80   // fe80::/10 link-local
-        || (seg[0] & 0xfe00) == 0xfc00   // fc00::/7 unique-local (ULA)
+        || (seg[0] & 0xfe00) == 0xfc00 // fc00::/7 unique-local (ULA)
 }
 
 /// Map a destination reply code to a [`TransportResult`] (§19.7.2).
@@ -306,7 +309,7 @@ fn expect_2xx((code, text): (u16, String)) -> Result<(), TransportAbort> {
         Ok(())
     } else if (400..500).contains(&code) {
         // A transient rejection to a control command — surface as a retryable transient.
-        Err(TransportAbort::Io(io::Error::new(io::ErrorKind::Other, format!("{code} {text}"))))
+        Err(TransportAbort::Io(io::Error::other(format!("{code} {text}"))))
     } else {
         Err(TransportAbort::Permanent { code, text })
     }
@@ -361,14 +364,11 @@ impl ClientStream {
     fn upgrade(self, config: &Arc<ClientConfig>, server_name: &str) -> io::Result<ClientStream> {
         let tcp = match self {
             ClientStream::Plain(t) => t,
-            ClientStream::Tls(_) => {
-                return Err(io::Error::new(io::ErrorKind::Other, "already TLS"))
-            }
+            ClientStream::Tls(_) => return Err(io::Error::other("already TLS")),
         };
         let name = ServerName::try_from(server_name.to_string())
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid server name"))?;
-        let conn = ClientConnection::new(config.clone(), name)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let conn = ClientConnection::new(config.clone(), name).map_err(io::Error::other)?;
         let mut tls = StreamOwned::new(conn, tcp);
         // Drive the handshake eagerly so certificate validation failures surface here (not later).
         tls.conn.complete_io(&mut tls.sock)?;
@@ -447,8 +447,8 @@ mod tests {
 
     #[test]
     fn ssrf_guard_allows_ordinary_public_addresses() {
-        assert!(!is_forbidden_dest_ip(v4("93.184.216.34")));  // example.com
-        assert!(!is_forbidden_dest_ip(v4("142.250.72.36")));  // a Google MX-range addr
+        assert!(!is_forbidden_dest_ip(v4("93.184.216.34"))); // example.com
+        assert!(!is_forbidden_dest_ip(v4("142.250.72.36"))); // a Google MX-range addr
         assert!(!is_forbidden_dest_ip(v4("8.8.8.8")));
         assert!(!is_forbidden_dest_ip(v6("2606:2800:220:1:248:1893:25c8:1946")));
         assert!(!is_forbidden_dest_ip(v6("2001:4860:4860::8888")));

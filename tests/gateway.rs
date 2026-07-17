@@ -7,15 +7,14 @@ use dmtap_core::mote::{
     validate, Envelope, Headers, Hpke, Kind, Outcome, Payload, RecipientCtx, SealKeypair,
 };
 
-use envoir_gateway::attestation::{Attestation, AttestationError, AttestationKey, GwKeyResolver, StaticGwKeys};
+use envoir_gateway::attestation::{
+    Attestation, AttestationError, AttestationKey, GwKeyResolver, StaticGwKeys,
+};
 use envoir_gateway::dkim::{self, DkimError, DkimKey, StaticDkimKeys};
 use envoir_gateway::dmarc::InMemoryDmarcResolver;
 use envoir_gateway::inbound::{
     AbuseDecision, AntiAbuse, Clock, ColdSenderGate, DeliveryOutcome, DkimPolicy, DmarcHandling,
     InboundGateway, KeyDirectory, MeshDelivery, MxSession, RecipientKey, SpfPolicy,
-};
-use envoir_gateway::provenance::{
-    chain_append, GatewayAttestation, Origin, Profile, ProvenanceError, ProvenanceRecord, Tier,
 };
 use envoir_gateway::mta_sts::{InMemoryPolicyFetcher, InMemoryTxtResolver, MtaStsTlsPolicy};
 use envoir_gateway::mx::{InMemoryMxResolver, MxHost};
@@ -24,6 +23,9 @@ use envoir_gateway::outbound::{
     TlsRequirement, TransportResult,
 };
 use envoir_gateway::outbound_guard::{OutboundSenderGuard, SenderVerdict};
+use envoir_gateway::provenance::{
+    chain_append, GatewayAttestation, Origin, Profile, ProvenanceError, ProvenanceRecord, Tier,
+};
 use envoir_gateway::spf::{InMemorySpfResolver, SpfResult};
 
 const NOW: u64 = 1_752_600_000_000;
@@ -43,7 +45,11 @@ struct TestRecipient {
 
 impl TestRecipient {
     fn new(email: &str) -> Self {
-        TestRecipient { email: email.into(), ik: IdentityKey::generate(), seal: SealKeypair::generate() }
+        TestRecipient {
+            email: email.into(),
+            ik: IdentityKey::generate(),
+            seal: SealKeypair::generate(),
+        }
     }
     fn recipient_key(&self) -> RecipientKey {
         RecipientKey { ik: self.ik.public(), seal_pub: self.seal.public().to_vec() }
@@ -223,7 +229,12 @@ fn inbound_unknown_recipient_is_550() {
         DeliveryOutcome::Acked,
         Box::new(AllowAll),
     );
-    let reply = gw.accept_message("s@gmail.com", "nobody@example.org", &sample_message("nobody@example.org"), NOW);
+    let reply = gw.accept_message(
+        "s@gmail.com",
+        "nobody@example.org",
+        &sample_message("nobody@example.org"),
+        NOW,
+    );
     assert_eq!(reply.code, 550);
 }
 
@@ -314,7 +325,8 @@ fn mx_session_unknown_recipient_rejected_at_rcpt_before_data() {
 #[test]
 fn attestation_verifies_under_the_domain_published_key() {
     let att_key = AttestationKey::generate(DOMAIN, GW_SELECTOR);
-    let published: StaticGwKeys = StaticGwKeys::new().publish(DOMAIN, GW_SELECTOR, att_key.public());
+    let published: StaticGwKeys =
+        StaticGwKeys::new().publish(DOMAIN, GW_SELECTOR, att_key.public());
     let mote_id = dmtap_core::ContentId::of(b"some-mote");
     let att = att_key.attest(&mote_id, "bob@gmail.com", "alice@example.org", NOW);
 
@@ -355,10 +367,7 @@ fn forged_attestation_is_rejected() {
     );
 
     // (d) No key published for the domain at all.
-    assert_eq!(
-        good.verify(DOMAIN, None, &mote_id),
-        Err(AttestationError::NoPublishedKey)
-    );
+    assert_eq!(good.verify(DOMAIN, None, &mote_id), Err(AttestationError::NoPublishedKey));
 
     // (e) Attestation for a different domain than the recipient's own.
     assert_eq!(
@@ -440,7 +449,12 @@ fn sample_payload() -> Payload {
     let mut p = Payload {
         from: sender.public(),
         sig: Vec::new(),
-        headers: Headers { thread: None, subject: Some("meeting notes".into()), mime: None, cc: vec![] },
+        headers: Headers {
+            thread: None,
+            subject: Some("meeting notes".into()),
+            mime: None,
+            cc: vec![],
+        },
         body: b"Here are the notes from today.\r\n".to_vec(),
         refs: vec![],
         attach: vec![],
@@ -517,9 +531,8 @@ fn outbound_refuses_to_sign_undelegated_domain() {
         Box::new(ScriptedTransport::new(true, TransportResult::Delivered { code: 250 })),
     );
     let payload = sample_payload();
-    let err = gw
-        .translate_and_sign(&payload, "mallory@not-mine.com", "bob@gmail.com", NOW)
-        .unwrap_err();
+    let err =
+        gw.translate_and_sign(&payload, "mallory@not-mine.com", "bob@gmail.com", NOW).unwrap_err();
     assert_eq!(err, OutboundError::NotDelegated("not-mine.com".into()));
 
     // And the end-to-end send reports it as a permanent failure (not retried blindly).
@@ -624,11 +637,12 @@ impl TlsPolicy for FixedMtaStsEnforce {
 
 #[test]
 fn send_dials_the_lowest_preference_mx_host() {
-    let mx = InMemoryMxResolver::new().with_mx(
-        "gmail.com",
-        &[("mx-backup.gmail.com", 20), ("mx-primary.gmail.com", 5)],
-    );
-    let transport = std::sync::Arc::new(RecordingTransport::new(true, TransportResult::Delivered { code: 250 }));
+    let mx = InMemoryMxResolver::new()
+        .with_mx("gmail.com", &[("mx-backup.gmail.com", 20), ("mx-primary.gmail.com", 5)]);
+    let transport = std::sync::Arc::new(RecordingTransport::new(
+        true,
+        TransportResult::Delivered { code: 250 },
+    ));
     struct ArcTransport(std::sync::Arc<RecordingTransport>);
     impl OutboundTransport for ArcTransport {
         fn deliver(&self, dest: &str, message: &[u8], require_tls: bool) -> TransportResult {
@@ -654,7 +668,10 @@ fn send_dials_the_lowest_preference_mx_host() {
 #[test]
 fn send_falls_back_to_the_domain_when_no_mx_records() {
     let mx = InMemoryMxResolver::new(); // nothing published for any domain
-    let transport = std::sync::Arc::new(RecordingTransport::new(true, TransportResult::Delivered { code: 250 }));
+    let transport = std::sync::Arc::new(RecordingTransport::new(
+        true,
+        TransportResult::Delivered { code: 250 },
+    ));
     struct ArcTransport(std::sync::Arc<RecordingTransport>);
     impl OutboundTransport for ArcTransport {
         fn deliver(&self, dest: &str, message: &[u8], require_tls: bool) -> TransportResult {
@@ -696,7 +713,10 @@ fn mta_sts_enforce_aborts_when_peer_offers_no_tls_never_downgrades() {
     // The resolved MX host DOES match the enforce policy's `mx:` pattern, but the transport (the
     // "peer") is not TLS-capable. This MUST abort — never silently send in cleartext.
     let mx = InMemoryMxResolver::new().with_mx("gmail.com", &[("mx1.gmail.com", 10)]);
-    let transport = std::sync::Arc::new(RecordingTransport::new(false, TransportResult::Delivered { code: 250 }));
+    let transport = std::sync::Arc::new(RecordingTransport::new(
+        false,
+        TransportResult::Delivered { code: 250 },
+    ));
     struct ArcTransport(std::sync::Arc<RecordingTransport>);
     impl OutboundTransport for ArcTransport {
         fn deliver(&self, dest: &str, message: &[u8], require_tls: bool) -> TransportResult {
@@ -727,8 +747,12 @@ fn mta_sts_enforce_aborts_when_no_resolved_mx_matches_any_pattern_never_downgrad
     // policy, or an attacker who hijacked MX records to point somewhere the policy never
     // authorized). MUST abort before ever dialing — not fall back to an unconstrained/plaintext
     // host.
-    let mx = InMemoryMxResolver::new().with_mx("gmail.com", &[("mx1.attacker-controlled.example", 10)]);
-    let transport = std::sync::Arc::new(RecordingTransport::new(true, TransportResult::Delivered { code: 250 }));
+    let mx =
+        InMemoryMxResolver::new().with_mx("gmail.com", &[("mx1.attacker-controlled.example", 10)]);
+    let transport = std::sync::Arc::new(RecordingTransport::new(
+        true,
+        TransportResult::Delivered { code: 250 },
+    ));
     struct ArcTransport(std::sync::Arc<RecordingTransport>);
     impl OutboundTransport for ArcTransport {
         fn deliver(&self, dest: &str, message: &[u8], require_tls: bool) -> TransportResult {
@@ -763,11 +787,12 @@ fn mta_sts_enforce_picks_the_lowest_preference_mx_among_matching_candidates() {
     // Two MX candidates; only the higher-preference-number (lower priority) one matches the
     // enforce policy's pattern. The gateway must still dial the best MATCHING one, not just the
     // globally-lowest-preference one that fails the pattern.
-    let mx = InMemoryMxResolver::new().with_mx(
-        "gmail.com",
-        &[("mx-unlisted.rogue.example", 1), ("mx-listed.gmail.com", 10)],
-    );
-    let transport = std::sync::Arc::new(RecordingTransport::new(true, TransportResult::Delivered { code: 250 }));
+    let mx = InMemoryMxResolver::new()
+        .with_mx("gmail.com", &[("mx-unlisted.rogue.example", 1), ("mx-listed.gmail.com", 10)]);
+    let transport = std::sync::Arc::new(RecordingTransport::new(
+        true,
+        TransportResult::Delivered { code: 250 },
+    ));
     struct ArcTransport(std::sync::Arc<RecordingTransport>);
     impl OutboundTransport for ArcTransport {
         fn deliver(&self, dest: &str, message: &[u8], require_tls: bool) -> TransportResult {
@@ -816,8 +841,10 @@ fn mta_sts_end_to_end_through_dns_txt_and_https_policy_seams() {
     // The full composition: TXT signal + fetched policy text parsed into an enforce policy with a
     // real (in-memory) DNS/HTTPS seam, driving OutboundGateway::send end to end.
     let txt = InMemoryTxtResolver::new().with_txt("_mta-sts.gmail.com", &["v=STSv1; id=42"]);
-    let fetcher = InMemoryPolicyFetcher::new()
-        .with_policy("gmail.com", "version: STSv1\nmode: enforce\nmx: *.gmail.com\nmax_age: 86400\n");
+    let fetcher = InMemoryPolicyFetcher::new().with_policy(
+        "gmail.com",
+        "version: STSv1\nmode: enforce\nmx: *.gmail.com\nmax_age: 86400\n",
+    );
     let policy = MtaStsTlsPolicy::new(Box::new(txt), Box::new(fetcher));
     let mx = InMemoryMxResolver::new().with_mx("gmail.com", &[("mx1.gmail.com", 10)]);
 
@@ -982,7 +1009,8 @@ fn spf_enforce_rejects_a_hard_fail_sender_at_mail_from_before_data() {
         DeliveryOutcome::Acked,
         Box::new(AllowAll),
     );
-    let spf = InMemorySpfResolver::new().with_txt("evil-sender.example", &["v=spf1 ip4:198.51.100.0/24 -all"]);
+    let spf = InMemorySpfResolver::new()
+        .with_txt("evil-sender.example", &["v=spf1 ip4:198.51.100.0/24 -all"]);
     let gw = base_gw.with_spf(Box::new(spf), SpfPolicy::Enforce);
 
     let mut s = MxSession::new(&gw, "203.0.113.9", NOW); // NOT in the authorized 198.51.100.0/24 range
@@ -990,7 +1018,10 @@ fn spf_enforce_rejects_a_hard_fail_sender_at_mail_from_before_data() {
     let mail = s.feed_line("MAIL FROM:<attacker@evil-sender.example>");
     assert_eq!(mail.code, 550, "SPF hard fail rejected at MAIL FROM, before DATA");
     assert!(mail.text.to_lowercase().contains("spf"));
-    assert!(delivery.captured.lock().unwrap().is_none(), "no MOTE was ever built for the SPF-failed sender");
+    assert!(
+        delivery.captured.lock().unwrap().is_none(),
+        "no MOTE was ever built for the SPF-failed sender"
+    );
 }
 
 #[test]
@@ -1004,7 +1035,8 @@ fn spf_enforce_accepts_a_pass_sender() {
         DeliveryOutcome::Acked,
         Box::new(AllowAll),
     );
-    let spf = InMemorySpfResolver::new().with_txt("good-sender.example", &["v=spf1 ip4:203.0.113.0/24 -all"]);
+    let spf = InMemorySpfResolver::new()
+        .with_txt("good-sender.example", &["v=spf1 ip4:203.0.113.0/24 -all"]);
     let gw = base_gw.with_spf(Box::new(spf), SpfPolicy::Enforce);
 
     let mut s = MxSession::new(&gw, "203.0.113.9", NOW); // inside the authorized range
@@ -1029,7 +1061,8 @@ fn spf_annotate_delivers_despite_a_hard_fail_but_the_verdict_is_still_computable
         DeliveryOutcome::Acked,
         Box::new(AllowAll),
     );
-    let spf = InMemorySpfResolver::new().with_txt("evil-sender.example", &["v=spf1 ip4:198.51.100.0/24 -all"]);
+    let spf = InMemorySpfResolver::new()
+        .with_txt("evil-sender.example", &["v=spf1 ip4:198.51.100.0/24 -all"]);
     let gw = base_gw.with_spf(Box::new(spf), SpfPolicy::Annotate); // the default
 
     // The verdict is computable regardless of policy...
@@ -1061,7 +1094,8 @@ fn spf_null_reverse_path_falls_back_to_the_helo_domain() {
         DeliveryOutcome::Acked,
         Box::new(AllowAll),
     );
-    let spf = InMemorySpfResolver::new().with_txt("bounce-relay.example", &["v=spf1 ip4:203.0.113.0/24 -all"]);
+    let spf = InMemorySpfResolver::new()
+        .with_txt("bounce-relay.example", &["v=spf1 ip4:203.0.113.0/24 -all"]);
     let gw = base_gw.with_spf(Box::new(spf), SpfPolicy::Enforce);
 
     let mut s = MxSession::new(&gw, "203.0.113.9", NOW);
@@ -1083,7 +1117,8 @@ fn dmarc_enforce_rejects_an_unaligned_reject_policy_message() {
     );
     // No SPF resolver (never evaluated) and no DKIM resolver (never verified) — the message cannot
     // possibly align, so DMARC's `p=reject` policy for the spoofed header-from domain must bite.
-    let dmarc = InMemoryDmarcResolver::new().with_txt("_dmarc.big-bank.example", &["v=DMARC1; p=reject"]);
+    let dmarc =
+        InMemoryDmarcResolver::new().with_txt("_dmarc.big-bank.example", &["v=DMARC1; p=reject"]);
     let gw = base_gw.with_dmarc(Box::new(dmarc), DmarcHandling::Enforce);
 
     let mut s = MxSession::new(&gw, "203.0.113.9", NOW);
@@ -1091,13 +1126,19 @@ fn dmarc_enforce_rejects_an_unaligned_reject_policy_message() {
     assert_eq!(s.feed_line("MAIL FROM:<phisher@spoofer.example>").code, 250);
     assert_eq!(s.feed_line(&format!("RCPT TO:<{}>", recip.email)).code, 250);
     s.feed_line("DATA");
-    for line in String::from_utf8(message_with_from_domain("big-bank.example", &recip.email)).unwrap().lines() {
+    for line in String::from_utf8(message_with_from_domain("big-bank.example", &recip.email))
+        .unwrap()
+        .lines()
+    {
         s.feed_line(line);
     }
     let reply = s.feed_line(".");
     assert_eq!(reply.code, 550, "DMARC p=reject with no aligned SPF/DKIM is refused");
     assert!(reply.text.to_lowercase().contains("dmarc"));
-    assert!(delivery.captured.lock().unwrap().is_none(), "no MOTE was built for the DMARC-failed message");
+    assert!(
+        delivery.captured.lock().unwrap().is_none(),
+        "no MOTE was built for the DMARC-failed message"
+    );
 }
 
 #[test]
@@ -1116,7 +1157,8 @@ fn dmarc_enforce_rejects_a_message_with_multiple_from_headers() {
     );
     // A DMARC resolver must be configured for DMARC to run at all; the specific record does not
     // matter because a multi-From message is refused before any per-domain policy lookup succeeds.
-    let dmarc = InMemoryDmarcResolver::new().with_txt("_dmarc.first.example", &["v=DMARC1; p=none"]);
+    let dmarc =
+        InMemoryDmarcResolver::new().with_txt("_dmarc.first.example", &["v=DMARC1; p=none"]);
     let gw = base_gw.with_dmarc(Box::new(dmarc), DmarcHandling::Enforce);
 
     // Two From headers — one "benign" (p=none), one the attacker wants a downstream client to show.
@@ -1138,8 +1180,14 @@ fn dmarc_enforce_rejects_a_message_with_multiple_from_headers() {
         s.feed_line(line);
     }
     let reply = s.feed_line(".");
-    assert_eq!(reply.code, 550, "a multi-From message is refused under DMARC Enforce (RFC 7489 §6.6.1)");
-    assert!(delivery.captured.lock().unwrap().is_none(), "no MOTE was built for the multi-From message");
+    assert_eq!(
+        reply.code, 550,
+        "a multi-From message is refused under DMARC Enforce (RFC 7489 §6.6.1)"
+    );
+    assert!(
+        delivery.captured.lock().unwrap().is_none(),
+        "no MOTE was built for the multi-From message"
+    );
 }
 
 #[test]
@@ -1156,7 +1204,8 @@ fn dmarc_pass_via_spf_alignment_delivers_normally() {
     // The envelope (MAIL FROM) domain matches the header-From domain exactly, and that domain's SPF
     // record passes unconditionally — SPF-aligned pass, so DMARC passes even under a p=reject policy.
     let spf = InMemorySpfResolver::new().with_txt("aligned.example", &["v=spf1 +all"]);
-    let dmarc = InMemoryDmarcResolver::new().with_txt("_dmarc.aligned.example", &["v=DMARC1; p=reject"]);
+    let dmarc =
+        InMemoryDmarcResolver::new().with_txt("_dmarc.aligned.example", &["v=DMARC1; p=reject"]);
     let gw = base_gw
         .with_spf(Box::new(spf), SpfPolicy::Annotate) // SPF itself not enforced; DMARC still uses it
         .with_dmarc(Box::new(dmarc), DmarcHandling::Enforce);
@@ -1166,7 +1215,10 @@ fn dmarc_pass_via_spf_alignment_delivers_normally() {
     assert_eq!(s.feed_line("MAIL FROM:<friend@aligned.example>").code, 250);
     assert_eq!(s.feed_line(&format!("RCPT TO:<{}>", recip.email)).code, 250);
     s.feed_line("DATA");
-    for line in String::from_utf8(message_with_from_domain("aligned.example", &recip.email)).unwrap().lines() {
+    for line in String::from_utf8(message_with_from_domain("aligned.example", &recip.email))
+        .unwrap()
+        .lines()
+    {
         s.feed_line(line);
     }
     let reply = s.feed_line(".");
@@ -1201,8 +1253,12 @@ fn malformed_binary_garbage_data_never_panics_with_spf_dkim_dmarc_all_enforcing(
     // Drive it straight through `accept_message_with_spf` (bypassing the line-oriented MxSession,
     // since raw NUL bytes aren't valid "lines" — this still exercises the exact same DKIM/SPF/DMARC
     // pipeline a socket-fed DATA body would).
-    let reply = gw.accept_message_with_spf("attacker@nowhere.example", &recip.email, garbage, NOW, None);
-    assert!(reply.code == 250 || reply.code == 451 || reply.code == 550, "a sane SMTP code, not a panic");
+    let reply =
+        gw.accept_message_with_spf("attacker@nowhere.example", &recip.email, garbage, NOW, None);
+    assert!(
+        reply.code == 250 || reply.code == 451 || reply.code == 550,
+        "a sane SMTP code, not a panic"
+    );
     // With no From: header at all, DMARC has nothing to align against.
     assert_eq!(
         gw.evaluate_dmarc(garbage, None, "attacker@nowhere.example"),
@@ -1219,7 +1275,8 @@ fn malformed_binary_garbage_data_never_panics_with_spf_dkim_dmarc_all_enforcing(
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-fn three_hop_gateway_chain_each_verifies_only_under_its_own_domain_and_the_record_carries_all_hops() {
+fn three_hop_gateway_chain_each_verifies_only_under_its_own_domain_and_the_record_carries_all_hops()
+{
     const RFC: &[u8] = b"From: a@gmail.com\r\nTo: bob@host.net\r\nSubject: hi\r\n\r\nbody\r\n";
     let k1 = AttestationKey::generate("relay-one.example", "gw1");
     let k2 = AttestationKey::generate("relay-two.example", "gw1");
@@ -1238,15 +1295,22 @@ fn three_hop_gateway_chain_each_verifies_only_under_its_own_domain_and_the_recor
     assert_eq!(chain[2].seq, Some(2));
 
     // Each hop verifies under its OWN domain's key over the exact bridged bytes...
-    chain[0].verify("relay-one.example", Some(&k1.public()), RFC).expect("hop 0 verifies under relay-one's key");
-    chain[1].verify("relay-two.example", Some(&k2.public()), RFC).expect("hop 1 verifies under relay-two's key");
-    chain[2].verify(DOMAIN, Some(&k3.public()), RFC).expect("hop 2 (recipient domain) verifies under its own key");
+    chain[0]
+        .verify("relay-one.example", Some(&k1.public()), RFC)
+        .expect("hop 0 verifies under relay-one's key");
+    chain[1]
+        .verify("relay-two.example", Some(&k2.public()), RFC)
+        .expect("hop 1 verifies under relay-two's key");
+    chain[2]
+        .verify(DOMAIN, Some(&k3.public()), RFC)
+        .expect("hop 2 (recipient domain) verifies under its own key");
     // ...and cross-domain verification fails (a hop never verifies under a DIFFERENT domain's key).
     assert!(chain[2].verify(DOMAIN, Some(&k1.public()), RFC).is_err());
     assert!(chain[0].verify("relay-one.example", Some(&k3.public()), RFC).is_err());
 
     // Assembled into the client-facing record: all three hops present, gateway-touched, round-trips.
-    let record = ProvenanceRecord::assemble(Tier::Fast, Profile::NotApplicable, None, None, chain.clone());
+    let record =
+        ProvenanceRecord::assemble(Tier::Fast, Profile::NotApplicable, None, None, chain.clone());
     assert_eq!(record.gateway_hops(), 3);
     assert_eq!(record.origin, Origin::GatewayTouched);
     assert!(!record.is_pure_mesh());
@@ -1376,8 +1440,10 @@ fn greylist_entry_expires_after_its_ttl_and_the_sender_is_greylisted_again() {
 
 #[test]
 fn governed_send_delivers_for_an_authenticated_sender() {
-    let transport =
-        std::sync::Arc::new(RecordingTransport::new(true, TransportResult::Delivered { code: 250 }));
+    let transport = std::sync::Arc::new(RecordingTransport::new(
+        true,
+        TransportResult::Delivered { code: 250 },
+    ));
     struct ArcTransport(std::sync::Arc<RecordingTransport>);
     impl OutboundTransport for ArcTransport {
         fn deliver(&self, dest: &str, message: &[u8], require_tls: bool) -> TransportResult {
@@ -1395,16 +1461,23 @@ fn governed_send_delivers_for_an_authenticated_sender() {
     )
     .with_sender_guard(guard);
 
-    let out =
-        gw.send_authenticated(&sample_payload(), "alice@alice-domain.com", "bob@gmail.com", "acct-alice", NOW);
+    let out = gw.send_authenticated(
+        &sample_payload(),
+        "alice@alice-domain.com",
+        "bob@gmail.com",
+        "acct-alice",
+        NOW,
+    );
     assert_eq!(out, GovernedSend::Sent(OutboundReport::Delivered));
     assert_eq!(transport.dialed_hosts().len(), 1, "an allowed send reached the destination MX");
 }
 
 #[test]
 fn governed_send_blocks_an_unauthenticated_sender_before_any_smtp() {
-    let transport =
-        std::sync::Arc::new(RecordingTransport::new(true, TransportResult::Delivered { code: 250 }));
+    let transport = std::sync::Arc::new(RecordingTransport::new(
+        true,
+        TransportResult::Delivered { code: 250 },
+    ));
     struct ArcTransport(std::sync::Arc<RecordingTransport>);
     impl OutboundTransport for ArcTransport {
         fn deliver(&self, dest: &str, message: &[u8], require_tls: bool) -> TransportResult {
@@ -1433,8 +1506,10 @@ fn governed_send_blocks_an_unauthenticated_sender_before_any_smtp() {
 
 #[test]
 fn governed_send_throttles_a_flood_and_never_dials_the_throttled_message() {
-    let transport =
-        std::sync::Arc::new(RecordingTransport::new(true, TransportResult::Delivered { code: 250 }));
+    let transport = std::sync::Arc::new(RecordingTransport::new(
+        true,
+        TransportResult::Delivered { code: 250 },
+    ));
     struct ArcTransport(std::sync::Arc<RecordingTransport>);
     impl OutboundTransport for ArcTransport {
         fn deliver(&self, dest: &str, message: &[u8], require_tls: bool) -> TransportResult {
@@ -1459,14 +1534,19 @@ fn governed_send_throttles_a_flood_and_never_dials_the_throttled_message() {
     assert_eq!(send("a@alice-domain.com"), GovernedSend::Sent(OutboundReport::Delivered));
     assert_eq!(send("a@alice-domain.com"), GovernedSend::Sent(OutboundReport::Delivered));
     // Third within the window is throttled — deferred to the node's retry queue, MX never dialed for it.
-    assert!(matches!(send("a@alice-domain.com"), GovernedSend::Blocked(SenderVerdict::Throttle { .. })));
+    assert!(matches!(
+        send("a@alice-domain.com"),
+        GovernedSend::Blocked(SenderVerdict::Throttle { .. })
+    ));
     assert_eq!(transport.dialed_hosts().len(), 2, "only the two allowed sends were dialed");
 }
 
 #[test]
 fn governed_send_fails_closed_with_no_guard_configured() {
-    let transport =
-        std::sync::Arc::new(RecordingTransport::new(true, TransportResult::Delivered { code: 250 }));
+    let transport = std::sync::Arc::new(RecordingTransport::new(
+        true,
+        TransportResult::Delivered { code: 250 },
+    ));
     struct ArcTransport(std::sync::Arc<RecordingTransport>);
     impl OutboundTransport for ArcTransport {
         fn deliver(&self, dest: &str, message: &[u8], require_tls: bool) -> TransportResult {

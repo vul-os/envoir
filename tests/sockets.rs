@@ -39,7 +39,11 @@ struct TestRecipient {
 }
 impl TestRecipient {
     fn new(email: &str) -> Self {
-        TestRecipient { email: email.into(), ik: IdentityKey::generate(), seal: SealKeypair::generate() }
+        TestRecipient {
+            email: email.into(),
+            ik: IdentityKey::generate(),
+            seal: SealKeypair::generate(),
+        }
     }
     fn recipient_key(&self) -> RecipientKey {
         RecipientKey { ik: self.ik.public(), seal_pub: self.seal.public().to_vec() }
@@ -86,8 +90,8 @@ fn self_signed() -> (CertificateDer<'static>, Arc<rustls::ServerConfig>) {
         rcgen::generate_simple_self_signed(vec![DOMAIN.to_string()]).expect("self-signed cert");
     let cert_der: CertificateDer<'static> = cert.der().clone();
     let key = PrivatePkcs8KeyDer::from(key_pair.serialize_der());
-    let cfg = envoir_gateway::server_config(vec![cert_der.clone()], key.into())
-        .expect("server config");
+    let cfg =
+        envoir_gateway::server_config(vec![cert_der.clone()], key.into()).expect("server config");
     (cert_der, cfg)
 }
 
@@ -108,10 +112,8 @@ fn loopback_starttls_delivers_and_produces_attested_mote() {
     let recip = TestRecipient::new("alice@example.org");
     let att_key = AttestationKey::generate(DOMAIN, GW_SELECTOR);
     let att_pub = att_key.public();
-    let delivery = Arc::new(CapturingDelivery {
-        outcome: DeliveryOutcome::Acked,
-        captured: Mutex::new(None),
-    });
+    let delivery =
+        Arc::new(CapturingDelivery { outcome: DeliveryOutcome::Acked, captured: Mutex::new(None) });
     let gw = InboundGateway::new(
         IdentityKey::generate(),
         vec![att_key],
@@ -139,7 +141,8 @@ fn loopback_starttls_delivers_and_produces_attested_mote() {
     assert_eq!(result, TransportResult::Delivered { code: 250 }, "STARTTLS DATA delivered → 250");
 
     // The inbound socket path built a MOTE and handed it to the mesh.
-    let (env, attestation) = delivery.captured.lock().unwrap().clone().expect("a MOTE was delivered");
+    let (env, attestation) =
+        delivery.captured.lock().unwrap().clone().expect("a MOTE was delivered");
 
     // It is addressed to the recipient's identity key and is a mail MOTE.
     assert!(env.to.resolves_to_key(&recip.ik.public()), "sealed to the recipient key");
@@ -254,7 +257,8 @@ fn starttls_advertised_but_the_command_itself_is_refused_is_aborted_not_downgrad
     // Opportunistic (require_tls = false): TLS is not mandated for this send, yet a peer that
     // advertised STARTTLS and then refused the command must still abort, not silently fall back to
     // an unencrypted MAIL/DATA on the same connection.
-    let result = transport.deliver("advertises-then-refuses.test", &sample_message("bob@x.test"), false);
+    let result =
+        transport.deliver("advertises-then-refuses.test", &sample_message("bob@x.test"), false);
     assert_eq!(
         result,
         TransportResult::TlsUnavailable,
@@ -326,7 +330,10 @@ fn starttls_handshake_failure_after_220_is_aborted_not_downgraded_even_when_oppo
         TransportResult::TlsUnavailable,
         "a TLS handshake that never completes after STARTTLS aborts, never downgrades"
     );
-    assert!(!saw_mail.load(Ordering::SeqCst), "must never have sent MAIL/DATA in cleartext after STARTTLS failed");
+    assert!(
+        !saw_mail.load(Ordering::SeqCst),
+        "must never have sent MAIL/DATA in cleartext after STARTTLS failed"
+    );
     let _ = handle.join();
 }
 

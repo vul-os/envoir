@@ -125,7 +125,10 @@ impl OutboundSenderGuard {
     /// Restrict outbound relay to this explicit set of authenticated accounts (the
     /// authenticated-senders-only allowlist). Until this is set the guard is fail-closed and
     /// authenticates **no** account, so the gateway is never an open outbound relay by default.
-    pub fn require_registered(mut self, accounts: impl IntoIterator<Item = impl Into<String>>) -> Self {
+    pub fn require_registered(
+        mut self,
+        accounts: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
         self.registered = Some(accounts.into_iter().map(Into::into).collect());
         self
     }
@@ -147,7 +150,8 @@ impl OutboundSenderGuard {
     pub fn authorize_send(&self, account: &str) -> SenderVerdict {
         if !self.is_authenticated(account) {
             return SenderVerdict::Refuse {
-                reason: "5.7.1 outbound relay denied: sender is not an authenticated account".into(),
+                reason: "5.7.1 outbound relay denied: sender is not an authenticated account"
+                    .into(),
             };
         }
         let now = self.clock.now_ms();
@@ -216,7 +220,12 @@ impl OutboundSenderGuard {
 
     /// The current reputation strike count for an account (for tests / operator introspection).
     pub fn strikes(&self, account: &str) -> u32 {
-        self.state.lock().expect("outbound guard poisoned").get(account).map(|s| s.strikes).unwrap_or(0)
+        self.state
+            .lock()
+            .expect("outbound guard poisoned")
+            .get(account)
+            .map(|s| s.strikes)
+            .unwrap_or(0)
     }
 }
 

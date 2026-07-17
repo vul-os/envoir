@@ -274,16 +274,18 @@ impl HttpsPolicyFetcher {
 
     fn fetch(&self, domain: &str) -> std::io::Result<String> {
         let host = format!("mta-sts.{domain}");
-        let addr: SocketAddr = (host.as_str(), 443u16)
-            .to_socket_addrs_first()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no address for mta-sts host"))?;
+        let addr: SocketAddr =
+            (host.as_str(), 443u16).to_socket_addrs_first().ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::NotFound, "no address for mta-sts host")
+            })?;
         let tcp = TcpStream::connect_timeout(&addr, self.connect_timeout)?;
         tcp.set_read_timeout(Some(self.io_timeout))?;
         tcp.set_write_timeout(Some(self.io_timeout))?;
-        let name = ServerName::try_from(host.clone())
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid server name"))?;
+        let name = ServerName::try_from(host.clone()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid server name")
+        })?;
         let conn = ClientConnection::new(self.client_config.clone(), name)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
         let mut tls = StreamOwned::new(conn, tcp);
         tls.conn.complete_io(&mut tls.sock)?;
 
@@ -296,16 +298,16 @@ impl HttpsPolicyFetcher {
         let mut response = Vec::new();
         tls.read_to_end(&mut response)?;
         let text = String::from_utf8_lossy(&response);
-        let (head, body) = text
-            .split_once("\r\n\r\n")
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "no HTTP header/body split"))?;
+        let (head, body) = text.split_once("\r\n\r\n").ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "no HTTP header/body split")
+        })?;
         let status_line = head.lines().next().unwrap_or("");
-        let status_ok = status_line.split_whitespace().nth(1).map(|c| c.starts_with('2')).unwrap_or(false);
+        let status_ok =
+            status_line.split_whitespace().nth(1).map(|c| c.starts_with('2')).unwrap_or(false);
         if !status_ok {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("non-2xx MTA-STS policy fetch: {status_line}"),
-            ));
+            return Err(std::io::Error::other(format!(
+                "non-2xx MTA-STS policy fetch: {status_line}"
+            )));
         }
         Ok(body.to_string())
     }
@@ -356,7 +358,8 @@ impl MtaStsTlsPolicy {
     /// retrievable / malformed (all of which this stateless gateway treats as "no policy").
     fn resolve(&self, domain: &str) -> Option<StsPolicy> {
         let txt_name = format!("_mta-sts.{domain}");
-        let signaled = self.txt.lookup_txt(&txt_name).iter().any(|v| v.trim_start().starts_with("v=STSv1"));
+        let signaled =
+            self.txt.lookup_txt(&txt_name).iter().any(|v| v.trim_start().starts_with("v=STSv1"));
         if !signaled {
             return None;
         }
@@ -412,7 +415,8 @@ mod tests {
 
     #[test]
     fn unknown_keys_are_ignored() {
-        let text = "version: STSv1\nmode: enforce\nmx: mail.example.com\nsome_future_key: whatever\n";
+        let text =
+            "version: STSv1\nmode: enforce\nmx: mail.example.com\nsome_future_key: whatever\n";
         assert!(parse_policy(text).is_ok());
     }
 
@@ -464,9 +468,18 @@ mod tests {
     fn wildcard_pattern_matches_exactly_one_label() {
         assert!(mx_pattern_matches("*.example.com", "mail.example.com"));
         assert!(mx_pattern_matches("*.example.com", "backup.example.com"));
-        assert!(!mx_pattern_matches("*.example.com", "example.com"), "wildcard requires a label, not zero");
-        assert!(!mx_pattern_matches("*.example.com", "a.b.example.com"), "wildcard is exactly one label");
-        assert!(!mx_pattern_matches("*.example.com", "evilexample.com"), "must be a label boundary, not a suffix");
+        assert!(
+            !mx_pattern_matches("*.example.com", "example.com"),
+            "wildcard requires a label, not zero"
+        );
+        assert!(
+            !mx_pattern_matches("*.example.com", "a.b.example.com"),
+            "wildcard is exactly one label"
+        );
+        assert!(
+            !mx_pattern_matches("*.example.com", "evilexample.com"),
+            "must be a label boundary, not a suffix"
+        );
     }
 
     #[test]
@@ -476,8 +489,14 @@ mod tests {
             .with_txt("_mta-sts.testing.example", &["v=STSv1; id=1"])
             .with_txt("_mta-sts.opted-out.example", &["v=STSv1; id=1"]);
         let fetcher = InMemoryPolicyFetcher::new()
-            .with_policy("enforced.example", "version: STSv1\nmode: enforce\nmx: mx.enforced.example\n")
-            .with_policy("testing.example", "version: STSv1\nmode: testing\nmx: mx.testing.example\n")
+            .with_policy(
+                "enforced.example",
+                "version: STSv1\nmode: enforce\nmx: mx.enforced.example\n",
+            )
+            .with_policy(
+                "testing.example",
+                "version: STSv1\nmode: testing\nmx: mx.testing.example\n",
+            )
             .with_policy("opted-out.example", "version: STSv1\nmode: none\n");
         let policy = MtaStsTlsPolicy::new(Box::new(txt), Box::new(fetcher));
 
@@ -499,7 +518,10 @@ mod tests {
             Box::new(InMemoryTxtResolver::new()),
             Box::new(InMemoryPolicyFetcher::new()),
         );
-        assert_eq!(policy.requirement_for("never-heard-of-sts.example"), TlsRequirement::Opportunistic);
+        assert_eq!(
+            policy.requirement_for("never-heard-of-sts.example"),
+            TlsRequirement::Opportunistic
+        );
         assert!(policy.allowed_mx_patterns("never-heard-of-sts.example").is_empty());
     }
 
@@ -515,9 +537,10 @@ mod tests {
 
     #[test]
     fn txt_signaled_but_policy_body_malformed_is_opportunistic() {
-        let txt = InMemoryTxtResolver::new().with_txt("_mta-sts.bad-policy.example", &["v=STSv1; id=1"]);
-        let fetcher =
-            InMemoryPolicyFetcher::new().with_policy("bad-policy.example", "mode: enforce\nmx: mx.example\n"); // no version
+        let txt =
+            InMemoryTxtResolver::new().with_txt("_mta-sts.bad-policy.example", &["v=STSv1; id=1"]);
+        let fetcher = InMemoryPolicyFetcher::new()
+            .with_policy("bad-policy.example", "mode: enforce\nmx: mx.example\n"); // no version
         let policy = MtaStsTlsPolicy::new(Box::new(txt), Box::new(fetcher));
         assert_eq!(policy.requirement_for("bad-policy.example"), TlsRequirement::Opportunistic);
     }
