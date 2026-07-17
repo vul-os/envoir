@@ -107,6 +107,19 @@ export function render(root) {
     </section>
 
     <section class="set-card">
+      <h2>${icon('network')} Node connection — real JMAP sync (spec §8.1)</h2>
+      <p class="set-hint">Point this client at <b>your own node</b> to leave the demo behind: it syncs your <b>real</b> mailbox over JMAP (RFC 8620/8621) at the node's native listener. Authentication is an <b>app-password</b> (spec §8.2) — a node-issued secret, never your identity key. Leave blank to keep running as the labeled simulation. <b>Current mode: <span class="mono" id="netmode">${state.net.mode === 'real' ? 'live node' : 'simulated'}</span></b>${state.net.error ? ` <span class="mono" style="color:var(--danger,#e5484d)">(${esc(state.net.error)})</span>` : ''}</p>
+      <label class="cfield"><span>Node base URL</span><input id="nodeurl" placeholder="http://127.0.0.1:4700" value="${esc(s.node.baseUrl || '')}" autocomplete="off" spellcheck="false"></label>
+      <label class="cfield"><span>Username (account)</span><input id="nodeuser" placeholder="you@your-node" value="${esc(s.node.username || '')}" autocomplete="off" spellcheck="false"></label>
+      <label class="cfield"><span>App-password</span><input id="nodepw" type="password" placeholder="node-issued app-password" value="${esc(s.node.appPassword || '')}" autocomplete="off" spellcheck="false"></label>
+      <div class="set-row">
+        <button class="btn primary" id="nodeconnect">${icon('network')} Connect &amp; sync</button>
+        <button class="btn ghost" id="nodedisconnect" ${state.net.mode === 'real' ? '' : 'disabled'}>Disconnect</button>
+        <button class="btn ghost" id="nodesync" ${state.net.mode === 'real' ? '' : 'disabled'}>${icon('repeat')} Sync now</button>
+      </div>
+    </section>
+
+    <section class="set-card">
       <h2>${icon('sun')} Appearance</h2>
       <div class="set-row between"><div><b>Theme</b><small>dark is primary</small></div>
         <div class="seg" id="themeseg" role="group" aria-label="Theme"><button data-th="dark" aria-pressed="${s.theme === 'dark'}" class="${s.theme === 'dark' ? 'on' : ''}">${icon('moon')} Dark</button><button data-th="light" aria-pressed="${s.theme === 'light'}" class="${s.theme === 'light' ? 'on' : ''}">${icon('sun')} Light</button></div></div>
@@ -184,6 +197,9 @@ export function render(root) {
     bus.rerender();
   };
 
+  // Node connection: real JMAP sync against the user's node
+  wireNode(root);
+
   // Notifications: permission, push subscription, and the local test wake-ping
   wireNotifications(root);
 
@@ -192,6 +208,49 @@ export function render(root) {
   root.querySelector('#signout').onclick = () => { if (confirm('Sign out and clear this identity from this browser?')) { logout(); location.reload(); } };
 
   renderSignin(root.querySelector('#signinbox'));
+}
+
+// ---- Node connection: real JMAP sync against the user's own node (spec §8.1) ----------------
+function wireNode(root) {
+  const s = state.settings;
+  const read = () => {
+    s.node.baseUrl = root.querySelector('#nodeurl').value.trim();
+    s.node.username = root.querySelector('#nodeuser').value.trim();
+    s.node.appPassword = root.querySelector('#nodepw').value;
+  };
+  root.querySelector('#nodeconnect').onclick = async () => {
+    read();
+    s.node.enabled = !!(s.node.baseUrl && s.node.username && s.node.appPassword);
+    saveSettings();
+    if (!s.node.enabled) { toast('Enter node URL, username and app-password to connect.', { ms: 4000 }); return; }
+    toast(`${icon('network')} Connecting to your node…`, { ms: 2000 });
+    const { connect } = await import('../net/sync.js');
+    const res = await connect({ ...s.node });
+    bus.refreshChrome();
+    if (res.ok) toast(`${icon('check')} Live node connected — ${res.count} conversation${res.count === 1 ? '' : 's'} synced`, { ms: 4200 });
+    else toast(`${icon('shield')} Could not reach the node: ${esc(res.reason || 'unreachable')} — staying in simulation.`, { ms: 5200 });
+    bus.rerender();
+  };
+  root.querySelector('#nodedisconnect').onclick = async () => {
+    const { disconnect } = await import('../net/sync.js');
+    disconnect();
+    s.node.enabled = false;
+    saveSettings();
+    // Re-seed the simulation so the demo mailbox comes back rather than an empty store.
+    const { initStore } = await import('../store.js');
+    initStore();
+    bus.refreshChrome();
+    toast(`${icon('network')} Disconnected — back to the simulated network.`, { ms: 3600 });
+    bus.rerender();
+  };
+  root.querySelector('#nodesync').onclick = async () => {
+    const { syncNow } = await import('../net/sync.js');
+    const res = await syncNow();
+    bus.refreshChrome();
+    if (res.ok) toast(res.changed ? `${icon('check')} Synced — mailbox updated` : `${icon('check')} Up to date`, { ms: 2600 });
+    else toast(`${icon('shield')} Sync failed: ${esc(res.reason || 'error')}`, { ms: 4200 });
+    bus.rerender();
+  };
 }
 
 // ---- Notifications: browser permission + Web Push subscription + local test wake-ping -------

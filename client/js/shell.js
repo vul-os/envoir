@@ -50,6 +50,14 @@ export const SHORTCUTS = [
   ['Esc', 'Close overlay'],
 ];
 
+// The honest network pill: REAL mode (live JMAP against the user's node) vs the labeled
+// SIMULATION. The `id="net-pill"` span's class + title + contents are refreshed by refreshChrome.
+export function netPillHtml() {
+  return state.net.mode === 'real'
+    ? `${icon('network')} live node`
+    : `${icon('network')} simulated network`;
+}
+
 export function mountShell() {
   initStore();
   const app = document.getElementById('app');
@@ -73,7 +81,7 @@ export function mountShell() {
         </div>
         <button class="cmd-open" id="cmdk" aria-label="Open command palette"><kbd>⌘K</kbd> commands</button>
         <div class="topbar-right">
-          <span class="net-pill" title="This client's network is simulated">${icon('network')} simulated network</span>
+          <span class="net-pill" id="net-pill">${netPillHtml()}</span>
           <button class="icon-btn" id="theme-toggle" title="Toggle theme" aria-label="Toggle light or dark theme">${icon(state.settings.theme === 'dark' ? 'sun' : 'moon')}</button>
           <button class="btn primary sm" id="quick-compose">${icon('edit')} Compose</button>
         </div>
@@ -143,6 +151,15 @@ function refreshChrome() {
   const setBadge = (id, n) => { const e = app.querySelector(`[data-badge="${id}"]`); if (e) { e.textContent = n || ''; e.classList.toggle('on', !!n); } };
   setBadge('mail', unread); setBadge('chat', chatUnread); setBadge('calendar', inviteCount);
   const t = app.querySelector('#theme-toggle'); if (t) t.innerHTML = icon(state.settings.theme === 'dark' ? 'sun' : 'moon');
+  const pill = app.querySelector('#net-pill');
+  if (pill) {
+    const real = state.net.mode === 'real';
+    pill.innerHTML = netPillHtml();
+    pill.classList.toggle('live', real);
+    pill.title = real
+      ? `Live JMAP sync with your node${state.net.accountId ? ' (' + state.net.accountId + ')' : ''}`
+      : 'This client\'s network is simulated';
+  }
   const id = currentIdentity();
   const railId = app.querySelector('#rail-id');
   if (railId) { railId.innerHTML = avatar(selfPerson(), 40); railId.title = displayAddress(id); railId.setAttribute('aria-label', `Open settings — signed in as ${displayAddress(id)}`); }

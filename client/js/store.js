@@ -22,6 +22,11 @@ const defaultSettings = {
   // here against the simulated store; a real node enforces before decryption for cold senders.
   blocked: [],
   allowed: ['ada@envoir.org'],
+  // Node connection (real JMAP sync, spec §8.1). Empty by default → the client runs as the
+  // clearly-labeled SIMULATION. Filled in (Settings → Node) or injected by a Tauri shell, it
+  // upgrades the client to REAL mode against the user's own node. The app-password (spec §8.2)
+  // is a node-issued secret, not the identity key.
+  node: { enabled: false, baseUrl: 'http://127.0.0.1:4700', username: '', appPassword: '' },
 };
 
 export const state = {
@@ -39,7 +44,42 @@ export const state = {
     compose: null,                  // active compose draft object or null
   },
   settings: { ...defaultSettings },
+  // Network mode — the honest REAL-vs-SIMULATION switch (net/sync.js owns the transitions).
+  //   mode 'sim'  → state.mail is seed data; UI shows "simulated network"
+  //   mode 'real' → state.mail is live JMAP data from the node; UI shows "live node"
+  net: {
+    mode: 'sim', status: 'idle', error: null,
+    client: null, accountId: null, sessionState: null, lastSync: 0,
+  },
 };
+
+// Merge a partial network-status patch into state.net (called by net/sync.js on every transition).
+export function setNetStatus(patch) {
+  state.net = { ...state.net, ...patch };
+  return state.net;
+}
+
+// Resolve the node connection config: a Tauri/host-injected `window.__ENVOIR_NODE__` wins (the
+// shell will inject base URL + app-password there), otherwise the saved Settings → Node config.
+// Returns `{ enabled, baseUrl, username, appPassword }`.
+export function resolveNodeConfig() {
+  const injected = (typeof globalThis !== 'undefined' && globalThis.__ENVOIR_NODE__) || null;
+  if (injected && injected.baseUrl && injected.username && injected.appPassword) {
+    return {
+      enabled: injected.enabled !== false,
+      baseUrl: injected.baseUrl,
+      username: injected.username,
+      appPassword: injected.appPassword,
+    };
+  }
+  const n = state.settings.node || {};
+  return {
+    enabled: !!n.enabled,
+    baseUrl: n.baseUrl || 'http://127.0.0.1:4700',
+    username: n.username || '',
+    appPassword: n.appPassword || '',
+  };
+}
 
 export function initStore() {
   state.mail = seedMail();
@@ -105,6 +145,7 @@ export function loadSettings() {
     const s = JSON.parse(localStorage.getItem(LS_SETTINGS) || 'null');
     if (s) state.settings = { ...defaultSettings, ...s,
       vacation: { ...defaultSettings.vacation, ...(s.vacation || {}) },
+      node: { ...defaultSettings.node, ...(s.node || {}) },
       blocked: Array.isArray(s.blocked) ? s.blocked : defaultSettings.blocked.slice(),
       allowed: Array.isArray(s.allowed) ? s.allowed : defaultSettings.allowed.slice() };
   } catch { /* ignore */ }

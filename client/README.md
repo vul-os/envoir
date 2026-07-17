@@ -3,7 +3,13 @@
 A premium, unified communications app for DMTAP — **mail, chat, calendar, contacts, files, and
 groups on one sovereign identity**. Plain HTML + CSS + vanilla JS ES modules. **No framework, no
 build step, no npm, no CDNs.** Everything is self-contained; the real cryptography runs in the
-browser and everything network-facing is a clearly-labeled simulation.
+browser.
+
+**Mail is now real when you point it at a node.** Configure your node's base URL + an
+app-password (Settings → *Node connection*, or a host-injected config) and the client leaves the
+demo behind: it syncs your **actual mailbox** over JMAP (RFC 8620/8621) against the node's native
+listener (spec §8.1), and the top-bar pill flips from *simulated network* to **live node**. With
+no node configured it stays a clearly-labeled simulation, so it still runs standalone as a demo.
 
 ## Run
 
@@ -94,15 +100,17 @@ conversation ·
 | MOTE | **Real signature** over the payload; content-address id computed | "Encryption" and the mixnet onion are structural, not performed (no real MLS/HPKE session) |
 | Sign-in demo | **Real signature** over the origin-bound challenge, same key path as mail | Origin binding is the weaker in-page mode; true phishing-resistance needs WebAuthn (§13.3.1) |
 | Files | **Real SHA-256** chunk/manifest hashing of dropped files | Labeled `b3:` to match the spec's BLAKE3 intent; not actually stored/replicated |
-| Network | — | **Entirely simulated**: no peers, no mixnet, no gateway; delivery paths + latency + hop animation are in-memory (`mesh-sim.js`). The UI says "simulated network." |
+| Mail sync | **Real JMAP** (RFC 8620/8621) against your node when a node URL + app-password are configured — live mailbox, folders, threads, keywords → the same UI (`js/net/jmap.js` + `js/net/sync.js`); pill shows **live node** | Falls back to the seed-data simulation when no node is configured or it's unreachable |
+| Network (delivery) | — | **Simulated**: no peers, no mixnet, no gateway; delivery-path + latency + hop animation are in-memory (`mesh-sim.js`). Real *send* over the node is the next step (JMAP EmailSubmission). |
 | Web Push | **Real** `PushManager.subscribe()` + service-worker `push`/`notificationclick` handling | No live push backend exists here — the applicationServerKey is a demo placeholder, and "Send test wake-ping" (Settings → Notifications) posts straight to the service worker to exercise the exact push → sync → notification path locally, clearly labeled as a simulation of what the user's own node would send |
-| Mail/chat/calendar/contacts/files/groups data | — | Rich in-memory **seed data** (`seed.js`); a real client syncs these as MOTEs over JMAP + libp2p to your node |
+| Chat/calendar/contacts/files/groups data | — | Rich in-memory **seed data** (`seed.js`) — these kinds are not yet wired to the node (mail is; the rest sync over JMAP-adjacent methods next) |
 | @handle directory | — | In-memory registry with pre-taken names + a fake key-transparency leaf |
 | Aliases / plus-addressing / RSVP / group posts | Build **real signed MOTEs** | Their *delivery* is simulated |
 
-A production client replaces `mesh-sim.js` + `seed.js` with a libp2p connection to the user's
-node, compiles the Rust MOTE/MLS/identity core to WASM (the libsignal model), and binds the
-sign-in origin via WebAuthn — the UI layer stays essentially the same.
+Mail already runs against the node (`js/net/jmap.js` + `js/net/sync.js`); a production client
+extends the same seam to replace the rest of `mesh-sim.js` + `seed.js` (chat/calendar/contacts/
+files, then real send via JMAP EmailSubmission), compiles the Rust MOTE/MLS/identity core to WASM
+(the libsignal model), and binds the sign-in origin via WebAuthn — the UI layer stays the same.
 
 ## Module layout
 
@@ -127,6 +135,8 @@ js/avatar.js          the avatar ladder: user URL → opt-in Gravatar → key-de
 js/resolver.js        pattern-classify a name against the resolver ladder (key-name/DNS/name-chain/@handle/petname) — presentation only
 js/provenance.js      transport-path provenance (pure-mesh vs gateway-touched) badges + expandable path graph
 js/mote.js            MOTE construction (spec §2), real payload signature; mail/chat/calendar/contact/group kinds
+js/net/jmap.js        REAL JMAP client (RFC 8620/8621): session discovery, batched calls + back-references, Email/changes, blob download — HTTP Basic app-password auth (DOM-free)
+js/net/sync.js        maps live JMAP mailbox → the existing state.mail thread shape; owns the real-vs-simulation mode switch
 js/mesh-sim.js        SIMULATED mesh/mixnet delivery planning + @handle directory
 js/seed.js            rich seed data for every module (people, mail threads, chats, events, files, groups)
 js/compose.js         compose modal: signatures, privacy tier, scheduled send, undo send, drafts

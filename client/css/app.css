@@ -317,6 +317,8 @@ kbd { font-family: var(--mono); font-size: 11px; background: var(--bg-3); border
 .topbar-right { display: flex; align-items: center; gap: 10px; }
 .net-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-faint); padding: 4px 10px; border-radius: 20px; background: var(--bg-2); border: 1px solid var(--line); }
 .net-pill .ic { width: 14px; height: 14px; color: var(--accent); }
+.net-pill.live { color: var(--good); background: color-mix(in srgb, var(--good) 12%, var(--bg-2)); border-color: color-mix(in srgb, var(--good) 40%, var(--line)); }
+.net-pill.live .ic { color: var(--good); }
 
 .view { flex: 1; min-height: 0; display: flex; overflow: hidden; }
 
