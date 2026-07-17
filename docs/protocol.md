@@ -102,9 +102,9 @@ bridge (inbound legacy → DMTAP, outbound DMTAP → legacy) run their own anti-
 sharing one. See [features/self-hosting.md](features/self-hosting.md#the-gateway-address-mapping)
 for the full model and
 [features/transport-traceability.md](features/transport-traceability.md) for how a recipient can
-verify a message actually crossed a gateway (and thus why it's billed). The gateway lives in this
-monorepo today by design, with the boundary discipline kept clean for a future split into its own
-`envoir-gateway` repository — see [`gateway/SEPARATION.md`](../gateway/SEPARATION.md).
+verify a message actually crossed a gateway (and thus why it's billed). The gateway now lives in
+its own `envoir-gateway` repository (env-oir/envoir-gateway), split out from this monorepo along
+the boundary that was kept clean for exactly that purpose.
 
 ## Client access
 

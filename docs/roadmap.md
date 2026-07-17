@@ -29,7 +29,7 @@ the spec's own roadmap markers, it doesn't belong here.
   [`crates/dmtap-mail/README.md`](../crates/dmtap-mail/README.md) for exactly what's done vs.
   explicitly deferred (real TLS, DEFLATE compression, cross-server CATENATE URLFETCH, JMAP push
   transport).
-- **The legacy gateway** (`gateway/`, backed by the `envoir-gateway` crate) — a real inbound MX
+- **The legacy gateway** (the `envoir-gateway` crate, now in its own `env-oir/envoir-gateway` repo) — a real inbound MX
   listener with STARTTLS, a real pre-`DATA` anti-abuse gate (RBL/DNSBL, SPF, DMARC-`p=` awareness,
   greylisting, per-IP rate limits), real gateway attestation sealing, real delegated-selector DKIM
   signing (ed25519-sha256, RFC 8463/6376, with a hard refusal to sign an undelegated domain), real

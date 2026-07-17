@@ -3,7 +3,7 @@
 ## The spec is authoritative
 
 Independent implementations must be buildable from the DMTAP specification alone — the Rust
-reference in this repository (`node/`, `gateway/`, `crates/*`) is a proof and a set of libraries,
+reference in this repository (`node/`, `crates/*`; the gateway is now its own `env-oir/envoir-gateway` repo) is a proof and a set of libraries,
 **not** normative. Where the reference and the spec disagree, the spec governs, and the
 discrepancy is a bug. The spec lives in the sibling
 **[env-oir/dmtap](https://github.com/env-oir/dmtap)** repository; changes to protocol behavior
@@ -16,7 +16,7 @@ should generally start there, not in this repo's code.
 - Read [roadmap.md](roadmap.md) for what's implemented vs. stubbed today, so you don't duplicate
   work already tracked as deferred.
 - Check the relevant crate's own doc comments and tests — most subsystems (`dmtap-mail`,
-  `dmtap-deniable`, `dmtap-mls`, `envoir-gateway`) carry a detailed capability/status table in
+  `dmtap-deniable`, `dmtap-mls`) carry a detailed capability/status table in
   their module docs or README.
 
 ## Building and testing
@@ -44,8 +44,8 @@ See [getting-started.md](getting-started.md) for the full command reference.
   implementation doesn't actually back up — this project's whole credibility rests on not
   overclaiming. See [privacy.md](privacy.md) and [security.md](security.md) for the tone to match.
 - **Honest about what's stubbed.** If you're implementing a piece of a larger subsystem, say so
-  in the module doc and in the relevant README, the way `node/README.md` and `gateway/README.md`
-  already do — a `todo!()` with a spec-section pointer is more useful than a silently-incomplete
+  in the module doc and in the relevant README, the way `node/README.md`
+  already does — a `todo!()` with a spec-section pointer is more useful than a silently-incomplete
   happy path.
 - **Fail closed, not open, on anything security-relevant.** DMTAP's whole downgrade-resistance
   model (spec §10.7) is "refuse or ask the user, never silently degrade" — new code should follow

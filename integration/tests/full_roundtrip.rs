@@ -15,10 +15,8 @@
 //! single call (here split into its two calls, `resolve_and_pin` then `send_mail`, so each stage's
 //! result is independently assertable).
 //!
-//! This whole delivery never invokes any `envoir-gateway` component — it is provably pure-mesh
-//! (§7.8.1(b)) simply because no gateway ever touched it. `gateway_provenance.rs` is the companion
-//! test that makes gateway-touched vs. pure-mesh explicitly distinguishable and provable within one
-//! recipient's inbox.
+//! This whole delivery is provably pure-mesh (§7.8.1(b)): the naming → seal → mesh → mail chain
+//! never leaves the DMTAP stack, so no legacy-SMTP bridge is ever involved in the path under test.
 
 use std::time::{Duration, Instant};
 

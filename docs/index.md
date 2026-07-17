@@ -62,7 +62,7 @@ JMAP, with CalDAV/CardDAV compatibility) — see [protocol.md](protocol.md#messa
 | Path | What it is |
 |---|---|
 | `node/` | envoir-node — the whole client side: identity, mailbox, mesh, messaging, files, client protocol servers |
-| `gateway/` | envoir-gateway — the optional legacy SMTP bridge |
+| env-oir/envoir-gateway | envoir-gateway — the optional legacy SMTP bridge, now its own repository (not in this workspace) |
 | `crates/dmtap-core` | Identity, MOTE, content addressing, canonical CBOR |
 | `crates/dmtap-auth` | DMTAP-Auth — decentralized, key-based sign-in |
 | `crates/dmtap-deniable` | Deniable 1:1 messaging (X3DH + Double Ratchet) |

@@ -26,7 +26,7 @@ FROM rust:1.90-slim-bookworm AS builder
 WORKDIR /src
 
 # Copy only the Cargo workspace members envoir-node's build graph needs. The root Cargo.toml
-# declares `members = ["node", "gateway", "integration", "crates/*"]`; ALL of those paths must
+# declares `members = ["node", "integration", "crates/*"]`; ALL of those paths must
 # exist for Cargo to parse the workspace manifest at all (even though `-p envoir-node` only
 # *compiles* node's own dependency subset: dmtap-core, dmtap-mail, dmtap-mls, dmtap-naming,
 # dmtap-auth, dmtap-deniable). `integration` and the unused crates (dmtap-p2p, dmtap-seam,
@@ -34,7 +34,6 @@ WORKDIR /src
 # not because their code is built into this image.
 COPY Cargo.toml ./Cargo.toml
 COPY node ./node
-COPY gateway ./gateway
 COPY crates ./crates
 COPY integration ./integration
 

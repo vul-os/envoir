@@ -99,11 +99,12 @@ fn suite_json_cross_reference_matches_known_state() {
     );
 
     // Sanity: the catalog has grown past its original shape (124 cases as of writing, up from 104;
-    // see SUITE.md/README) and this crate now executes the large majority of them — 116/124 (up from
-    // 111/124 after the suite-negotiation / tier-enforcement / mix-descriptor-freshness / pinned-
-    // domain-directory / random-mode gateway-alias reference surfaces landed and were wired here),
-    // with only 8 honestly left `Skipped` for behavior no crate in this workspace can exercise yet
-    // (see the `skip_reason` table in `construction.rs`). Rather than pin an exact
+    // see SUITE.md/README) and this crate now executes the large majority of them — 110/124, with
+    // 14 honestly left `Skipped`: 8 for behavior no crate in this workspace can exercise yet, plus
+    // the 6 legacy-SMTP-gateway cases (DMTAP-GWALIAS-01/02/03, DMTAP-LEG-01/02/03) whose reference
+    // code was split out to the separate env-oir/envoir-gateway repo and is now executed by that
+    // repo's own conformance suite (see the `skip_reason` table in `construction.rs`). Rather than
+    // pin an exact
     // total (which would break on every new spec case), just sanity-check the three buckets sum
     // correctly and that both "some cases pass" and "some cases are honestly skipped" hold.
     assert_eq!(pass + skip + fails.len(), outcomes.len());
@@ -192,12 +193,12 @@ fn a_meaningful_share_of_construction_todo_cases_are_executed() {
         "construction-todo cases FAILED their construction (not just skipped): {failed:?}"
     );
     assert!(
-        executed.len() >= 77,
-        "expected at least 77 construction-todo cases to be actually executed (against dmtap-core \
-         directly, plus more via dmtap-auth/dmtap-naming/dmtap-deniable/dmtap-mls/dmtap-clustersync/ \
-         envoir-gateway — see the Cargo.toml comment; this floor rose from 72 when the suite- \
-         negotiation, tier-enforcement, mix-descriptor-freshness, pinned-domain-directory and \
-         random-mode gateway-alias cases were wired), got {} ({executed:?}) — did \
+        executed.len() >= 71,
+        "expected at least 71 construction-todo cases to be actually executed (against dmtap-core \
+         directly, plus more via dmtap-auth/dmtap-naming/dmtap-deniable/dmtap-mls/dmtap-clustersync \
+         — see the Cargo.toml comment; this floor DROPPED from 77 when the 6 legacy-SMTP-gateway \
+         cases, DMTAP-GWALIAS-01/02/03 and DMTAP-LEG-01/02/03, moved to the split-out \
+         env-oir/envoir-gateway repo's own conformance suite), got {} ({executed:?}) — did \
          construction::run_construction_case regress?",
         executed.len()
     );

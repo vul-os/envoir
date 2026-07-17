@@ -24,7 +24,7 @@ Onboarding has three tiers (spec §3.8), so you can start free and grow into ful
 ## Running your own gateway
 
 To exchange mail with the legacy world (`@gmail.com` and the like), you need a gateway — either
-your own, self-hosted (`cargo run -p envoir-gateway -- run`, see
+your own, self-hosted (built and run from its own env-oir/envoir-gateway repo, see
 [getting-started.md](../getting-started.md#run-the-gateway-optional)), in which case you bear only
 the IP-reputation warmup cost and owe nobody a bill, or a third-party operator's.
 
@@ -45,7 +45,7 @@ directory to already know about you:
   registered anywhere.
 - **A gateway's own default local-part, once you *do* register.** In key-registered mode (the
   default; see below), a gateway operator additionally allocates each admitted key a short,
-  content-address-derived default local-part (`k` + base32, [`gateway/src/authz.rs`](../../gateway/src/authz.rs)),
+  content-address-derived default local-part (`k` + base32; see the env-oir/envoir-gateway repo),
   with an optional operator-assigned **vanity** name layered on top — a vanity request that would
   shadow another key's reserved key-derived form is refused fail-closed, so a vanity name can
   never impersonate someone else's default address.
@@ -66,10 +66,9 @@ directory to already know about you:
   money** — quota/usage-tracking is plain OSS; billing is a separate, thin operator-side layer (see
   [architecture.md](../architecture.md#where-an-operators-billing-sits)).
 
-The gateway lives in this monorepo today by design, kept loosely coupled enough that splitting it
-into its own `envoir-gateway` repository later is a clean lift rather than an untangling — see
-[`gateway/SEPARATION.md`](../../gateway/SEPARATION.md) for exactly what boundary discipline that
-requires and when the split actually happens.
+The gateway now lives in its own `envoir-gateway` repository (env-oir/envoir-gateway), split out
+from this monorepo — the loose coupling and boundary discipline that made that a clean lift rather
+than an untangling are described in that repo.
 
 ## Billing is tied to the gateway only
 

@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.75"
 license = "MIT"
 publish = false
-description = "Cross-component end-to-end integration tests for the Envoir DMTAP reference stack — wiring the real node, mail, gateway, p2p, naming, and deniable crates together (legacy↔DMTAP, DMTAP↔DMTAP over TCP, DMTAP↔DMTAP over real libp2p, adversarial, KT-verified resolution, deniable repudiation)"
+description = "Cross-component end-to-end integration tests for the Envoir DMTAP reference stack — wiring the real node, mail, p2p, naming, and deniable crates together (DMTAP↔DMTAP over TCP, DMTAP↔DMTAP over real libp2p, adversarial, KT-verified resolution, deniable repudiation)"
 
 # A test-only crate: the library is empty; everything of interest is under `tests/`, which wires the
 # REAL crates (no mocks between components) into end-to-end paths:
@@ -28,7 +28,6 @@ path = "src/lib.rs"
 envoir-node = { path = "../node" }
 dmtap-core = { path = "../crates/dmtap-core" }
 dmtap-mail = { path = "../crates/dmtap-mail" }
-envoir-gateway = { path = "../gateway" }
 dmtap-p2p = { path = "../crates/dmtap-p2p" }
 dmtap-naming = { path = "../crates/dmtap-naming" }
 dmtap-deniable = { path = "../crates/dmtap-deniable" }

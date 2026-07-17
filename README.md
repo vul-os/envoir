@@ -194,7 +194,7 @@ flowchart LR
     end
 
     subgraph Legacy["Legacy email — optional"]
-        Gateway["envoir-gateway (gateway/)<br/>the one component that speaks SMTP"]
+        Gateway["envoir-gateway (separate repo)<br/>the one component that speaks SMTP"]
         SMTP["SMTP / the existing internet"]
     end
 
@@ -220,7 +220,7 @@ functional standalone — the operator seam and any hosted operator are optional
 | Path | What it is |
 |---|---|
 | [`node/`](node) | **envoir-node** — the whole client side: identity, mailbox, mesh, messaging, files, and the IMAP/POP3/SMTP-submission/JMAP client servers |
-| [`gateway/`](gateway) | **envoir-gateway** — the optional legacy SMTP bridge; the only component that isn't content-blind; lives here by design, kept loosely coupled for a future split into its own repo (see [`gateway/SEPARATION.md`](gateway/SEPARATION.md)) |
+| *(separate repo)* | **envoir-gateway** — the optional legacy SMTP bridge; the only component that isn't content-blind. Split out of this monorepo into its own **env-oir/envoir-gateway** repo |
 | [`crates/dmtap-core`](crates/dmtap-core) | Identity, MOTE, content addressing, canonical CBOR, delegated capability tokens — the shared primitives |
 | [`crates/dmtap-auth`](crates/dmtap-auth) | DMTAP-Auth — decentralized, key-based sign-in |
 | [`crates/dmtap-deniable`](crates/dmtap-deniable) | Deniable 1:1 messaging (X3DH + Double Ratchet) |
@@ -246,7 +246,7 @@ workspace, and it never gates a protocol, client, or privacy feature.
 ## Quickstart
 
 ```sh
-# Build the whole workspace (node, gateway, and every crate)
+# Build the whole workspace (node and every crate)
 cargo build --workspace
 
 # Two in-process nodes exchange a real, end-to-end-encrypted MOTE
@@ -254,10 +254,10 @@ cargo run -p envoir-node -- run
 
 # Demo IMAP (1143) / POP3 (1110) / SMTP-submission (1587) servers against an in-memory mailbox
 cargo run -p envoir-node -- serve-mail
-
-# The optional legacy-email bridge (reads GATEWAY_DOMAIN / GATEWAY_LISTEN / GATEWAY_TLS_CERT+KEY env vars)
-cargo run -p envoir-gateway -- run
 ```
+
+The optional legacy-email bridge (`envoir-gateway`) now lives in its own **env-oir/envoir-gateway**
+repo — build and run it from there.
 
 The web client needs no build step — no framework, no npm, no CDNs:
 
@@ -274,9 +274,8 @@ python3 -m http.server 8095
 Self-hosting is not a crippled tier — every protocol feature, client, and privacy guarantee is
 available with no operator at all; a hosted operator only ever sells convenience (see
 [docs/features/self-hosting.md](docs/features/self-hosting.md)). Beyond the `cargo run` commands
-above, a `deploy/` directory (reference Docker/compose and process-supervision examples for
-`envoir-node` and `envoir-gateway`) is being added alongside this documentation pass — check this
-repo's root for it, and see its own `README.md` once merged for the exact steps.
+above, a [`deploy/`](deploy) directory (reference Docker/compose and process-supervision examples
+for `envoir-node`) is available — see its own [`README.md`](deploy/README.md) for the exact steps.
 
 ## Spec
 
@@ -302,8 +301,7 @@ inclusion/no-rollback/split-view soundness — see its README for exact property
 honest limitations); the wire-format
 decoders are exercised by **`cargo-fuzz`** targets in [`fuzz/`](fuzz); a **121-case conformance
 suite** runs 92 cases to a pass today (0 failures, the other 29 each skipped with a documented
-reason) via [`crates/conformance-runner`](crates/conformance-runner); the gateway fails closed
-against **SSRF** on its outbound DNS/MX resolution; the node's anti-rollback/anti-abuse state
+reason) via [`crates/conformance-runner`](crates/conformance-runner); the node's anti-rollback/anti-abuse state
 survives a restart instead of resetting to a weaker baseline; and `cargo test --workspace` runs
 **761 passing tests**. [`integration/`](integration) adds dedicated adversarial tests on top. None
 of this substitutes for an **independent external security audit**, which has not yet happened and
