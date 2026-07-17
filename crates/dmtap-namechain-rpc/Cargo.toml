@@ -1,0 +1,45 @@
+[package]
+name = "dmtap-namechain-rpc"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+description = "Real network-backed DMTAP name-chain resolvers (spec §3.12.5): ENS (.eth) over Ethereum JSON-RPC (EIP-137 namehash, eth_call, structural CCIP-Read/ENSIP-10) and SNS (.sol) over Solana JSON-RPC (self-derived Bonfida name-registry PDA). Implements dmtap-naming's NameChainClient trait; network sits behind an injectable HttpTransport so the pure logic is unit-tested offline"
+repository = "https://example.invalid/envoir"
+
+[dependencies]
+# The trait we implement (`NameChainClient`) + the `Chain` discriminant live here; we are a real
+# network-backed impl of the exact seam its `InMemoryNameChain` mock stands in for (§3.12.5).
+dmtap-naming = { path = "../dmtap-naming" }
+# Only used transitively via dmtap-naming's public API surface; kept explicit so the classical-IK
+# byte convention this crate returns stays pinned to the same core types.
+dmtap-core = { path = "../dmtap-core" }
+# ENS namehash (EIP-137) + ABI 4-byte selectors are Ethereum **Keccak-256** (pre-NIST), which is
+# `sha3::Keccak256` — NOT NIST SHA3-256. digest 0.10 is already resolved in the workspace tree.
+sha3 = "0.10"
+# SNS getHashedName + the SPL-name PDA hash are SHA-256; already in-tree via dmtap-core.
+sha2 = "0.10"
+# Solana pubkeys / PDAs are Base58; already in-tree (libp2p-identity pulls the same version).
+bs58 = "0.5"
+# The Solana PDA off-curve test is exactly "does this 32-byte value decompress to a valid Edwards
+# point?" — curve25519-dalek is already built in the workspace (x25519-dalek/dmtap-core depend on it),
+# so reusing it adds no heavy web3 stack.
+curve25519-dalek = "4"
+# JSON-RPC request/response shaping; already in-tree (dmtap-core, node, …).
+serde_json = "1"
+# eth_call `to`/`data` hex and account-data hex; already in-tree.
+hex = "0.4"
+# Solana getAccountInfo returns base64-encoded account data; already in-tree.
+base64 = "0.22"
+# Fail-closed typed errors, matching the sibling crates' style; already in-tree.
+thiserror = "1"
+# The ONE real transport: a small blocking HTTPS client on rustls (the workspace already builds
+# rustls 0.23 for the gateway). Optional + default so the pure resolver logic and its offline tests
+# never require it (`--no-default-features` gives a transport-free build); the live path needs it.
+ureq = { version = "2", default-features = false, features = ["tls"], optional = true }
+
+[features]
+# The real `UreqTransport` is on by default so the crate is network-backed out of the box; disable it
+# for a pure, dependency-light build that only ships the trait + the injectable-transport seam.
+default = ["net"]
+net = ["dep:ureq"]
