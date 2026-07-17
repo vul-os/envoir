@@ -62,7 +62,12 @@ impl Default for AuthzMode {
 /// Domain-separation label for the admission challenge signature (§18.1.6 style): a distinct tag so
 /// a signature proving key-control for gateway admission can never be replayed as any other DMTAP
 /// object (an attestation, an identity op, …).
-const ADMISSION_DS: &[u8] = b"DMTAP-v0/gateway-admission\x00";
+///
+/// Public (like `dmtap_auth::AUTH_ASSERTION_DS`) so a legitimate sender — or a downstream
+/// integration test — can produce an admission signature the gateway will accept without
+/// hand-copying an internal byte string. Exposing the tag grants no authority: admission still
+/// requires control of the DMTAP key that signs [`Challenge::signing_body`].
+pub const ADMISSION_DS: &[u8] = b"DMTAP-v0/gateway-admission\x00";
 
 /// A single-use admission challenge the gateway hands a connecting sender (§9 cost-for-cold-contact,
 /// DMTAP-Auth handshake). The sender proves control of its DMTAP key by signing [`Self::signing_body`]
