@@ -1,11 +1,17 @@
+# envoir-gateway — split out of the env-oir/envoir monorepo (see SEPARATION.md). It pins the two
+# shared libraries it needs (dmtap-core, dmtap-mail) to published git tags of that monorepo rather
+# than path deps, so this repo builds standalone with no circular dependency.
+[workspace]
+
 [package]
 name = "envoir-gateway"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "Apache-2.0 OR MIT"
 description = "DMTAP legacy SMTP gateway — the optional bridge between DMTAP and legacy email"
-repository = "https://example.invalid/envoir"
+repository = "https://github.com/env-oir/envoir-gateway"
+homepage = "https://github.com/env-oir/envoir-gateway"
 
 # The gateway is the ONLY component that speaks SMTP and the ONLY one not content-blind
 # (the legacy leg is unavoidably plaintext). It is OPTIONAL and fades as adoption grows.
@@ -17,9 +23,12 @@ repository = "https://example.invalid/envoir"
 
 [dependencies]
 # Shared DMTAP primitives — MOTE build/seal, Identity + Ed25519, canonical §18 CBOR (spec §1, §2).
-dmtap-core = { path = "../crates/dmtap-core" }
+# Pinned to a published tag of the env-oir/envoir monorepo (the split precondition — SEPARATION.md).
+dmtap-core = { git = "https://github.com/env-oir/envoir", tag = "v0.1.0" }
 # RFC 5322 parse/render + SMTP DATA→MoteDraft conversion (reused for the message translation).
-dmtap-mail = { path = "../crates/dmtap-mail" }
+# BOTH deps MUST share one git source (same tag) so Cargo unifies dmtap-core to a single copy —
+# distinct tag strings resolve as distinct sources and produce a type-mismatched duplicate crate.
+dmtap-mail = { git = "https://github.com/env-oir/envoir", tag = "v0.1.0" }
 
 # --- DKIM delegated-selector signing (spec §7.3; RFC 8463 ed25519-sha256, RFC 6376 relaxed) ---
 ed25519-dalek = { version = "2", features = ["rand_core"] }
