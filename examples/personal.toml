@@ -60,3 +60,34 @@ dmarc_enforce = false   # reject unaligned p=reject / sp=reject
 # it does not price overage. Handy to bound blast radius if a key is compromised.
 quota_messages = 0
 quota_bytes    = 0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OPTIONAL legacy IMAP access server (spec §8.2) — OFF by default.
+#
+# Lets old mail clients (Thunderbird, Apple Mail, Outlook, mutt) read/manage your
+# DMTAP mailbox over IMAP, alongside the SMTP bridge above. It is STORE-BACKED: the
+# gateway is otherwise stateless, so the served mailbox is YOUR OWN snapshot — a
+# directory of RFC 5322 .eml files handed to the gateway (imap_maildir). Mutations
+# (flag changes, APPEND) are session-local and NOT persisted back; your node stays
+# the mailbox authority. Requires tls_cert/tls_key above — app-passwords must never
+# travel in cleartext.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# imap_enable = true
+
+# Bind address. Production: "0.0.0.0:993" (implicit TLS) or "0.0.0.0:143" (STARTTLS).
+# imap_listen = "127.0.0.1:1143"
+
+# TLS mode: "starttls" (default, upgrade in place) or "implicit" (TLS from byte one).
+# imap_tls = "starttls"
+
+# App-password credentials, one per line:
+#     <username>  <app-password>  [<ed25519-identity-key-b64>]
+# The identity key may be omitted when <username> matches an email in `directory`
+# above (it is then resolved from there). Unset ⇒ no credentials ⇒ every login is
+# refused (fail-closed).
+# imap_credentials = "app-passwords.txt"
+
+# Optional directory of RFC 5322 `.eml` files projected into the served INBOX — the
+# operator's own mailbox snapshot. Unset ⇒ the standard empty folder layout.
+# imap_maildir = "/var/mail/owner"

@@ -22,6 +22,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use dmtap_core::identity::IdentityKey;
+use dmtap_mail::auth::StaticAuthenticator;
+use dmtap_mail::store::{Flag, MemoryStore};
 use rustls::ServerConfig;
 
 use crate::attestation::AttestationKey;
@@ -29,6 +31,7 @@ use crate::authz::{AuthzMode, IdentityRegistry, Quota, QuotaLedger, RegisteredId
 use crate::directory::FileDirectory;
 use crate::dkim::DnsDkimKeyResolver;
 use crate::dmarc::DnsDmarcResolver;
+use crate::imap_access::{load_maildir_messages, ImapAccessServer, ImapTls};
 use crate::inbound::{
     AllowAllAbuse, DkimPolicy, DmarcHandling, InboundGateway, KeyDirectory, MeshDelivery, SpfPolicy,
 };
@@ -78,6 +81,25 @@ pub struct PersonalConfig {
     pub quota_messages: u64,
     /// Optional per-identity hard cap on relayed bytes (`0`/unset ⇒ unlimited).
     pub quota_bytes: u64,
+    /// Enable the OPTIONAL legacy IMAP access server (spec §8.2) so old clients (Thunderbird, Apple
+    /// Mail, Outlook) can read/manage the mailbox. **Off by default.** Requires
+    /// [`tls_cert`](Self::tls_cert)/[`tls_key`](Self::tls_key): IMAP app-passwords must never travel
+    /// in cleartext. See [`crate::imap_access`] for the honest store-source scoping.
+    pub imap_enable: bool,
+    /// IMAP access bind address (default `127.0.0.1:1143`). Production: `0.0.0.0:993` with
+    /// `imap_tls = implicit`, or `0.0.0.0:143` with `imap_tls = starttls`.
+    pub imap_listen: String,
+    /// How the IMAP access server presents TLS (reuses the gateway cert/key): `starttls` (default)
+    /// or `implicit`.
+    pub imap_tls: ImapTls,
+    /// App-password credentials file, one per line:
+    /// `<username> <app-password> [<identity-pub-b64>]`. When the identity key is omitted it is
+    /// resolved from the recipient [`directory`](Self::directory) by matching the username to an
+    /// email. Unset ⇒ no credentials ⇒ every login is refused (fail-closed).
+    pub imap_credentials: Option<String>,
+    /// Optional directory of RFC 5322 `.eml` files projected into the served `INBOX` — the operator's
+    /// own mailbox snapshot handed to the gateway. Unset ⇒ the standard empty folder layout.
+    pub imap_maildir: Option<String>,
 }
 
 impl Default for PersonalConfig {
@@ -97,6 +119,11 @@ impl Default for PersonalConfig {
             dmarc_enforce: false,
             quota_messages: 0,
             quota_bytes: 0,
+            imap_enable: false,
+            imap_listen: "127.0.0.1:1143".to_string(),
+            imap_tls: ImapTls::StartTls,
+            imap_credentials: None,
+            imap_maildir: None,
         }
     }
 }
@@ -202,6 +229,16 @@ impl PersonalConfig {
                 self.quota_bytes =
                     value.parse().map_err(|_| bad("expected a non-negative integer"))?
             }
+            "imap_enable" => {
+                self.imap_enable = parse_bool(&value).ok_or_else(|| bad("expected true/false"))?
+            }
+            "imap_listen" => self.imap_listen = value,
+            "imap_tls" => {
+                self.imap_tls = ImapTls::parse(&value)
+                    .ok_or_else(|| bad("expected \"starttls\" or \"implicit\""))?
+            }
+            "imap_credentials" => self.imap_credentials = non_empty(value),
+            "imap_maildir" => self.imap_maildir = non_empty(value),
             other => return Err(ConfigError::UnknownKey { line, key: other.to_string() }),
         }
         Ok(())
@@ -241,6 +278,15 @@ impl PersonalConfig {
         if let Ok(v) = std::env::var("GATEWAY_QUOTA_BYTES") {
             cfg.quota_bytes = v.parse().unwrap_or(0);
         }
+        cfg.imap_enable = env_flag("GATEWAY_IMAP_ENABLE");
+        if let Ok(v) = std::env::var("GATEWAY_IMAP_LISTEN") {
+            cfg.imap_listen = v;
+        }
+        if let Some(m) = std::env::var("GATEWAY_IMAP_TLS").ok().and_then(|v| ImapTls::parse(&v)) {
+            cfg.imap_tls = m;
+        }
+        cfg.imap_credentials = std::env::var("GATEWAY_IMAP_CREDENTIALS").ok().and_then(non_empty);
+        cfg.imap_maildir = std::env::var("GATEWAY_IMAP_MAILDIR").ok().and_then(non_empty);
         cfg
     }
 
@@ -372,6 +418,98 @@ impl PersonalConfig {
         ledger
     }
 
+    /// Load the IMAP app-password authenticator from the credentials file (`<username>
+    /// <app-password> [<identity-pub-b64>]` per line). When the identity key is omitted it is
+    /// resolved from the recipient directory by username→email. Fail-closed: a malformed line, a bad
+    /// base64 key, or an unknown user with no explicit key is a hard error; an unset file yields an
+    /// empty authenticator (every login refused). Returns the authenticator and the credential count.
+    fn load_imap_authenticator(
+        &self,
+        dir: &DirectorySource,
+    ) -> std::io::Result<(StaticAuthenticator, usize)> {
+        let mut auth = StaticAuthenticator::new();
+        let Some(path) = &self.imap_credentials else {
+            return Ok((auth, 0));
+        };
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| std::io::Error::new(e.kind(), format!("imap_credentials {path}: {e}")))?;
+        let invalid = |line: usize, msg: &str| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("imap_credentials {path} line {line}: {msg}"),
+            )
+        };
+        let mut count = 0usize;
+        for (idx, raw) in text.lines().enumerate() {
+            let line = idx + 1;
+            let stripped = strip_comment(raw);
+            let trimmed = stripped.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let mut fields = trimmed.split_whitespace();
+            let user = fields.next().expect("non-empty line has a first field");
+            let password = fields.next().ok_or_else(|| {
+                invalid(line, "expected `<username> <app-password> [<identity-pub-b64>]`")
+            })?;
+            let identity_pub = match fields.next() {
+                Some(b64) => crate::b64::decode(b64)
+                    .map_err(|e| invalid(line, &format!("bad identity-pub base64: {e}")))?,
+                None => resolve_identity(dir, user).ok_or_else(|| {
+                    invalid(
+                        line,
+                        &format!("user {user:?} not in directory and no identity-pub given"),
+                    )
+                })?,
+            };
+            if fields.next().is_some() {
+                return Err(invalid(line, "too many fields"));
+            }
+            auth.issue(user, password, identity_pub, "app-password");
+            count += 1;
+        }
+        Ok((auth, count))
+    }
+
+    /// Build the optional IMAP access deployment, or `None` when `imap_enable` is false. Fail-closed:
+    /// enabling IMAP without a TLS cert/key, a bad credentials file, or an unreadable maildir is a
+    /// hard startup error (never a half-wired or cleartext-auth listener).
+    fn build_imap(
+        &self,
+        dir: &DirectorySource,
+        tls: Option<Arc<ServerConfig>>,
+    ) -> std::io::Result<Option<ImapDeployment>> {
+        if !self.imap_enable {
+            return Ok(None);
+        }
+        let tls = tls.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "imap_enable=true requires tls_cert + tls_key — IMAP app-passwords must not travel in cleartext",
+            )
+        })?;
+        let (auth, cred_count) = self.load_imap_authenticator(dir)?;
+        let seed = match &self.imap_maildir {
+            Some(d) => load_maildir_messages(d)?,
+            None => Vec::new(),
+        };
+        let server = ImapAccessServer::bind(&self.imap_listen, tls, self.imap_tls)?;
+        let bound = server.local_addr()?;
+        eprintln!(
+            "gateway[imap]: legacy IMAP access on {bound} ({:?}); {} credential(s); {} seeded message(s)",
+            self.imap_tls,
+            cred_count,
+            seed.len()
+        );
+        if cred_count == 0 {
+            eprintln!(
+                "gateway[imap]: WARNING — no imap_credentials configured; every login will be refused \
+                 (fail-closed). Set imap_credentials to issue app-passwords."
+            );
+        }
+        Ok(Some(ImapDeployment { server, seed: Arc::new(seed), auth: Arc::new(auth) }))
+    }
+
     /// Run the personal gateway daemon: bind the inbound MX, wire the outbound/admission/quota seams,
     /// and serve until `shutdown` flips (the caller installs the signal handler). Fail-closed: any
     /// mis-configuration surfaces as an `Err` here rather than a half-wired daemon.
@@ -421,6 +559,10 @@ impl PersonalConfig {
             );
         }
 
+        // Build the optional legacy IMAP access server BEFORE consuming the directory (it resolves
+        // credential identities from the same directory) — fail-closed at startup on any misconfig.
+        let imap = self.build_imap(&dir_source, tls.clone())?;
+
         let directory: Box<dyn KeyDirectory> = dir_source.into_boxed();
         let gw = self.build_inbound(directory, mesh);
         eprintln!(
@@ -431,7 +573,22 @@ impl PersonalConfig {
         let listener = MxListener::bind(&self.listen, tls)?;
         let bound = listener.local_addr()?;
         eprintln!("gateway[personal]: inbound MX listening on {bound} for {} — up (SIGINT/SIGTERM to stop)", self.domain);
-        listener.serve_until(&gw, shutdown)?;
+
+        // Serve the inbound MX (this thread) and, when enabled, the legacy IMAP access server (its own
+        // thread) concurrently. Both poll the SAME shutdown flag, so one SIGINT/SIGTERM stops both.
+        // The MX gateway is not `Send`, so it stays on this thread; the IMAP side is fully `Send`.
+        match imap {
+            Some(dep) => std::thread::scope(|scope| -> std::io::Result<()> {
+                let imap_handle = scope.spawn(|| dep.run(shutdown));
+                let mx = listener.serve_until(&gw, shutdown);
+                let imap_res = imap_handle
+                    .join()
+                    .map_err(|_| std::io::Error::other("IMAP thread panicked"))?;
+                mx?;
+                imap_res
+            })?,
+            None => listener.serve_until(&gw, shutdown)?,
+        }
         eprintln!(
             "gateway[personal]: shutdown signal received — stopped accepting, exiting cleanly"
         );
@@ -476,6 +633,41 @@ impl DirectorySource {
             DirectorySource::File(d) => Box::new(d),
             DirectorySource::Empty(d) => Box::new(d),
         }
+    }
+}
+
+/// Resolve a credential username to a DMTAP identity public key from the recipient directory, by
+/// case-insensitive email match. Used when an `imap_credentials` line omits the explicit key.
+fn resolve_identity(dir: &DirectorySource, user: &str) -> Option<Vec<u8>> {
+    dir.iter().find(|(email, _)| email.eq_ignore_ascii_case(user)).map(|(_, k)| k.ik.clone())
+}
+
+/// A built, bound legacy IMAP access server plus the per-session store snapshot and authenticator,
+/// ready to serve until shutdown. The mailbox `seed` is held as raw `Send + Sync` bytes so a fresh
+/// [`MemoryStore`] can be rebuilt per connection (the store's parse cache is `!Sync`).
+struct ImapDeployment {
+    server: ImapAccessServer,
+    seed: Arc<Vec<(Vec<u8>, u64)>>,
+    auth: Arc<StaticAuthenticator>,
+}
+
+impl ImapDeployment {
+    /// Serve the IMAP access listener until `shutdown` flips. Each connection gets its own store
+    /// (rebuilt from the snapshot) and a clone of the app-password authenticator.
+    fn run(self, shutdown: &AtomicBool) -> std::io::Result<()> {
+        let seed = self.seed;
+        let auth = self.auth;
+        self.server.serve_until(
+            move || {
+                let mut store = MemoryStore::new();
+                for (raw, ts) in seed.iter() {
+                    store.deliver_raw("INBOX", raw.clone(), vec![Flag::Recent], *ts);
+                }
+                store
+            },
+            move || (*auth).clone(),
+            shutdown,
+        )
     }
 }
 
@@ -564,6 +756,107 @@ mod tests {
         );
         assert!(cfg.directory.is_none(), "resolves nobody until configured");
         assert!(cfg.quota().is_none(), "unlimited until a cap is set");
+        assert!(!cfg.imap_enable, "legacy IMAP access is OFF by default");
+    }
+
+    #[test]
+    fn imap_config_keys_parse_and_default_off() {
+        // Off by default; keys unset.
+        let cfg = PersonalConfig::parse("domain = mail.example.org\n").unwrap();
+        assert!(!cfg.imap_enable);
+        assert_eq!(cfg.imap_tls, ImapTls::StartTls, "default TLS mode is STARTTLS");
+
+        let text = r#"
+            imap_enable      = true
+            imap_listen      = "0.0.0.0:993"
+            imap_tls         = implicit
+            imap_credentials = "/etc/envoir/app-passwords.txt"
+            imap_maildir     = "/var/mail/owner"
+        "#;
+        let cfg = PersonalConfig::parse(text).unwrap();
+        assert!(cfg.imap_enable);
+        assert_eq!(cfg.imap_listen, "0.0.0.0:993");
+        assert_eq!(cfg.imap_tls, ImapTls::Implicit);
+        assert_eq!(cfg.imap_credentials.as_deref(), Some("/etc/envoir/app-passwords.txt"));
+        assert_eq!(cfg.imap_maildir.as_deref(), Some("/var/mail/owner"));
+
+        // A bad imap_tls value fails closed.
+        assert!(matches!(
+            PersonalConfig::parse("imap_tls = plaintext\n").unwrap_err(),
+            ConfigError::BadValue { key, .. } if key == "imap_tls"
+        ));
+    }
+
+    #[test]
+    fn imap_requires_tls_and_is_none_when_disabled() {
+        // Disabled → no deployment regardless of the rest of the config.
+        let cfg = PersonalConfig::default();
+        let dir = cfg.load_directory().unwrap();
+        assert!(cfg.build_imap(&dir, None).unwrap().is_none(), "disabled → None");
+
+        // Enabled but no TLS cert/key → hard error (app-passwords must not travel in cleartext).
+        let cfg = PersonalConfig { imap_enable: true, ..PersonalConfig::default() };
+        let dir = cfg.load_directory().unwrap();
+        assert!(cfg.build_imap(&dir, None).is_err(), "enabled without TLS must fail closed");
+    }
+
+    #[test]
+    fn imap_credentials_bind_to_directory_identity_and_fail_closed() {
+        // A credentials file that omits the identity key resolves it from the recipient directory.
+        let ik = IdentityKey::generate();
+        let seal = dmtap_core::mote::SealKeypair::generate();
+        let mut dirpath = std::env::temp_dir();
+        dirpath.push(format!("envoir-gw-imap-dir-{}.txt", std::process::id()));
+        std::fs::write(
+            &dirpath,
+            format!(
+                "me@example.org {} {}\n",
+                b64::encode(&ik.public()),
+                b64::encode(seal.public())
+            ),
+        )
+        .unwrap();
+        let mut credpath = std::env::temp_dir();
+        credpath.push(format!("envoir-gw-imap-cred-{}.txt", std::process::id()));
+        // Line 1 omits the key (resolved from directory); line 2 gives an explicit key.
+        std::fs::write(
+            &credpath,
+            format!(
+                "me@example.org app-pw-1\nother@example.org app-pw-2 {}\n",
+                b64::encode(&[7u8; 32])
+            ),
+        )
+        .unwrap();
+
+        let cfg = PersonalConfig {
+            domain: "example.org".to_string(),
+            directory: Some(dirpath.display().to_string()),
+            imap_credentials: Some(credpath.display().to_string()),
+            ..PersonalConfig::default()
+        };
+        let dir = cfg.load_directory().unwrap();
+        let (auth, count) = cfg.load_imap_authenticator(&dir).unwrap();
+        assert_eq!(count, 2, "both credential lines load");
+        // The directory-bound credential authenticates and resolves to the directory identity key.
+        assert_eq!(
+            dmtap_mail::auth::Authenticator::verify(&auth, "me@example.org", "app-pw-1"),
+            Some(ik.public()),
+            "directory-resolved identity"
+        );
+        assert!(
+            dmtap_mail::auth::Authenticator::verify(&auth, "me@example.org", "wrong").is_none(),
+            "wrong password fails closed"
+        );
+
+        // An unknown user with no explicit key is a hard error (cannot bind an identity).
+        std::fs::write(&credpath, "ghost@example.org app-pw-3\n").unwrap();
+        assert!(
+            cfg.load_imap_authenticator(&dir).is_err(),
+            "unknown user + no key must fail closed"
+        );
+
+        let _ = std::fs::remove_file(&dirpath);
+        let _ = std::fs::remove_file(&credpath);
     }
 
     #[test]

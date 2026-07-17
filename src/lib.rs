@@ -68,6 +68,7 @@ pub mod dkim;
 pub mod dmarc;
 pub mod dns;
 pub mod forwarded_addr;
+pub mod imap_access;
 pub mod inbound;
 pub mod inbound_tcp;
 pub mod mesh;
@@ -101,6 +102,9 @@ pub use dmarc::{
 };
 pub use forwarded_addr::{
     decode as decode_forwarded, encode as encode_forwarded, ForwardedAddrError,
+};
+pub use imap_access::{
+    load_maildir_messages, seed_inbox, seed_store_from_maildir, ImapAccessServer, ImapTls,
 };
 pub use inbound::{
     AbuseDecision, AllowAllAbuse, AntiAbuse, Clock, ColdSenderGate, DeliveryOutcome, DkimPolicy,
