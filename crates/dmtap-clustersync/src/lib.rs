@@ -50,15 +50,15 @@ pub mod journal;
 pub mod recon;
 pub mod wire;
 
-pub use cluster::{Cluster, Replica};
-pub use crdt::{validate_op, ClusterState, LwwMap, OrSet, HLC_SKEW_MS};
+pub use cluster::{Cluster, Replica, CLUSTER_MEMBER_LIVENESS_MS};
+pub use crdt::{validate_op, ClusterState, DeathReg, DeathState, LwwMap, OrSet, HLC_SKEW_MS};
 pub use error::{Action, SyncError};
 pub use journal::{genesis_prev, verify_segment, Journal};
 pub use recon::{range_fingerprint, reconcile, verify_range, ReconConfig, ReconOutcome};
 pub use wire::{
-    AddTag, ClusterOp, ClusterSyncFrame, Hash, Hlc, JournalEntry, RangeFingerprint, StabilityMark,
-    FRAME_ANNOUNCE, FRAME_FETCH, FRAME_JOURNAL, FRAME_RECON, FRAME_STABILITY, OP_LWW_SET,
-    OP_SET_ADD, OP_SET_REMOVE,
+    AddTag, ClusterOp, ClusterSyncFrame, DeleteClass, Hash, Hlc, JournalEntry, RangeFingerprint,
+    StabilityMark, DEATH_LIVE, FRAME_ANNOUNCE, FRAME_FETCH, FRAME_JOURNAL, FRAME_RECON,
+    FRAME_STABILITY, OP_DELETE, OP_LWW_SET, OP_SET_ADD, OP_SET_REMOVE,
 };
 
 #[cfg(test)]

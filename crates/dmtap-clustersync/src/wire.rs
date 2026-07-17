@@ -35,10 +35,58 @@ pub const FRAME_STABILITY: u8 = 5;
 // ── CRDT op kind discriminants (§18.6.3, ClusterOp key 1) ────────────────────────────────────
 /// OR-Set add: element gains a unique add-tag `{device, HLC}` (§5.6.4).
 pub const OP_SET_ADD: u8 = 1;
-/// OR-Set remove: tombstones the specific observed add-tags (§5.6.4).
+/// OR-Set remove: tombstones the specific observed add-tags (§5.6.4). The **benign, add-wins**
+/// delete regime (removing an ordinary label): an accidental resurrection is harmless.
 pub const OP_SET_REMOVE: u8 = 2;
 /// Per-field LWW-Register write, keyed by HLC (§5.6.4).
 pub const OP_LWW_SET: u8 = 3;
+/// **Durable death-certificate write** — the **remove-wins** delete regime (§5.6.4): an HLC-keyed
+/// per-object `deleted` flag (an LWW register over the states `{live, deleted}`) that **dominates**
+/// the add-wins OR-Set. A durable, confidentiality-bearing deletion — a `redact` (§6.7), a reached
+/// `expires` (§2.4), or a `sensitive`-marked removal — writes this so **no concurrent OR-Set
+/// add-tag can resurrect the object**. The op's [`field`](ClusterOp::field) carries the death token:
+/// a [`DeleteClass`] token (`redact`/`expires`/`sensitive`) for a delete, or [`DEATH_LIVE`] for an
+/// explicit un-delete.
+pub const OP_DELETE: u8 = 4;
+
+/// The death token written into [`ClusterOp::field`] for an **explicit un-delete** (§5.6.4): a
+/// genuine user action returning an object to `live`. Only an un-delete with a *greater* HLC than
+/// the death certificate can supersede it; a bare OR-Set add never writes this field at all.
+pub const DEATH_LIVE: &str = "live";
+
+/// The **durable-delete class** (§5.6.4) that produced a death certificate — the confidentiality-
+/// bearing deletion regimes that ride the remove-wins dimension rather than a benign add-wins
+/// OR-Set remove. On the wire the class travels as its lowercase token in [`ClusterOp::field`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DeleteClass {
+    /// A `redact` (§6.7): content erased for confidentiality.
+    Redact,
+    /// A reached `expires` (§2.4): the object's lifetime elapsed.
+    Expires,
+    /// A `sensitive`-marked removal: an operator/policy-driven durable delete.
+    Sensitive,
+}
+
+impl DeleteClass {
+    /// The lowercase wire token for this class (the string carried in [`ClusterOp::field`]).
+    pub fn token(self) -> &'static str {
+        match self {
+            DeleteClass::Redact => "redact",
+            DeleteClass::Expires => "expires",
+            DeleteClass::Sensitive => "sensitive",
+        }
+    }
+
+    /// Parse a class from its wire token, or `None` if it is not a durable-delete class token.
+    pub fn from_token(s: &str) -> Option<Self> {
+        match s {
+            "redact" => Some(DeleteClass::Redact),
+            "expires" => Some(DeleteClass::Expires),
+            "sensitive" => Some(DeleteClass::Sensitive),
+            _ => None,
+        }
+    }
+}
 
 /// Hybrid logical clock (§5.6.4). The **total order is lexicographic `(wall, counter, device)`** —
 /// which is exactly the derived field order below, so `derive(Ord)` yields the normative tiebreak:
@@ -102,16 +150,20 @@ impl AddTag {
     }
 }
 
-/// A CRDT metadata op (§5.6.4 / §18.6.3). `kind` 1/2 are OR-Set add/remove (membership, folders,
-/// labels, deletes); `kind` 3 is a per-field LWW-Register write (read/unread, star, current
-/// folder), keyed by `hlc`.
+/// A CRDT metadata op (§5.6.4 / §18.6.3). `kind` 1/2 are OR-Set add/remove (benign, add-wins
+/// membership, folders, labels); `kind` 3 is a per-field LWW-Register write (read/unread, star,
+/// current folder), keyed by `hlc`; `kind` 4 is a **remove-wins durable death-certificate** write
+/// (`redact`/`expires`/`sensitive` delete, or an explicit un-delete), whose death token rides in
+/// `field`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClusterOp {
-    /// `1`=set-add, `2`=set-remove, `3`=lww-set (§18.6.3 key 1).
+    /// `1`=set-add, `2`=set-remove, `3`=lww-set, `4`=durable delete/un-delete (§18.6.3 key 1).
     pub kind: u8,
     /// The object / folder / label id the op applies to (§18.6.3 key 2).
     pub target: String,
-    /// The LWW field name — present iff `kind = 3` (§18.6.3 key 3).
+    /// The LWW field name — present iff `kind = 3`. For `kind = 4` this slot instead carries the
+    /// **death token**: a [`DeleteClass::token`] (`redact`/`expires`/`sensitive`) for a durable
+    /// delete, or [`DEATH_LIVE`] for an explicit un-delete (§18.6.3 key 3).
     pub field: Option<String>,
     /// The LWW value — present iff `kind = 3`. An `ext-value` (bool/int/bytes/tstr and nestings,
     /// §18.3.6); integer-keyed maps, floats, tags, and null are rejected on decode (§18.6.3 key 4).
@@ -183,6 +235,32 @@ impl ClusterOp {
     /// for a CRDT op (§5.6.3(b)).
     pub fn op_hash(&self) -> Hash {
         dmtap_core::ContentId::of(&cbor::encode(&self.to_cv())).0
+    }
+
+    /// A durable **death-certificate** op (`kind = 4`, §5.6.4): mark `target` durably deleted under
+    /// `class` (`redact`/`expires`/`sensitive`), remove-wins. The `class` token rides in `field`.
+    pub fn durable_delete(target: impl Into<String>, class: DeleteClass, hlc: Hlc) -> Self {
+        ClusterOp {
+            kind: OP_DELETE,
+            target: target.into(),
+            field: Some(class.token().to_owned()),
+            value: None,
+            hlc,
+            observed: None,
+        }
+    }
+
+    /// An explicit **un-delete** op (`kind = 4`, §5.6.4): write `target` back to `live`. Supersedes
+    /// a death certificate only if its `hlc` is *greater* than the certificate's.
+    pub fn undelete(target: impl Into<String>, hlc: Hlc) -> Self {
+        ClusterOp {
+            kind: OP_DELETE,
+            target: target.into(),
+            field: Some(DEATH_LIVE.to_owned()),
+            value: None,
+            hlc,
+            observed: None,
+        }
     }
 }
 
@@ -516,6 +594,33 @@ mod tests {
         let frame = ClusterSyncFrame::new(FRAME_ANNOUNCE, vec![9]).with_ops(ops.clone());
         let back = ClusterSyncFrame::from_det_cbor(&frame.det_cbor()).unwrap();
         assert_eq!(back.ops, ops);
+    }
+
+    #[test]
+    fn durable_delete_and_undelete_ops_round_trip() {
+        // The remove-wins death-certificate ops (kind 4) travel with their class/`live` token in the
+        // `field` slot and survive a canonical CBOR round-trip byte-for-byte.
+        let ops = vec![
+            ClusterOp::durable_delete("inbox/msg-1", DeleteClass::Redact, hlc(20, 0, 1)),
+            ClusterOp::durable_delete("inbox/msg-2", DeleteClass::Expires, hlc(21, 0, 1)),
+            ClusterOp::durable_delete("inbox/msg-3", DeleteClass::Sensitive, hlc(22, 0, 1)),
+            ClusterOp::undelete("inbox/msg-1", hlc(30, 0, 1)),
+        ];
+        let frame = ClusterSyncFrame::new(FRAME_ANNOUNCE, vec![9]).with_ops(ops.clone());
+        let back = ClusterSyncFrame::from_det_cbor(&frame.det_cbor()).unwrap();
+        assert_eq!(back.ops, ops);
+        // The tokens survive as the documented lowercase strings.
+        assert_eq!(back.ops[0].field.as_deref(), Some("redact"));
+        assert_eq!(back.ops[3].field.as_deref(), Some(DEATH_LIVE));
+    }
+
+    #[test]
+    fn delete_class_token_round_trips() {
+        for c in [DeleteClass::Redact, DeleteClass::Expires, DeleteClass::Sensitive] {
+            assert_eq!(DeleteClass::from_token(c.token()), Some(c));
+        }
+        assert_eq!(DeleteClass::from_token("live"), None);
+        assert_eq!(DeleteClass::from_token("nope"), None);
     }
 
     #[test]
