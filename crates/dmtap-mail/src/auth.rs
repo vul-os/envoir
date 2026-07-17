@@ -80,7 +80,7 @@ impl Authenticator for StaticAuthenticator {
 }
 
 /// Constant-time-ish byte comparison (length leaks, contents do not).
-fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }

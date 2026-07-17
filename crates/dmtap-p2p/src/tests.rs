@@ -461,3 +461,26 @@ fn connection_close_and_redial_resilience() {
         "a re-dials b and delivery resumes without re-learning the route"
     );
 }
+
+/// MED-2 regression: `enqueue_inbound` must cap both the inbox backlog and the auto-learned peer
+/// book so a hostile peer forging a fresh `from` per frame cannot grow either without bound.
+#[test]
+fn inbound_enqueue_is_capped() {
+    let inbox: Arc<Mutex<VecDeque<InboundFrame>>> = Arc::new(Mutex::new(VecDeque::new()));
+    let peers: Arc<Mutex<HashMap<Vec<u8>, PeerId>>> = Arc::new(Mutex::new(HashMap::new()));
+    let peer = PeerId::random();
+
+    // Flood with far more distinct `from`s (and frames) than either cap allows.
+    let flood = MAX_INBOX_FRAMES.max(MAX_AUTO_PEERS) + 4096;
+    for i in 0..flood {
+        let from = format!("attacker-{i}").into_bytes();
+        enqueue_inbound(&inbox, &peers, from, Frame::Ack(vec![i as u8]), peer);
+    }
+
+    let depth = inbox.lock().unwrap().len();
+    let book = peers.lock().unwrap().len();
+    assert!(depth <= MAX_INBOX_FRAMES, "inbox depth {depth} exceeded cap {MAX_INBOX_FRAMES}");
+    assert_eq!(depth, MAX_INBOX_FRAMES, "inbox should fill exactly to the cap then drop");
+    assert!(book <= MAX_AUTO_PEERS, "peer book {book} exceeded cap {MAX_AUTO_PEERS}");
+    assert_eq!(book, MAX_AUTO_PEERS, "peer book should fill exactly to the cap then stop learning");
+}
