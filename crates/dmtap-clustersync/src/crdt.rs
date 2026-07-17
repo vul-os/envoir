@@ -5,14 +5,25 @@
 //! deletes — does, and §5.6.4 fixes the concrete CRDT primitives so two implementations converge
 //! **byte-identically**:
 //!
-//! * **Membership / folders / labels / deletes → Observed-Remove Set (OR-Set)** with tombstones.
+//! * **Benign label membership → Observed-Remove Set (OR-Set)** with tombstones (**add-wins**).
 //!   Each add carries a globally-unique add-tag `{device, HLC}`; a remove tombstones the *specific*
 //!   add-tags it observed. An element is present **iff it has ≥1 add-tag not covered by a
-//!   tombstone** — so a concurrent add *wins over* a remove that never saw it, and deletes are
-//!   tombstones (non-destructive), never resurrecting or losing data.
+//!   tombstone** — so a concurrent add *wins over* a remove that never saw it. This add-wins bias
+//!   is correct **only** for benign, many-valued labels, where a spuriously-resurrected tag is
+//!   harmless.
 //! * **Per-field flags & moves → Last-Writer-Wins register per field**, keyed by the HLC. The
 //!   winner of two concurrent writes is the one with the greater HLC under the total order
 //!   `(wall, counter, device)` — deterministic on every replica, never a wall-clock coin-flip.
+//! * **Durable deletions → remove-wins HLC-keyed `deleted` flag** (a per-object "death
+//!   certificate," an LWW register over `{live, deleted}`) that **dominates** the OR-Set. A
+//!   `redact` (§6.7), a reached `expires` (§2.4), or a `sensitive`-marked removal sets it; once set
+//!   with the greatest HLC, **no unobserved OR-Set add-tag can resurrect the object** — a
+//!   concurrent benign re-label does not un-redact a message, closing the resurrection hole where
+//!   an add-wins delete would let a concurrent label op revive redacted/expired/sensitive content.
+//!   The delete/re-add tiebreak is explicit: because the flag is LWW-keyed by HLC, only a later
+//!   **explicit un-delete** (a `live` write with a *greater* HLC than the certificate) supersedes
+//!   it; a bare OR-Set add — which never writes the `deleted` field, so has no HLC on it — can
+//!   **never** outrank a set death certificate.
 //!
 //! Why these are the right primitives: mailbox metadata is **concurrent, add-and-remove, no
 //! coordinator** — a grow-only set cannot model un-reading/un-labelling, a plain LWW-set loses the
@@ -28,7 +39,10 @@
 //! (`ERR_CLUSTER_CRDT_OP_INVALID`, `0x0413`).
 
 use crate::error::SyncError;
-use crate::wire::{AddTag, ClusterOp, Hlc, OP_LWW_SET, OP_SET_ADD, OP_SET_REMOVE};
+use crate::wire::{
+    AddTag, ClusterOp, DeleteClass, Hlc, DEATH_LIVE, OP_DELETE, OP_LWW_SET, OP_SET_ADD,
+    OP_SET_REMOVE,
+};
 use dmtap_core::cbor::{self, Cv};
 use dmtap_core::deniable::DeniablePayload;
 use std::collections::{BTreeMap, BTreeSet};
@@ -48,7 +62,7 @@ pub const HLC_SKEW_MS: u64 = 120_000;
 /// removes only ever tombstone adds they causally saw, so this never rejects an honest op.
 pub fn validate_op(op: &ClusterOp, receiver_now_ms: u64) -> Result<(), SyncError> {
     // Unknown kind ⇒ invalid.
-    if !matches!(op.kind, OP_SET_ADD | OP_SET_REMOVE | OP_LWW_SET) {
+    if !matches!(op.kind, OP_SET_ADD | OP_SET_REMOVE | OP_LWW_SET | OP_DELETE) {
         return Err(SyncError::CrdtOpInvalid);
     }
     // Out-of-skew HLC ⇒ invalid ("win-forever" clock).
@@ -87,6 +101,19 @@ pub fn validate_op(op: &ClusterOp, receiver_now_ms: u64) -> Result<(), SyncError
             // wraps entries in signed history, and a durable MLS-signed copy of deniable content is
             // exactly what deniability exists to prevent.
             if embeds_deniable(value) {
+                return Err(SyncError::CrdtOpInvalid);
+            }
+        }
+        OP_DELETE => {
+            // A durable death-certificate write carries a **death token** in `field` and nothing
+            // else: no LWW value (it does not write a scalar cell), no observed set (it is not an
+            // OR-Set remove). The token is either a durable-delete class (`redact`/`expires`/
+            // `sensitive`) or the explicit `live` un-delete; any other token is invalid.
+            let field = op.field.as_deref().ok_or(SyncError::CrdtOpInvalid)?;
+            if op.value.is_some() || op.observed.is_some() {
+                return Err(SyncError::CrdtOpInvalid);
+            }
+            if field != DEATH_LIVE && DeleteClass::from_token(field).is_none() {
                 return Err(SyncError::CrdtOpInvalid);
             }
         }
@@ -225,6 +252,114 @@ impl OrSet {
     }
 }
 
+/// The state of a per-object **death certificate** (§5.6.4): the object is either `Live` or durably
+/// `Deleted` under a [`DeleteClass`]. Ordered so that, at an exact HLC tie, `Deleted` beats `Live`
+/// (remove-wins, fail-safe toward deletion) and a later class deterministically beats an earlier —
+/// making the LWW join total and identical on every replica. In practice HLCs are globally unique
+/// (the `device` field disambiguates), so the tie rule only guarantees determinism.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DeathState {
+    /// The object is live (never deleted, or explicitly un-deleted).
+    Live,
+    /// The object is durably deleted under this class.
+    Deleted(DeleteClass),
+}
+
+impl DeathState {
+    /// The durable-delete class if this certificate is `Deleted`.
+    pub fn class(&self) -> Option<DeleteClass> {
+        match self {
+            DeathState::Live => None,
+            DeathState::Deleted(c) => Some(*c),
+        }
+    }
+}
+
+/// The **remove-wins durable-delete dimension** (§5.6.4): a per-object HLC-keyed `deleted` flag —
+/// an LWW register over the states `{live, deleted}` (a 2P-Set-style "death certificate"). Set with
+/// the greatest HLC, it **dominates** the add-wins [`OrSet`]: a `Deleted` certificate makes the
+/// object absent **regardless** of any un-tombstoned OR-Set add-tag, so a concurrent benign
+/// re-label cannot resurrect a redacted/expired/sensitive object. Only an explicit un-delete (a
+/// `Live` write with a *greater* HLC) supersedes a certificate; a bare OR-Set add never touches
+/// this dimension.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeathReg {
+    /// object → the winning `(HLC, state)` of its death certificate.
+    regs: BTreeMap<String, (Hlc, DeathState)>,
+}
+
+/// Whether a death write `(new_hlc, new_state)` beats the incumbent `(cur_hlc, cur_state)` — the
+/// total, deterministic LWW join. Greater HLC wins; at an exact HLC tie the greater [`DeathState`]
+/// wins (`Deleted` > `Live`), so an un-delete needs a *strictly greater* HLC to revive an object
+/// and equal-HLC ties fail safe toward deletion.
+fn death_wins(new_hlc: &Hlc, new_state: &DeathState, cur_hlc: &Hlc, cur_state: &DeathState) -> bool {
+    match new_hlc.cmp(cur_hlc) {
+        std::cmp::Ordering::Greater => true,
+        std::cmp::Ordering::Less => false,
+        std::cmp::Ordering::Equal => new_state > cur_state,
+    }
+}
+
+impl DeathReg {
+    /// An empty register.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Apply a death-certificate write to `object`; keeps it only if it beats the incumbent (LWW).
+    pub fn write(&mut self, object: &str, hlc: Hlc, state: DeathState) {
+        match self.regs.get(object) {
+            Some((cur_hlc, cur_state)) if !death_wins(&hlc, &state, cur_hlc, cur_state) => {}
+            _ => {
+                self.regs.insert(object.to_owned(), (hlc, state));
+            }
+        }
+    }
+
+    /// The winning death state of `object` (default [`DeathState::Live`] if no certificate exists).
+    pub fn state(&self, object: &str) -> DeathState {
+        self.regs.get(object).map(|(_, s)| s.clone()).unwrap_or(DeathState::Live)
+    }
+
+    /// Whether `object` currently bears a `Deleted` death certificate (durably deleted).
+    pub fn is_deleted(&self, object: &str) -> bool {
+        matches!(self.regs.get(object), Some((_, DeathState::Deleted(_))))
+    }
+
+    /// The durable-delete class of `object`, if it is currently deleted.
+    pub fn class(&self, object: &str) -> Option<DeleteClass> {
+        self.regs.get(object).and_then(|(_, s)| s.class())
+    }
+
+    /// The sorted object ids currently bearing a `Deleted` certificate, each with its class — the
+    /// observable output of the remove-wins dimension (used in [`ClusterState::snapshot`]).
+    pub fn deleted(&self) -> Vec<(String, DeleteClass)> {
+        self.regs
+            .iter()
+            .filter_map(|(o, (_, s))| s.class().map(|c| (o.clone(), c)))
+            .collect()
+    }
+
+    /// Join with `other` (§5.6.4): per object, keep the winning certificate. HLC-max with the
+    /// deterministic [`death_wins`] tiebreak is commutative, associative, and idempotent ⇒ a CvRDT.
+    pub fn merge(&mut self, other: &DeathReg) {
+        for (object, (hlc, state)) in &other.regs {
+            match self.regs.get(object) {
+                Some((cur_hlc, cur_state)) if !death_wins(hlc, state, cur_hlc, cur_state) => {}
+                _ => {
+                    self.regs.insert(object.clone(), (hlc.clone(), state.clone()));
+                }
+            }
+        }
+    }
+
+    /// The maximum HLC across every death-certificate register — folded into the replica's §5.6.5
+    /// stability watermark so a durable delete/un-delete advances GC like any other op.
+    fn max_hlc(&self) -> Option<Hlc> {
+        self.regs.values().map(|(h, _)| h.clone()).max()
+    }
+}
+
 /// A per-field Last-Writer-Wins register map (§5.6.4), keyed by `(target, field)`. Each cell keeps
 /// the single winning `(HLC, value)`; the winner is the greater HLC under the total order
 /// `(wall, counter, device)`, with a final deterministic tiebreak on the encoded value bytes so
@@ -285,10 +420,12 @@ impl LwwMap {
 /// scalar flags (§5.6.4). `merge` joins both halves, so `ClusterState` is itself a CvRDT.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClusterState {
-    /// Object / folder / label membership + deletes.
+    /// Benign, add-wins object / folder / label membership + benign label removes.
     pub set: OrSet,
     /// Per-field flags & moves (read/unread, star, current folder, …).
     pub lww: LwwMap,
+    /// Remove-wins durable-delete death certificates; dominates [`set`](Self::set).
+    pub deaths: DeathReg,
 }
 
 impl ClusterState {
@@ -314,6 +451,17 @@ impl ClusterState {
                     self.lww.set(&op.target, field, op.hlc.clone(), value.clone());
                 }
             }
+            OP_DELETE => {
+                // The death token in `field` selects the certificate state: a class token ⇒ durable
+                // `Deleted`, the `live` token ⇒ an explicit un-delete. (Validated by `validate_op`.)
+                if let Some(field) = &op.field {
+                    let state = match DeleteClass::from_token(field) {
+                        Some(class) => DeathState::Deleted(class),
+                        None => DeathState::Live, // `field == DEATH_LIVE`
+                    };
+                    self.deaths.write(&op.target, op.hlc.clone(), state);
+                }
+            }
             _ => {}
         }
     }
@@ -325,10 +473,30 @@ impl ClusterState {
         Ok(())
     }
 
-    /// Join with `other` (§5.6.4): merge both halves. Commutative, associative, idempotent.
+    /// Join with `other` (§5.6.4): merge all three dimensions (OR-Set, LWW registers, remove-wins
+    /// death certificates). Each is a CvRDT join ⇒ commutative, associative, idempotent.
     pub fn merge(&mut self, other: &ClusterState) {
         self.set.merge(&other.set);
         self.lww.merge(&other.lww);
+        self.deaths.merge(&other.deaths);
+    }
+
+    /// Whether `target` is durably deleted — its death certificate is `Deleted` (§5.6.4). Dominates
+    /// OR-Set membership.
+    pub fn is_deleted(&self, target: &str) -> bool {
+        self.deaths.is_deleted(target)
+    }
+
+    /// Whether `target` is **present**: the remove-wins death certificate is not `Deleted` **and**
+    /// the add-wins OR-Set holds a live add-tag (§5.6.4). The durable-delete dimension dominates, so
+    /// a concurrent benign re-label can never resurrect a redacted/expired/sensitive object.
+    pub fn is_present(&self, target: &str) -> bool {
+        !self.deaths.is_deleted(target) && self.set.contains(target)
+    }
+
+    /// The present OR-Set elements (§5.6.4), with any durably-deleted object filtered out.
+    pub fn present_elements(&self) -> Vec<String> {
+        self.set.elements().into_iter().filter(|e| !self.deaths.is_deleted(e)).collect()
     }
 
     /// Run the §5.6.5 stability-cut GC over the OR-Set half (see [`OrSet::prune_stable`]): reclaim
@@ -350,7 +518,7 @@ impl ClusterState {
             .chain(self.set.tombstones.values())
             .flat_map(|tags| tags.iter().map(|t| t.hlc.clone()));
         let lww_keys = self.lww.regs.values().map(|(h, _)| h.clone());
-        set_tags.chain(lww_keys).max()
+        set_tags.chain(lww_keys).chain(self.deaths.max_hlc()).max()
     }
 
     /// A canonical, order-independent snapshot of the *observable* state — present set elements and
@@ -358,7 +526,8 @@ impl ClusterState {
     /// ops (in any order, with any duplication) produce **byte-identical** snapshots; this is the
     /// strong-eventual-consistency equality used by the convergence tests (§5.6.4).
     pub fn snapshot(&self) -> Vec<u8> {
-        let members: Vec<Cv> = self.set.elements().into_iter().map(Cv::Text).collect();
+        // Present members exclude durably-deleted objects (remove-wins death dimension dominates).
+        let members: Vec<Cv> = self.present_elements().into_iter().map(Cv::Text).collect();
         let mut cells: Vec<Cv> = self
             .lww
             .regs
@@ -368,7 +537,16 @@ impl ClusterState {
             })
             .collect();
         cells.sort_by(|a, b| cbor::encode(a).cmp(&cbor::encode(b)));
-        cbor::encode(&Cv::Array(vec![Cv::Array(members), Cv::Array(cells)]))
+        // The observable output of the death dimension: each durably-deleted object with its class
+        // token. A `Live` certificate contributes nothing (observationally identical to no cert), so
+        // two replicas that converge on presence produce byte-identical snapshots.
+        let deleted: Vec<Cv> = self
+            .deaths
+            .deleted()
+            .into_iter()
+            .map(|(o, c)| Cv::Array(vec![Cv::Text(o), Cv::Text(c.token().to_owned())]))
+            .collect();
+        cbor::encode(&Cv::Array(vec![Cv::Array(members), Cv::Array(cells), Cv::Array(deleted)]))
     }
 }
 
@@ -409,6 +587,14 @@ mod tests {
             hlc: hlc(w, 0, d),
             observed: None,
         }
+    }
+    /// A durable death-certificate (remove-wins) op of the given class.
+    fn del(target: &str, class: DeleteClass, w: u64, d: u8) -> ClusterOp {
+        ClusterOp::durable_delete(target, class, hlc(w, 0, d))
+    }
+    /// An explicit un-delete (write `live`) op.
+    fn undel(target: &str, w: u64, d: u8) -> ClusterOp {
+        ClusterOp::undelete(target, hlc(w, 0, d))
     }
     /// Apply a list of ops (assumed valid) to a fresh state in the given order.
     fn state_of(ops: &[ClusterOp]) -> ClusterState {
@@ -576,5 +762,145 @@ mod tests {
         let mut op = lww("m", "read", 10, 1, Cv::Bool(true));
         op.value = None;
         assert_eq!(validate_op(&op, 1_000_000), Err(SyncError::CrdtOpInvalid));
+    }
+
+    // ── D3: remove-wins durable delete (§5.6.4) ──────────────────────────────────────────────
+
+    #[test]
+    fn durable_delete_is_remove_wins_over_concurrent_benign_relabel() {
+        // The resurrection hole an add-wins delete would leave open: A durably redacts a message
+        // while B, never having seen the redaction, concurrently re-labels it (a benign OR-Set add
+        // with a fresh, un-tombstoned add-tag). The death certificate DOMINATES the OR-Set, so the
+        // message stays deleted — a concurrent re-label does not un-redact confidential content.
+        let s = state_of(&[
+            add("m1", 10, 0xA),                 // m1 was present (a live add-tag)
+            del("m1", DeleteClass::Redact, 20, 0xA), // A redacts it (durable, remove-wins)
+            add("m1", 21, 0xB),                 // B concurrently re-labels — a NEW, unseen add-tag
+        ]);
+        // The OR-Set alone would report it present (B's add-tag is un-tombstoned)...
+        assert!(s.set.contains("m1"), "the OR-Set still holds a live add-tag");
+        // ...but the remove-wins death certificate dominates: the object is absent.
+        assert!(s.is_deleted("m1"));
+        assert!(!s.is_present("m1"), "remove-wins: a concurrent benign re-label cannot resurrect it");
+        assert!(!s.present_elements().contains(&"m1".to_string()));
+        assert_eq!(s.deaths.class("m1"), Some(DeleteClass::Redact));
+
+        // Order-independence: applying the same ops in any order converges identically.
+        let reordered = state_of(&[add("m1", 21, 0xB), add("m1", 10, 0xA), del("m1", DeleteClass::Redact, 20, 0xA)]);
+        assert_eq!(reordered.snapshot(), s.snapshot());
+    }
+
+    #[test]
+    fn bare_orset_add_never_resurrects_a_durable_delete_even_with_greater_hlc() {
+        // The exact delete/re-add tiebreak (§5.6.4): a bare OR-Set add — even one whose HLC is
+        // GREATER than the death certificate's — never writes the `deleted` field, so it has no HLC
+        // on that dimension and can NEVER outrank a set certificate. Only an explicit un-delete can.
+        let s = state_of(&[
+            del("m1", DeleteClass::Sensitive, 20, 0xA), // death certificate @ wall 20
+            add("m1", 99, 0xB),                          // a bare add @ wall 99 (>> 20)
+        ]);
+        assert!(s.is_deleted("m1"), "a bare add, however late, does not un-delete");
+        assert!(!s.is_present("m1"));
+    }
+
+    #[test]
+    fn explicit_undelete_with_greater_hlc_readds_but_a_lesser_one_does_not() {
+        // Only a genuine un-delete (a `live` write) with a *greater* HLC than the certificate
+        // supersedes it (§5.6.4). Below/at the certificate's HLC it loses; above it, the object
+        // reverts to its OR-Set membership (present again, since a live add-tag exists).
+        let base = [add("m1", 5, 0xA), del("m1", DeleteClass::Expires, 20, 0xA)];
+
+        // An un-delete BELOW the certificate loses ⇒ stays deleted.
+        let mut lo = state_of(&base);
+        lo.apply(&undel("m1", 15, 0xA));
+        assert!(lo.is_deleted("m1"), "an un-delete with a lesser HLC cannot revive the object");
+
+        // An un-delete ABOVE the certificate wins ⇒ live again (OR-Set add-tag makes it present).
+        let mut hi = state_of(&base);
+        hi.apply(&undel("m1", 25, 0xA));
+        assert!(!hi.is_deleted("m1"));
+        assert!(hi.is_present("m1"), "a greater-HLC un-delete re-adds the object");
+        assert!(hi.present_elements().contains(&"m1".to_string()));
+    }
+
+    #[test]
+    fn benign_label_remove_is_still_add_wins_alongside_the_death_dimension() {
+        // Adding the remove-wins dimension must NOT change benign label semantics: a benign OR-Set
+        // remove that did not observe a concurrent add still loses to it (add-wins), and no death
+        // certificate is involved, so the label stays present.
+        let a_tag = AddTag { device: vec![0xA], hlc: hlc(10, 0, 0xA) };
+        let s = state_of(&[
+            add("work", 10, 0xA),           // A labels "work"
+            add("work", 11, 0xB),           // B concurrently re-labels "work" (unseen add-tag)
+            remove("work", 12, 0xA, vec![a_tag]), // A un-labels, observing only its own tag
+        ]);
+        assert!(!s.is_deleted("work"), "a benign label remove is not a durable delete");
+        assert!(s.is_present("work"), "add-wins: the concurrent unseen re-label survives the remove");
+    }
+
+    #[test]
+    fn death_register_is_a_convergent_lww_commutative_and_idempotent() {
+        // The death dimension is itself a CvRDT: concurrent delete/un-delete writes converge on the
+        // greater-HLC winner regardless of order or duplication.
+        let ops = [
+            del("m", DeleteClass::Redact, 10, 0xA),
+            undel("m", 20, 0xB),                 // greater HLC ⇒ live wins
+            del("m", DeleteClass::Sensitive, 15, 0xC), // an intermediate delete
+        ];
+        let fwd = state_of(&ops);
+        let mut rev: Vec<ClusterOp> = ops.iter().rev().cloned().collect();
+        rev.push(ops[0].clone()); // duplicate one op (idempotency)
+        let bwd = state_of(&rev);
+        assert_eq!(fwd.snapshot(), bwd.snapshot(), "death register converges under any order");
+        assert!(!fwd.is_deleted("m"), "the greatest-HLC write (un-delete @20) wins");
+
+        // Merge of the two divergent replicas is the same fixed point (join).
+        let mut merged = fwd.clone();
+        merged.merge(&bwd);
+        assert_eq!(merged.snapshot(), fwd.snapshot());
+    }
+
+    #[test]
+    fn equal_hlc_tie_is_remove_wins_deleted_beats_live() {
+        // Determinism at an exact HLC tie (pathological — HLCs are globally unique in practice):
+        // `Deleted` beats `Live`, so ties fail safe toward deletion and merge stays commutative.
+        let mut a = ClusterState::new();
+        a.apply(&del("m", DeleteClass::Redact, 10, 0xA));
+        a.apply(&undel("m", 10, 0xA)); // identical HLC ⇒ does not supersede
+        assert!(a.is_deleted("m"), "an equal-HLC un-delete does not revive (remove-wins tie)");
+
+        // Order-independent: live-then-delete lands identically.
+        let mut b = ClusterState::new();
+        b.apply(&undel("m", 10, 0xA));
+        b.apply(&del("m", DeleteClass::Redact, 10, 0xA));
+        assert_eq!(a.snapshot(), b.snapshot());
+    }
+
+    #[test]
+    fn validate_durable_delete_and_undelete_ops() {
+        // Well-formed durable-delete and un-delete ops validate.
+        assert!(validate_op(&del("m", DeleteClass::Redact, 10, 1), 1_000_000).is_ok());
+        assert!(validate_op(&undel("m", 10, 1), 1_000_000).is_ok());
+
+        // A kind-4 op with no death token is invalid.
+        let mut no_field = del("m", DeleteClass::Redact, 10, 1);
+        no_field.field = None;
+        assert_eq!(validate_op(&no_field, 1_000_000), Err(SyncError::CrdtOpInvalid));
+
+        // A kind-4 op with an unknown token is invalid.
+        let mut bad_token = del("m", DeleteClass::Redact, 10, 1);
+        bad_token.field = Some("obliterate".into());
+        assert_eq!(validate_op(&bad_token, 1_000_000), Err(SyncError::CrdtOpInvalid));
+
+        // A kind-4 op may not smuggle an LWW value or an observed set.
+        let mut with_value = del("m", DeleteClass::Redact, 10, 1);
+        with_value.value = Some(Cv::Bool(true));
+        assert_eq!(validate_op(&with_value, 1_000_000), Err(SyncError::CrdtOpInvalid));
+        let mut with_obs = del("m", DeleteClass::Redact, 10, 1);
+        with_obs.observed = Some(vec![AddTag { device: vec![1], hlc: hlc(5, 0, 1) }]);
+        assert_eq!(validate_op(&with_obs, 1_000_000), Err(SyncError::CrdtOpInvalid));
+
+        // The skew bound still applies to a durable delete.
+        assert_eq!(validate_op(&del("m", DeleteClass::Redact, 300_000, 1), 0), Err(SyncError::CrdtOpInvalid));
     }
 }

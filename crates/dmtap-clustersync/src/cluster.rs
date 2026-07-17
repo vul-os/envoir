@@ -25,6 +25,15 @@ use dmtap_core::identity::Identity;
 use dmtap_core::ContentId;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// **Cluster-member-liveness timeout: 7 days** (§16.10). A member that has not been seen advancing
+/// its `StabilityMark` on the cluster channel within this window is treated as **stale** — excluded
+/// from the §5.6.5 stability cut (and SHOULD be proposed for MLS Remove) — so a dead-but-unrevoked
+/// device cannot stall tombstone GC forever. Exclusion affects only *when* a tombstone may be
+/// reclaimed, never *whether* an op is authorised (§5.6.1 is unchanged): a returning device
+/// re-syncs via backfill (§5.6.3), pulling current state before it can push, so exclusion never
+/// enables resurrection.
+pub const CLUSTER_MEMBER_LIVENESS_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+
 /// The authenticated membership view of an owner's device cluster (§5.6.1), derived from a **pinned,
 /// verified `Identity`**. Construction fails closed if the identity does not verify; membership is
 /// then the set of device keys whose `DeviceCert` verifies under the identity's `IK` and is present
@@ -101,6 +110,10 @@ pub struct Replica {
     /// Per-device max-applied-HLC stability marks ingested from peers (§5.6.5), the input to the
     /// leaderless stability cut that drives tombstone GC.
     stability: BTreeMap<Vec<u8>, Hlc>,
+    /// Per-device local wall-clock time (ms) this replica last **saw** that device active on the
+    /// cluster channel (a stability mark or an ops frame). Drives the §16.10 liveness bound: a
+    /// member not seen within [`CLUSTER_MEMBER_LIVENESS_MS`] is excluded from the stability cut.
+    last_seen: BTreeMap<Vec<u8>, u64>,
 }
 
 impl Replica {
@@ -114,6 +127,7 @@ impl Replica {
             state: ClusterState::new(),
             journal: Journal::new(),
             stability: BTreeMap::new(),
+            last_seen: BTreeMap::new(),
         }
     }
 
@@ -213,6 +227,8 @@ impl Replica {
             self.state.apply(op);
             self.journal.append(op.op_hash());
         }
+        // The peer was seen active on the cluster channel now (§16.10 liveness refresh).
+        self.last_seen.insert(frame.device.clone(), now_ms);
         Ok(())
     }
 
@@ -287,11 +303,16 @@ impl Replica {
         ClusterSyncFrame::stability(self.device.clone(), marks)
     }
 
-    /// Ingest a peer's type-5 stability marks (§5.6.5): authorise the origin (`0x0410`), then record
-    /// each mark as a **monotonic per-device max** (a mark can only advance a device's watermark,
-    /// never rewind it — a stale/replayed lower mark is ignored, so GC never over-collects).
-    pub fn ingest_stability(&mut self, frame: &ClusterSyncFrame) -> Result<(), SyncError> {
+    /// Ingest a peer's type-5 stability marks at local time `now_ms` (§5.6.5): authorise the origin
+    /// (`0x0410`), then record each mark as a **monotonic per-device max** (a mark can only advance a
+    /// device's watermark, never rewind it — a stale/replayed lower mark is ignored, so GC never
+    /// over-collects) and refresh that device's §16.10 liveness (it was seen on the channel now).
+    pub fn ingest_stability(&mut self, frame: &ClusterSyncFrame, now_ms: u64) -> Result<(), SyncError> {
         self.cluster.authorize_frame(frame)?;
+        // Only the frame's *origin* device is provably seen active now — a mark relayed on behalf of
+        // some other device must NOT refresh that device's liveness, or a peer echoing a dead
+        // device's stale mark could keep it "live" forever and defeat the §16.10 bound.
+        self.last_seen.insert(frame.device.clone(), now_ms);
         for mark in &frame.stability {
             self.stability
                 .entry(mark.device.clone())
@@ -305,20 +326,51 @@ impl Replica {
         Ok(())
     }
 
-    /// The §5.6.5 **stability cut**: the minimum max-applied-HLC across *every* cluster member,
-    /// folding in this replica's own watermark ([`own_stability_mark`](Self::own_stability_mark)).
-    /// Returns `None` — **fail-closed, no GC** — unless a mark is known for every current member, so
-    /// a silent member (which might still originate a concurrent op below a naive cut) can never
-    /// cause premature tombstone collection.
-    pub fn stability_cut(&self) -> Option<Hlc> {
+    /// Whether `member` is **stale** at local time `now_ms` (§16.10): this replica has seen it on
+    /// the cluster channel before, but not within [`CLUSTER_MEMBER_LIVENESS_MS`]. This replica's own
+    /// device is never stale (it is trivially active). A member **never seen** is *not* stale — it
+    /// still blocks the cut (fail-closed), so a just-joined member is never wrongly excluded; only a
+    /// device that was alive and then went quiet past the window is treated as departed.
+    pub fn is_stale(&self, member: &[u8], now_ms: u64) -> bool {
+        if member == self.device.as_slice() {
+            return false;
+        }
+        match self.last_seen.get(member) {
+            Some(seen) => now_ms.saturating_sub(*seen) > CLUSTER_MEMBER_LIVENESS_MS,
+            None => false,
+        }
+    }
+
+    /// The current members that are **stale** at `now_ms` (§16.10) — excluded from the stability cut
+    /// and which the caller SHOULD propose for MLS **Remove** from the cluster group (§5.6.1), so
+    /// membership converges to the actually-live replica set. A returning device is re-admitted by a
+    /// fresh Welcome and re-syncs via backfill (§5.6.3) before it can push.
+    pub fn stale_members(&self, now_ms: u64) -> Vec<Vec<u8>> {
+        self.cluster
+            .members()
+            .iter()
+            .filter(|m| self.is_stale(m, now_ms))
+            .cloned()
+            .collect()
+    }
+
+    /// The §5.6.5 **liveness-bounded stability cut** at local time `now_ms`: the minimum
+    /// max-applied-HLC across every **live** cluster member, folding in this replica's own watermark
+    /// ([`own_stability_mark`](Self::own_stability_mark)). A member gone **stale** past the §16.10
+    /// liveness window is **excluded** (treated as departed), giving GC a ceiling a dead-but-
+    /// unrevoked device can no longer stall. A **live** member without a known watermark still yields
+    /// `None` — **fail-closed, no GC** — so a briefly-quiet-but-live member (which might still
+    /// originate a concurrent op below a naive cut) can never cause premature collection.
+    pub fn stability_cut(&self, now_ms: u64) -> Option<Hlc> {
         let mut cut: Option<Hlc> = None;
         for member in self.cluster.members() {
-            let mark = if member == &self.device {
-                self.state.max_hlc()
+            let hlc = if member == &self.device {
+                self.state.max_hlc()? // our own watermark; None ⇒ nothing applied ⇒ no cut
+            } else if self.is_stale(member, now_ms) {
+                continue; // §16.10: a stale member is excluded from the cut, not required to mark
             } else {
-                self.stability.get(member).cloned()
+                self.stability.get(member).cloned()? // live member w/o a mark ⇒ no cut (fail closed)
             };
-            let hlc = mark?; // any member without a known watermark ⇒ no cut (fail closed)
             cut = Some(match cut {
                 Some(c) if c <= hlc => c,
                 _ => hlc,
@@ -327,12 +379,12 @@ impl Replica {
         cut
     }
 
-    /// Run the §5.6.5 stability-cut GC: if a cut exists ([`stability_cut`](Self::stability_cut)),
-    /// reclaim every collapsed OR-Set add+tombstone pair at/below it
-    /// ([`ClusterState::prune_stable`]). Observable state and convergence are preserved. Returns the
-    /// number of tags reclaimed (0 if no cut is available yet).
-    pub fn gc(&mut self) -> usize {
-        match self.stability_cut() {
+    /// Run the §5.6.5 liveness-bounded stability-cut GC at local time `now_ms`: if a cut exists
+    /// ([`stability_cut`](Self::stability_cut)), reclaim every collapsed OR-Set add+tombstone pair
+    /// at/below it ([`ClusterState::prune_stable`]). Observable state and convergence are preserved.
+    /// Returns the number of tags reclaimed (0 if no cut is available yet).
+    pub fn gc(&mut self, now_ms: u64) -> usize {
+        match self.stability_cut(now_ms) {
             Some(cut) => self.state.prune_stable(&cut),
             None => 0,
         }
@@ -547,18 +599,18 @@ mod tests {
         let before = r0.state().snapshot();
 
         // Fail-closed: without device 1's mark, no cut exists ⇒ GC is a no-op.
-        assert!(r0.stability_cut().is_none(), "missing a member mark ⇒ no cut");
-        assert_eq!(r0.gc(), 0);
+        assert!(r0.stability_cut(now).is_none(), "missing a member mark ⇒ no cut");
+        assert_eq!(r0.gc(now), 0);
 
         // Device 1 advertises a watermark (wall 40) above the dead delete's tags (≤ 11).
         let mark_frame = ClusterSyncFrame::stability(
             dks[1].clone(),
             vec![StabilityMark { device: dks[1].clone(), hlc: Hlc { wall: 40, counter: 0, device: dks[1].clone() } }],
         );
-        r0.ingest_stability(&mark_frame).unwrap();
+        r0.ingest_stability(&mark_frame, now).unwrap();
         // Cut = min(own max = 30, peer = 40) = 30, which is ≥ the delete tags.
-        assert!(r0.stability_cut().is_some());
-        let reclaimed = r0.gc();
+        assert!(r0.stability_cut(now).is_some());
+        let reclaimed = r0.gc(now);
         assert_eq!(reclaimed, 1, "the stable dead tombstone pair is reclaimed");
         // Observable state unchanged; the live element survives.
         assert_eq!(r0.state().snapshot(), before, "GC must not change observable state");
@@ -566,7 +618,125 @@ mod tests {
 
         // A stability frame from a non-member is refused fail-closed (0x0410).
         let stranger = ClusterSyncFrame::stability(vec![0xEE; 32], vec![]);
-        assert_eq!(r0.ingest_stability(&stranger).unwrap_err(), SyncError::DeviceUnauthorized);
+        assert_eq!(r0.ingest_stability(&stranger, now).unwrap_err(), SyncError::DeviceUnauthorized);
+    }
+
+    /// Build a 3-member cluster on device 0 holding one collapsed delete ("m", tags ≤ 11) plus a
+    /// live "keep" (wall 30), ingest device 1's high watermark (wall 40) at `seen_ms`. Device 2 is
+    /// the variable in the D5 liveness tests. Returns `(r0, dks)`.
+    fn cluster_with_pending_delete(seen_ms: u64) -> (Replica, Vec<Vec<u8>>) {
+        use crate::wire::{AddTag, OP_SET_ADD, OP_SET_REMOVE};
+        let (_ik, identity, dks) = identity_with_devices(3);
+        let cluster = Cluster::from_identity(&identity).unwrap();
+        let mut r0 = Replica::new(dks[0].clone(), cluster);
+        let d0 = dks[0].clone();
+        let now = 10_000_000u64;
+        let add_hlc = Hlc { wall: 10, counter: 0, device: d0.clone() };
+        r0.state_mut()
+            .ingest(&ClusterOp { kind: OP_SET_ADD, target: "m".into(), field: None, value: None, hlc: add_hlc.clone(), observed: None }, now)
+            .unwrap();
+        r0.state_mut()
+            .ingest(&ClusterOp { kind: OP_SET_REMOVE, target: "m".into(), field: None, value: None, hlc: Hlc { wall: 11, counter: 0, device: d0.clone() }, observed: Some(vec![AddTag { device: d0.clone(), hlc: add_hlc }]) }, now)
+            .unwrap();
+        r0.state_mut()
+            .ingest(&ClusterOp { kind: OP_SET_ADD, target: "keep".into(), field: None, value: None, hlc: Hlc { wall: 30, counter: 0, device: d0.clone() }, observed: None }, now)
+            .unwrap();
+        // Device 1 is live with a high watermark (wall 40 > the delete tags).
+        let d1_mark = ClusterSyncFrame::stability(
+            dks[1].clone(),
+            vec![StabilityMark { device: dks[1].clone(), hlc: Hlc { wall: 40, counter: 0, device: dks[1].clone() } }],
+        );
+        r0.ingest_stability(&d1_mark, seen_ms).unwrap();
+        (r0, dks)
+    }
+
+    #[test]
+    fn live_member_with_a_low_watermark_blocks_the_cut_safety_preserved() {
+        // D5 safety half: device 2 is seen recently (within the 7-day window) but its watermark is
+        // LOW (wall 5, below the delete tags ≤ 11). Being live, it is INCLUDED in the cut, so the cut
+        // stays below the tombstone and GC reclaims nothing — a still-live replica can never have its
+        // un-tombstoned add prematurely collected.
+        let t = 100 * CLUSTER_MEMBER_LIVENESS_MS; // an arbitrary "now" well past epoch
+        let (mut r0, dks) = cluster_with_pending_delete(t);
+        let d2_low = ClusterSyncFrame::stability(
+            dks[2].clone(),
+            vec![StabilityMark { device: dks[2].clone(), hlc: Hlc { wall: 5, counter: 0, device: dks[2].clone() } }],
+        );
+        r0.ingest_stability(&d2_low, t).unwrap(); // seen NOW ⇒ live
+
+        assert!(!r0.is_stale(&dks[2], t), "device 2 was just seen ⇒ live");
+        // Cut = min(own 30, dev1 40, dev2 5) = 5 < the delete tags ⇒ GC blocked.
+        assert_eq!(r0.stability_cut(t), Some(Hlc { wall: 5, counter: 0, device: dks[2].clone() }));
+        assert_eq!(r0.gc(t), 0, "a live low-watermark member blocks GC (safety)");
+        assert!(!r0.state().set.contains("m"), "the delete stays applied");
+    }
+
+    #[test]
+    fn member_stale_beyond_liveness_window_is_excluded_so_gc_progresses() {
+        // D5 liveness half: device 2 was seen once (with a low watermark) but has since gone quiet
+        // for longer than the 7-day window — a dead-but-unrevoked device that would stall GC forever.
+        // It is EXCLUDED from the cut, giving GC a ceiling: the cut rises to min(own 30, dev1 40) = 30
+        // ≥ the delete tags, so the stable tombstone is finally reclaimed.
+        let seen = 100 * CLUSTER_MEMBER_LIVENESS_MS;
+        let (mut r0, dks) = cluster_with_pending_delete(seen);
+        let d2_low = ClusterSyncFrame::stability(
+            dks[2].clone(),
+            vec![StabilityMark { device: dks[2].clone(), hlc: Hlc { wall: 5, counter: 0, device: dks[2].clone() } }],
+        );
+        r0.ingest_stability(&d2_low, seen).unwrap();
+
+        // "Now" is one millisecond past device 2's liveness window; device 1 was refreshed too...
+        let now = seen + CLUSTER_MEMBER_LIVENESS_MS + 1;
+        // ...so re-advertise device 1 as still-live at `now` (only device 2 has gone dark).
+        let d1_mark = ClusterSyncFrame::stability(
+            dks[1].clone(),
+            vec![StabilityMark { device: dks[1].clone(), hlc: Hlc { wall: 40, counter: 0, device: dks[1].clone() } }],
+        );
+        r0.ingest_stability(&d1_mark, now).unwrap();
+
+        assert!(r0.is_stale(&dks[2], now), "device 2 unseen past the window ⇒ stale");
+        assert!(!r0.is_stale(&dks[1], now), "device 1 seen at `now` ⇒ live");
+        assert_eq!(r0.stale_members(now), vec![dks[2].clone()], "device 2 SHOULD be proposed for Remove");
+
+        // Excluding the stale member, the cut = min(own 30, dev1 40) = 30 ≥ the delete tags.
+        assert_eq!(r0.stability_cut(now), Some(Hlc { wall: 30, counter: 0, device: dks[0].clone() }));
+        let before = r0.state().snapshot();
+        assert_eq!(r0.gc(now), 1, "the stale member no longer stalls GC — the tombstone is reclaimed");
+        assert_eq!(r0.state().snapshot(), before, "GC preserves observable state");
+        assert!(r0.state().set.contains("keep"));
+    }
+
+    #[test]
+    fn a_never_seen_member_still_blocks_the_cut_fail_closed() {
+        // A member this replica has NEVER heard from is not treated as stale (we cannot prove it is
+        // dead vs. just-joined) — it blocks the cut fail-closed, exactly as before D5. Only a device
+        // seen-then-gone-quiet past the window is excluded.
+        let t = 100 * CLUSTER_MEMBER_LIVENESS_MS;
+        let (r0, dks) = cluster_with_pending_delete(t);
+        assert!(!r0.is_stale(&dks[2], t + CLUSTER_MEMBER_LIVENESS_MS + 1), "never-seen ⇒ not stale");
+        assert!(r0.stability_cut(t + CLUSTER_MEMBER_LIVENESS_MS + 1).is_none(), "a never-seen member blocks the cut");
+    }
+
+    #[test]
+    fn apply_ops_refreshes_a_peers_liveness() {
+        // Being seen carrying ops on the channel (not only stability marks) refreshes liveness.
+        use crate::wire::{Hlc, FRAME_ANNOUNCE, OP_LWW_SET};
+        let (_ik, identity, dks) = identity_with_devices(2);
+        let cluster = Cluster::from_identity(&identity).unwrap();
+        let mut r0 = Replica::new(dks[0].clone(), cluster);
+        let t = 100 * CLUSTER_MEMBER_LIVENESS_MS;
+        let op = ClusterOp {
+            kind: OP_LWW_SET,
+            target: "m".into(),
+            field: Some("read".into()),
+            value: Some(Cv::Bool(true)),
+            hlc: Hlc { wall: 1, counter: 0, device: dks[1].clone() },
+            observed: None,
+        };
+        let frame = ClusterSyncFrame::new(FRAME_ANNOUNCE, dks[1].clone()).with_ops(vec![op]);
+        r0.apply_ops(&frame, t).unwrap();
+        assert!(!r0.is_stale(&dks[1], t), "a peer that just sent ops is live");
+        assert!(r0.is_stale(&dks[1], t + CLUSTER_MEMBER_LIVENESS_MS + 1), "and goes stale once quiet past the window");
     }
 
     #[test]
