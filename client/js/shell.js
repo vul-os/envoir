@@ -7,7 +7,7 @@ import { currentIdentity, displayAddress, displayName, selfPerson } from './iden
 import { PEOPLE } from './seed.js';
 import { esc, icon, avatar, brandMark, openModal, closeModal, hideInspector, applyStagger } from './ui.js';
 import { bus } from './bus.js';
-import { openCompose } from './compose.js';
+import { openCompose, refreshComposeNote } from './compose.js';
 import { onInstallPromptChange } from './pwa.js';
 
 import { render as renderMail, mailKeys } from './views/mail.js';
@@ -163,6 +163,9 @@ function refreshChrome() {
   const id = currentIdentity();
   const railId = app.querySelector('#rail-id');
   if (railId) { railId.innerHTML = avatar(selfPerson(), 40); railId.title = displayAddress(id); railId.setAttribute('aria-label', `Open settings — signed in as ${displayAddress(id)}`); }
+  // Every net-mode transition funnels through here — keep an OPEN compose's footer note honest
+  // (the sim/seam/real wording is mode-keyed and autoConnect can flip the mode after it rendered).
+  refreshComposeNote();
 }
 
 function toggleTheme() {

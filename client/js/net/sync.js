@@ -156,6 +156,43 @@ async function pullMail(client) {
   return { threads, sessionState: client.sessionState };
 }
 
+// In REAL mode, state.mail is ALSO the only home of locally-originated records: compose writes
+// just-sent Sent threads, partial-failure drafts and autosaved drafts straight into it, tagged
+// `local: true` (compose.js), with sent messages carrying the node's send receipt ids as
+// `nodeIds` (the MOTE content ids from POST /v1/send). A wholesale `state.mail = serverThreads`
+// on reconnect/resync would destroy them, so every real-mode rebuild merges instead:
+//   • a `local` THREAD is carried over unless the server now holds its message — i.e. every
+//     nodeId it recorded shows up as a server email id (drafts record none → always carried);
+//   • a `local` MESSAGE appended to a SERVER thread (a real-mode reply) is re-appended to the
+//     rebuilt thread under the same rule, keeping chronological order.
+// Supersession is exact-id only. If the node later serves the sent copy under an unrelated id
+// the worst case is a visible duplicate next to the server's copy — honest, and strictly better
+// than silently losing the user's only record of what they sent.
+// Exported for the headless harness (client/test/net.test.mjs).
+export function mergeLocalMail(serverThreads) {
+  const serverIds = new Set();
+  for (const t of serverThreads) for (const m of t.msgs) serverIds.add(String(m.id));
+  const superseded = (m) => Array.isArray(m.nodeIds) && m.nodeIds.length > 0
+    && m.nodeIds.every((id) => serverIds.has(String(id)));
+
+  const merged = serverThreads.slice();
+  const byId = new Map(merged.map((t) => [t.id, t]));
+  for (const t of state.mail) {
+    if (t.local) {
+      if (byId.has(t.id)) continue;              // the server adopted this very thread id — its copy wins
+      if (t.msgs.every(superseded)) continue;    // fully served by the node now — drop the local copy
+      merged.unshift(t);
+    } else {
+      const server = byId.get(t.id);
+      if (!server) continue;
+      const appendix = t.msgs.filter((m) => m.local && !superseded(m)
+        && !server.msgs.some((x) => String(x.id) === String(m.id)));
+      if (appendix.length) { server.msgs.push(...appendix); server.msgs.sort((a, b) => a.time - b.time); }
+    }
+  }
+  return merged;
+}
+
 // Point the mail UI selection at something sensible after the store is swapped.
 function reselectInbox() {
   const first = state.mail.find((t) => t.folder === 'inbox') || state.mail[0];
@@ -174,11 +211,14 @@ export async function connect(cfg) {
     setNetStatus({ mode: 'sim', status: 'idle', error: null });
     return { ok: false, mode: 'sim', reason: 'unconfigured' };
   }
+  // A RE-connect from real mode must not destroy locally-originated threads; the FIRST connect
+  // (from sim) replaces wholesale — seed/sim data must never leak into the live mailbox.
+  const wasReal = state.net.mode === 'real';
   setNetStatus({ status: 'connecting', error: null });
   const client = new JmapClient(cfg);
   try {
     const { threads, sessionState } = await pullMail(client);
-    state.mail = threads;
+    state.mail = wasReal ? mergeLocalMail(threads) : threads;
     reselectInbox();
     setNetStatus({
       mode: 'real', status: 'connected', error: null,
@@ -235,7 +275,7 @@ export async function syncNow() {
     }
     const { threads, sessionState } = await pullMail(client);
     const prevSel = state.ui.selThread;
-    state.mail = threads;
+    state.mail = mergeLocalMail(threads);   // always real-mode here — carry local records over
     if (!state.mail.some((t) => t.id === prevSel)) reselectInbox();
     setNetStatus({ sessionState, lastSync: Date.now(), status: 'connected', error: null });
     return { ok: true, changed: true, count: threads.length };

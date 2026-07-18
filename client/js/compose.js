@@ -22,12 +22,22 @@ function textToHtml(s) { return esc(s || '').replace(/\n/g, '<br>'); }
 // The honest footer note, keyed to how THIS message will actually go out (net/send.js sendMode):
 //   real → delivered by the node's Send API   seam → live node but send not provisioned
 //   sim  → the labeled simulation (no real delivery)
+// Real send carries a PLAIN-TEXT body (commitSendReal — no MIME builder here), so the note says so.
 function composeNote() {
   switch (sendMode()) {
-    case 'real': return 'sealed · signed with your real key · delivered by your node';
+    case 'real': return 'sealed · signed with your real key · delivered by your node as plain text';
     case 'seam': return 'sealed · signed with your real key · add a send token in Settings → Node to deliver for real';
     default: return 'sealed · signed with your real key · simulated delivery — connect your node to send for real';
   }
+}
+
+// The footer note is mode-keyed, and the mode can flip while compose is OPEN (autoConnect resolves
+// async after boot). Every net transition already funnels through the shell's refreshChrome();
+// that hook calls this so an open compose never keeps promising "simulated delivery" (or the
+// reverse) after the mode has genuinely changed.
+export function refreshComposeNote() {
+  const tag = document.querySelector('.compose-note .sim-tag');
+  if (tag) tag.textContent = composeNote();
 }
 
 export function openCompose(opts = {}) {
@@ -233,7 +243,9 @@ function upsertDraft(draft, text) {
     const t = thread(draft.threadId);
     if (t) { t.subject = draft.subject || '(no subject)'; t.tier = draft.tier; t.scheduledAt = draft.scheduleAt || null; t.msgs = [msg]; return; }
   }
-  const t = { id: uid('t'), subject: draft.subject || '(no subject)', labels: [], folder: 'drafts', read: true, starred: false, snoozeUntil: null, tier: draft.tier, verified: false, legacy: false, scheduledAt: draft.scheduleAt || null, msgs: [msg] };
+  // `local: true` marks a thread that exists ONLY in this client (net/sync.js carries such
+  // threads across a real-mode mailbox rebuild instead of destroying them).
+  const t = { id: uid('t'), subject: draft.subject || '(no subject)', labels: [], folder: 'drafts', read: true, starred: false, snoozeUntil: null, tier: draft.tier, verified: false, legacy: false, scheduledAt: draft.scheduleAt || null, local: true, msgs: [msg] };
   state.mail.unshift(t);
   draft.threadId = t.id;
 }
@@ -242,6 +254,10 @@ const splitRecips = (s) => (s || '').split(',').map(x => x.trim()).filter(Boolea
 // Send with an UNDO window (Gmail's undo-send — a client-side pre-dispatch delay, spec §17#17).
 let _pending = null;
 function doSendWithUndo(draft) {
+  // Snapshot the send mode at CLICK time. autoConnect() resolves async, so the mode can flip
+  // (sim → real) while the undo window runs — a compose that said "simulated delivery" must not
+  // silently deliver for real 5s later. What the user believed when they hit Send is what happens.
+  const mode = sendMode();
   closeModal();
   clearTimeout(_pending?.timer);
   _pending = { draft };
@@ -249,15 +265,17 @@ function doSendWithUndo(draft) {
     ms: UNDO_MS, action: 'Undo',
     onAction: () => { clearTimeout(_pending.timer); _pending = null; openCompose({ ...draft, html: true }); },
   });
-  _pending.timer = setTimeout(() => { _pending = null; commitSend(draft); }, UNDO_MS);
+  _pending.timer = setTimeout(() => { _pending = null; commitSend(draft, mode); }, UNDO_MS);
 }
 
 // Dispatch, honestly, by how this session can actually send (net/send.js):
 //   real → POST /v1/send genuinely seals + dispatches a MOTE on the node    (commitSendReal)
 //   seam → live node but no send token: NEVER fake a send, keep it as a draft (commitSendSeam)
 //   sim  → the labeled mesh-sim animation over a real, locally-signed MOTE   (commitSendSim)
-async function commitSend(draft) {
-  switch (sendMode()) {
+// `mode` is the caller's click-time snapshot (doSendWithUndo); it wins over the live sendMode()
+// so async mode drift can't invert the user's intent. Exported for the headless harness.
+export async function commitSend(draft, mode = sendMode()) {
+  switch (mode) {
     case 'real': return commitSendReal(draft);
     case 'seam': return commitSendSeam(draft);
     default: return commitSendSim(draft);
@@ -265,41 +283,77 @@ async function commitSend(draft) {
 }
 
 // Build the client-side "sent" thread object for a just-sent message (shared by real + sim paths).
+// The trust chips reflect the first recipient the message ACTUALLY went to (sentMsg.to — under a
+// partial real-send failure that is not necessarily the first one typed). `local: true` as above.
 function sentThread(draft, sentMsg) {
-  const to0 = splitRecips(draft.to)[0] || draft.to;
+  const to0 = (sentMsg.to && sentMsg.to[0]) || splitRecips(draft.to)[0] || draft.to;
   const recip = person(to0);
-  return { id: uid('t'), subject: draft.subject || '(no subject)', labels: [], folder: 'sent', read: true, starred: false, snoozeUntil: null, tier: draft.tier, verified: recip.trust === 'verified', legacy: recip.trust === 'legacy', msgs: [sentMsg] };
+  return { id: uid('t'), subject: draft.subject || '(no subject)', labels: [], folder: 'sent', read: true, starred: false, snoozeUntil: null, tier: draft.tier, verified: recip.trust === 'verified', legacy: recip.trust === 'legacy', local: true, msgs: [sentMsg] };
 }
 const composedText = (draft) => draft._text || stripHtml(draft.body);
 
-// REAL send over the node's Send API. On success the message lands in Sent with the node's real
-// content-id; on ANY failure it is surfaced verbatim and the message is kept in Drafts — never a
-// fake "Delivered".
-async function commitSendReal(draft) {
-  const to0 = splitRecips(draft.to)[0] || draft.to;
+// Markup beyond bare line structure (br / div / p — what plain typing in the contentEditable
+// produces) means the user actually FORMATTED the body, so a plain-text real send loses something.
+const hasRichFormatting = (html) => /<(?!\/?(br|div|p)[\s/>])[a-z]/i.test(html || '');
+
+// REAL send over the node's Send API — one POST per recipient (the API takes a single `to`).
+// Honesty rules, in order:
+//   • attachments are REFUSED (kept in Drafts): /v1/send posts a plaintext body and this client
+//     deliberately hand-rolls no MIME — chips shown as "delivered" would be a lie;
+//   • rich text goes out as plain text, and the Sent record says so (text body, html:false);
+//   • only recipients the node actually ACCEPTED are recorded as sent; failures are surfaced by
+//     name + reason and the unsent remainder is kept as a draft. All-fail keeps everything in
+//     Drafts — never a fake "Delivered". Exported for the headless harness.
+export async function commitSendReal(draft) {
+  const recips = splitRecips(draft.to);
   const text = composedText(draft);
-  toast(`${icon('send')} Sending via your node…`, { ms: 2200 });
-  let receipt;
-  try {
-    receipt = await sendMail({ to: to0, subject: draft.subject, body: text });
-  } catch (err) {
-    const reason = (err && err.message) ? err.message : 'send failed';
+
+  if (draft.attach.length) {
     upsertDraft(draft, text);
     bus.rerender(); bus.refreshChrome();
-    toast(`${icon('shield')} Send failed: ${esc(reason)} — kept in Drafts.`, { ms: 6500 });
+    toast(`${icon('files')} Attachments aren't supported over real send yet — kept in Drafts.`, { ms: 6500 });
     return;
   }
-  const sentMsg = { id: uid('m'), from: 'you', me: true, to: splitRecips(draft.to), time: Date.now(), tier: draft.tier, body: draft.body, html: true, text, attach: draft.attach.slice() };
+
+  toast(`${icon('send')} Sending via your node…`, { ms: 2200 });
+  const sent = [], failed = [], receipts = [];
+  for (const to of recips) {
+    try { receipts.push(await sendMail({ to, subject: draft.subject, body: text })); sent.push(to); }
+    catch (err) { failed.push({ to, reason: (err && err.message) ? err.message : 'send failed' }); }
+  }
+
+  if (!sent.length) {
+    upsertDraft(draft, text);
+    bus.rerender(); bus.refreshChrome();
+    toast(`${icon('shield')} Send failed: ${esc(failed[0].reason)} — kept in Drafts.`, { ms: 6500 });
+    return;
+  }
+
+  // Record what ACTUALLY went out: the plain-text body (html:false), only the accepted
+  // recipients, and the node's receipt ids (nodeIds = MOTE content ids) so a later JMAP rebuild
+  // can recognize the server's own copy and drop this local one (net/sync.js mergeLocalMail).
+  const sentMsg = { id: uid('m'), from: 'you', me: true, to: sent.slice(), time: Date.now(), tier: draft.tier, body: text, html: false, text, attach: [], local: true, nodeIds: receipts.map(r => r.id).filter(Boolean) };
   if (draft.replyThread) {
     const t = thread(draft.replyThread);
     if (t) { t.msgs.push(sentMsg); t.read = true; } else state.mail.unshift(sentThread(draft, sentMsg));
   } else {
     state.mail.unshift(sentThread(draft, sentMsg));
   }
+
+  // Partial failure: keep a draft covering ONLY the recipients that failed (the sent ones are
+  // sent — resending to them from the draft would double-deliver).
+  if (failed.length) upsertDraft({ ...draft, threadId: null, to: failed.map(f => f.to).join(', ') }, text);
+
   bus.rerender(); bus.refreshChrome();
+  const plainNote = hasRichFormatting(draft.body) ? ' as plain text (formatting isn\'t carried over real send yet)' : '';
+  if (failed.length) {
+    toast(`${icon('shield')} Sent to ${sent.map(esc).join(', ')}${plainNote} — failed for ${failed.map(f => esc(f.to)).join(', ')}: ${esc(failed[0].reason)}. Unsent kept in Drafts.`, { ms: 9000 });
+    return;
+  }
+  const receipt = receipts[receipts.length - 1];
   const idShort = receipt.id ? esc(receipt.id.slice(0, 16)) + '…' : '';
   const via = receipt.transport ? ` · ${esc(receipt.transport)}` : '';
-  toast(`${icon('check')} Sent via your node${via}${idShort ? ' · ' + idShort : ''}`, { ms: 4600 });
+  toast(`${icon('check')} Sent via your node${plainNote}${via}${idShort ? ' · ' + idShort : ''}`, { ms: 4600 });
 }
 
 // Live node, but no send token provisioned. Do NOT simulate a send in real mode: hold the message

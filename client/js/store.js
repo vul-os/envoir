@@ -72,7 +72,11 @@ export function resolveNodeConfig() {
       baseUrl: injected.baseUrl,
       username: injected.username,
       appPassword: injected.appPassword,
-      sendToken: injected.sendToken || '',
+      // The shell owns the CONNECTION (base URL + app-password), but the user may still own the
+      // send CAPABILITY: the sendToken is a separate node-issued key (spec §13.5.1) the user can
+      // paste into Settings → Node. An injected config WITHOUT one must therefore fall back to
+      // the saved settings token — otherwise that Settings field is dead UI under a desktop shell.
+      sendToken: injected.sendToken || (state.settings.node && state.settings.node.sendToken) || '',
     };
   }
   const n = state.settings.node || {};
