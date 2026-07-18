@@ -33,6 +33,10 @@ path = "../crates/dmtap-clustersync"
 [dependencies.envoir-node]
 path = "../node"
 
+# --- gateway admission challenge + local-part allocation (§7.9, §7.10, §9) ---
+[dependencies.envoir-gateway]
+path = "../gateway"
+
 [workspace]
 members = ["."]
 
@@ -281,6 +285,20 @@ bench = false
 [[bin]]
 name = "sphinx_parse"
 path = "fuzz_targets/sphinx_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gateway_alias"
+path = "fuzz_targets/gateway_alias.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gateway_admission"
+path = "fuzz_targets/gateway_admission.rs"
 test = false
 doc = false
 bench = false

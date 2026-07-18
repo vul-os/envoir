@@ -76,14 +76,13 @@ machine-readable data (`suite.json`), and byte-exact known-answer vectors
 
 - **124 numbered cases** across the conformance levels (Core, Private, Groups & Files, Legacy,
   Clients, Auth).
-- **110 execute and pass today** — 67 backed by committed byte-exact vectors covering content
+- **116 execute and pass today** — 67 backed by committed byte-exact vectors covering content
   addressing, the 8-word key-name checksum, safety numbers, Ed25519 sign/verify (with two RFC 8032
   cross-checks), canonical CBOR of the four core signed objects, suite fail-closed behavior, and
-  the MOTE content-address + signature validation order — plus 43 more exercised directly against
+  the MOTE content-address + signature validation order — plus 49 more exercised directly against
   the reference crates' public API. Zero failures.
-- **14 are skipped with a documented, per-case reason** for subsystems not yet vectored (mixnet,
-  MLS, auth) and for the legacy-gateway cases now executed in the separate `env-oir/envoir-gateway`
-  repo — deferred honestly, not silently skipped.
+- **8 are skipped with a documented, per-case reason** for subsystems not yet vectored (mixnet,
+  MLS, auth) — deferred honestly, not silently skipped.
 
 [`crates/conformance-runner`](../crates/conformance-runner) is the reference runner: it drives the
 vector-dispatch loop plus a **drift guard** that fails the build if the committed vectors and what

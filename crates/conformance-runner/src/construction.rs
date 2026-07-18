@@ -47,13 +47,9 @@ use dmtap_core::TimestampMs;
 
 // Additional workspace crates (see `Cargo.toml` comment): the behavior a handful of
 // `construction-todo` cases describe lives one layer above `dmtap-core` proper — the login
-// ceremony, name resolution + KT quorum/freshness, MLS groups, and the deniable session — in
-// crates that already exist in this workspace. Driving their real public API is the honest way to
-// execute those cases rather than leaving them skipped. (The legacy-SMTP-gateway cases —
-// DMTAP-GWALIAS-01/02/03 and DMTAP-LEG-01/02/03 — used to be executed here against the
-// `envoir-gateway` crate, but that crate is now split out to the separate env-oir/envoir-gateway
-// repo and is executed by that repo's own conformance suite; those cases are honestly Skipped
-// here, see `skip_reason`.)
+// ceremony, name resolution + KT quorum/freshness, MLS groups, the legacy gateway, and the
+// deniable session — in crates that already exist in this workspace. Driving their real public
+// API is the honest way to execute those cases rather than leaving them skipped.
 use dmtap_auth::{
     create_login, verify_login, AuthError, Challenge, Clock as AuthClock, DeviceCertAuthorizer,
     InMemoryReplayCache, TrustedClientStub,
@@ -73,6 +69,14 @@ use dmtap_clustersync::{
     Hlc, JournalEntry, RangeFingerprint, SyncError, HLC_SKEW_MS, OP_LWW_SET, OP_SET_ADD,
     OP_SET_REMOVE,
 };
+use envoir_gateway::alias_map::{AliasTarget, GatewayAliasError, GatewayAliasMap};
+use envoir_gateway::attestation::{AttestationError as GwAttestationError, AttestationKey};
+use envoir_gateway::forwarded_addr::{self, ForwardedAddrError};
+use envoir_gateway::outbound::{
+    AlwaysRequireTls, GovernedSend, OutboundError, OutboundGateway, OutboundTransport,
+    TransportResult,
+};
+use envoir_gateway::outbound_guard::{OutboundSenderGuard, SenderVerdict};
 
 use crate::{CaseOutcome, SuiteCase};
 
@@ -93,6 +97,7 @@ pub fn run_construction_case(case: &SuiteCase) -> CaseOutcome {
         "DMTAP-PRIV-04" => Some(tier_enforce_downgrade_refused()),
         "DMTAP-PRIV-06" => Some(mix_descriptor_stale_rejected()),
         "DMTAP-ORG-03" => Some(domain_directory_non_pinned_authority_rejected()),
+        "DMTAP-GWALIAS-02" => Some(gateway_alias_unmapped_rejected()),
         "DMTAP-FILE-01" => Some(manifest_root_order_sensitive()),
         "DMTAP-FILE-02" => Some(chunk_hash_mismatch_rejected()),
         "DMTAP-FILE-03" => Some(size_tier_mismatch_detected()),
@@ -137,12 +142,17 @@ pub fn run_construction_case(case: &SuiteCase) -> CaseOutcome {
         "DMTAP-DENIABLE-03" => Some(deniable_ratchet_mac_failure_rejected()),
         "DMTAP-GRP-01" => Some(grp_foreign_commit_rejected()),
         "DMTAP-GRP-03" => Some(grp_stale_epoch_decrypt_rejected()),
+        "DMTAP-LEG-01" => Some(leg_gateway_attestation_invalid_rejected()),
+        "DMTAP-LEG-02" => Some(leg_dkim_undelegated_domain_rejected()),
+        "DMTAP-LEG-03" => Some(leg_outbound_open_relay_refused()),
         "DMTAP-ALIAS-03" => Some(alias_multiple_names_same_identity()),
         "DMTAP-RESOLVE-01" => Some(resolve_namechain_binding_disagreement_rejected()),
         "DMTAP-RESOLVE-02" => Some(resolve_unsupported_type_rejected()),
         "DMTAP-RESOLVE-03" => Some(resolve_cross_resolver_disagreement_rejected()),
         "DMTAP-ALIAS-01" => Some(alias_forward_unverified_rejected()),
         "DMTAP-ALIAS-02" => Some(alias_revoked_rejected()),
+        "DMTAP-GWALIAS-01" => Some(gwalias_encoding_invalid_rejected()),
+        "DMTAP-GWALIAS-03" => Some(gwalias_encode_decode_roundtrips()),
         "DMTAP-FILE-06" => Some(file_manifest_durability_invalid_rejected()),
         "DMTAP-FILE-07" => Some(file_spool_overflow_rejected()),
         "DMTAP-FILE-08" => Some(file_retention_expired_rejected()),
@@ -164,17 +174,12 @@ pub fn run_construction_case(case: &SuiteCase) -> CaseOutcome {
 /// Explicit, per-case reasons for the `construction-todo` cases this crate does NOT execute,
 /// because the described behavior has no API surface to exercise ANYWHERE in this worktree's
 /// dependency graph (investigated by reading the relevant module — in `dmtap-core` and, since this
-/// crate now also depends on `dmtap-auth`/`dmtap-naming`/`dmtap-deniable`/`dmtap-mls` for the cases
-/// whose behavior lives one layer above `dmtap-core` proper, in those crates too — not guessed), or
-/// (the legacy-gateway cases) because the code that exercised them now lives only in the split-out
-/// env-oir/envoir-gateway repo. Grouped by root cause so the coverage report reads as an honest,
-/// categorized gap list rather than one generic "todo".
+/// crate now also depends on `dmtap-auth`/`dmtap-naming`/`dmtap-deniable`/`dmtap-mls`/
+/// `envoir-gateway` for the cases whose behavior lives one layer above `dmtap-core` proper, in
+/// those crates too — not guessed). Grouped by root cause so the coverage report reads as an
+/// honest, categorized gap list rather than one generic "todo".
 fn skip_reason(id: &str, operation: &str) -> String {
     let reason = match id {
-        "DMTAP-GWALIAS-01" | "DMTAP-GWALIAS-02" | "DMTAP-GWALIAS-03" | "DMTAP-LEG-01"
-        | "DMTAP-LEG-02" | "DMTAP-LEG-03" => "the gateway is split out to the \
-            env-oir/envoir-gateway repo; this case is executed in that repo's own conformance \
-            suite, not here.",
         "DMTAP-VAL-05" => "dmtap_core::mote::validate() does not verify ChallengeResponse cryptographic \
             validity — its own doc comment states issuer-trust evaluation (ARC/PoW/postage grammar, §9) \
             is unimplemented and any *present* challenge is treated as meeting threshold, so a \
@@ -618,6 +623,54 @@ fn domain_directory_non_pinned_authority_rejected() -> Result<(), String> {
             }
         }
         other => Err(format!("expected Err(AuthorityMismatch), got {other:?}")),
+    }
+}
+
+/// DMTAP-GWALIAS-02 (§7.10.3, §18.3.12): inbound legacy mail to a random-mode gateway alias whose
+/// `GatewayAliasMap` row is missing / expired / burned resolves to `ERR_GATEWAY_ALIAS_UNMAPPED`
+/// (`0x0605`, RETURN_SENDER_SMTP `550 5.1.1`) rather than being silently dropped. Positive control:
+/// a live row resolves to its bound native target.
+fn gateway_alias_unmapped_rejected() -> Result<(), String> {
+    let mut map = GatewayAliasMap::new();
+    let now = 1_700_000_000_000u64;
+    let target = AliasTarget::Native { local: "imran".into(), domain: "mydomain.com".into() };
+
+    // Positive control: a freshly-minted, live row resolves to its target.
+    let live = map.mint(target.clone());
+    match map.resolve(&live, now) {
+        Ok(t) if t == target => {}
+        other => {
+            return Err(format!("positive control: a live alias must resolve to its target, got {other:?}"))
+        }
+    }
+
+    // Negative (missing): a never-minted token has no row.
+    match map.resolve("nosuchaliastoken", now) {
+        Err(GatewayAliasError::Unmapped) => {}
+        other => return Err(format!("expected a missing alias to be Unmapped, got {other:?}")),
+    }
+
+    // Negative (expired): a TTL'd row resolved past its expiry.
+    let expiring = map.mint_with(target.clone(), None, Some(1_000), false, now);
+    match map.resolve(&expiring, now + 2_000) {
+        Err(GatewayAliasError::Unmapped) => {}
+        other => return Err(format!("expected an expired alias to be Unmapped, got {other:?}")),
+    }
+
+    // Negative (burned): an explicitly-burned row, checked for the exact wire code.
+    let burned = map.mint(target.clone());
+    if !map.burn(&burned) {
+        return Err("burn() must report that the minted row existed".into());
+    }
+    match map.resolve(&burned, now) {
+        Err(e) if e == GatewayAliasError::Unmapped => {
+            if e.code() == 0x0605 {
+                Ok(())
+            } else {
+                Err(format!("expected error code 0x0605, got 0x{:04x}", e.code()))
+            }
+        }
+        other => Err(format!("expected a burned alias to be Unmapped, got {other:?}")),
     }
 }
 
@@ -1934,6 +1987,72 @@ fn alias_revoked_rejected() -> Result<(), String> {
     }
 }
 
+/// DMTAP-GWALIAS-01: "an encoded gateway alias `localpart.nativedomain@gateway.domain` that does not
+/// reversibly decode to exactly one `(localpart, nativedomain)` (ambiguous escaping) or exceeds RFC
+/// 5321 limits is rejected — the gateway MUST NOT guess a native address" (§7.10.2, §18.3.12). Drives
+/// the REAL SRS-style `envoir_gateway::forwarded_addr` codec. It surfaces the fail-closed refusal the
+/// case's §21 code `ERR_GATEWAY_ALIAS_ENCODING_INVALID` (`0x0606`) names as a typed `None`/
+/// `ForwardedAddrError` (a pure, stateless codec carries no §21 registry code — exactly as
+/// dmtap-core's `cbor::decode` surfaces the §18.1.1 `0x020D` reject family as a `CborError`), so we
+/// assert the refusal itself across each disjunct the case lists: a dangling/ambiguous escape decodes
+/// to nothing (no guess), and an over-64-octet encoding is refused `TooLong`.
+fn gwalias_encoding_invalid_rejected() -> Result<(), String> {
+    // (a) A dangling escape (`-` with no following `-`/`.`) — the gateway MUST NOT guess a native
+    // address; decode fails closed to `None` rather than inventing a split.
+    if let Some(pair) = forwarded_addr::decode("imran-x.mydomain-.com") {
+        return Err(format!(
+            "an ambiguous/dangling-escape local-part was decoded to {pair:?} — the gateway MUST NOT \
+             guess a native address; expected None (fail-closed)"
+        ));
+    }
+    // (b) A bare dot inside the domain component (a second, spurious separator) is not reversible.
+    if let Some(pair) = forwarded_addr::decode("imran.my.domain.com") {
+        return Err(format!(
+            "a non-canonical local-part with an ambiguous split was decoded to {pair:?}; expected \
+             None (only the canonical single-separator form round-trips)"
+        ));
+    }
+    // (c) An encoding whose escaped join would exceed the RFC 5321 §4.5.3.1.1 64-octet local-part
+    // limit is refused `TooLong` — it cannot be a legal `<localpart>@gateway.domain`. Each label
+    // stays within the 63-octet DNS limit (so the domain itself is valid), but the escaped join
+    // `user` + `.` + escape(domain) runs well past 64 octets.
+    let long_domain = format!("{}.{}", "a".repeat(50), "a".repeat(50));
+    match forwarded_addr::encode("user", &long_domain) {
+        Err(ForwardedAddrError::TooLong(_)) => {}
+        other => {
+            return Err(format!(
+                "expected ForwardedAddrError::TooLong for an over-64-octet encoded local-part, got \
+                 {other:?}"
+            ))
+        }
+    }
+    Ok(())
+}
+
+/// DMTAP-GWALIAS-03: "the encoded local-part round-trips: `encode(localpart, nativedomain)` (escape
+/// `-`->`--`, `.`->`-.`, join with a top-level `.`) then `decode` yields the original
+/// `(localpart, nativedomain)` — deterministic KAT, e.g. `imran + mydomain.com` ->
+/// `imran.mydomain-.com` -> back" (§7.10.2). Drives the REAL `forwarded_addr::{encode,decode}` on the
+/// case's own worked example and asserts BOTH the exact escaped wire form AND the exact inverse.
+fn gwalias_encode_decode_roundtrips() -> Result<(), String> {
+    let (local, native) = ("imran", "mydomain.com");
+    let encoded = forwarded_addr::encode(local, native)
+        .map_err(|e| format!("encode({local:?},{native:?}) failed: {e}"))?;
+    // The spec's worked example: `imran` stays verbatim, `mydomain.com`'s dot escapes to `-.`, and
+    // the two are joined by the single top-level `.`.
+    if encoded != "imran.mydomain-.com" {
+        return Err(format!(
+            "encoded form mismatch: got {encoded:?}, want \"imran.mydomain-.com\" (the §7.10.2 KAT)"
+        ));
+    }
+    match forwarded_addr::decode(&encoded) {
+        Some((l, d)) if l == local && d == native => Ok(()),
+        other => Err(format!(
+            "round-trip failed: decode({encoded:?}) = {other:?}, want ({local:?}, {native:?})"
+        )),
+    }
+}
+
 /// DMTAP-FILE-06: "a Referenced (> 25 MiB) `ManifestRef` missing durability, or with an unknown class
 /// / cluster-replicated `replicas < 1` / pinned without retention, is rejected fail-closed" (§5.5.2,
 /// §18.3.7). Drives the REAL `ManifestRef::validate_durability` / `Durability::validate` across every
@@ -2833,6 +2952,121 @@ fn grp_stale_epoch_decrypt_rejected() -> Result<(), String> {
     }
 }
 
+// ============================================================================================
+// LEG — the legacy SMTP gateway (envoir-gateway) — spec §7, §7.2a, §7.3.
+// ============================================================================================
+
+/// DMTAP-LEG-01: "a gateway attestation that fails to verify under a trusted key is rejected"
+/// (`ERR_GATEWAY_ATTESTATION_INVALID`). Issues a genuine domain-anchored `Attestation`, tampers its
+/// signature after signing, and confirms the recipient-side `Attestation::verify` rejects it under
+/// the (correct) published key rather than accepting a forged/corrupted attestation.
+fn leg_gateway_attestation_invalid_rejected() -> Result<(), String> {
+    let key = AttestationKey::generate("recipient.example", "sel1");
+    let mote_id = ContentId::of(b"conformance-leg-01 wrapped mote");
+    let mut att = key.attest(&mote_id, "sender@legacy.example", "alice@recipient.example", 1_700_000_000_000);
+    att.sig[0] ^= 0xff; // tamper after signing
+
+    match att.verify("recipient.example", Some(&key.public()), &mote_id) {
+        Err(GwAttestationError::BadSignature(_)) => Ok(()),
+        other => Err(format!("expected Err(BadSignature) (attestation invalid, rejected), got {other:?}")),
+    }
+}
+
+/// A no-op [`OutboundTransport`]: DMTAP-LEG-02 only exercises `translate_and_sign` (the
+/// delegation-refusal gate), which returns before any transport call, so this stub is never
+/// actually invoked — it exists only to satisfy `OutboundGateway::new`'s constructor shape.
+struct UnusedTransport;
+impl OutboundTransport for UnusedTransport {
+    fn deliver(&self, _dest_domain: &str, _message: &[u8], _require_tls: bool) -> TransportResult {
+        TransportResult::Permanent { code: 550, text: "unused in this construction".into() }
+    }
+}
+
+/// DMTAP-LEG-02: "invalid DKIM delegation is rejected" (`ERR_DKIM_DELEGATION_INVALID`). The gateway
+/// MUST refuse to DKIM-sign for a domain it holds no delegated selector for (§7.3's hard refusal,
+/// `OutboundGateway::translate_and_sign`) — attempts to sign outbound mail for a domain absent from
+/// its delegated-key set and confirms it is refused (`OutboundError::NotDelegated`) rather than
+/// signing with some other domain's key or skipping the check.
+fn leg_dkim_undelegated_domain_rejected() -> Result<(), String> {
+    let gateway = OutboundGateway::new(
+        vec![], // no delegated DKIM keys at all — this gateway is delegated for NOTHING
+        Box::new(AlwaysRequireTls),
+        Box::new(UnusedTransport),
+    );
+    let payload = Payload {
+        from: IdentityKey::generate().public(),
+        sig: Vec::new(),
+        headers: Headers::default(),
+        body: b"conformance-runner leg-02 outbound body".to_vec(),
+        refs: vec![],
+        attach: vec![],
+        expires: None,
+    };
+    match gateway.translate_and_sign(&payload, "alice@undelegated.example", "bob@dest.example", 1_700_000_000_000) {
+        Err(OutboundError::NotDelegated(domain)) => {
+            if domain != "undelegated.example" {
+                return Err(format!(
+                    "NotDelegated named the wrong domain: got {domain}, want undelegated.example"
+                ));
+            }
+            Ok(())
+        }
+        other => Err(format!(
+            "expected Err(NotDelegated) (the gateway MUST refuse to sign for an undelegated domain), \
+             got {other:?}"
+        )),
+    }
+}
+
+/// DMTAP-LEG-03: "an outbound DMTAP->legacy relay from a sender the gateway has neither
+/// authenticated (no GatewayAuthz / key-registered relationship) nor been paid by (no valid
+/// redeemable postage) is refused fail-closed; a valid mesh sender_sig alone does NOT authorize
+/// egress (open-relay prevention)" (§7.11.2, §9.10, §7.12). `OutboundGateway::send_authenticated`
+/// is the mesh-ingest entry point named by this case's own doc comment: with an
+/// `OutboundSenderGuard` configured via `require_registered` (the authenticated-senders-only
+/// allowlist, §7.3, §9), an account NOT in that set is refused by the guard BEFORE any DKIM/SMTP
+/// work is attempted — even though the payload itself is a perfectly well-formed mail `Payload`,
+/// mirroring "a valid mesh sender_sig alone does NOT authorize egress": nothing about the
+/// payload's own authenticity is in question here, only the sender's egress authorization.
+/// Mirrors envoir-gateway's own `outbound_guard.rs` unit test
+/// `unauthenticated_sender_is_refused_no_open_outbound_relay`, driven through the `OutboundGateway`
+/// construction this case names (`gateway_outbound_admit`) rather than the bare guard in isolation.
+fn leg_outbound_open_relay_refused() -> Result<(), String> {
+    let guard = OutboundSenderGuard::new().require_registered(["acct-registered-sender"]);
+    let gateway = OutboundGateway::new(
+        vec![], // no delegated DKIM keys needed: the guard refuses before translate_and_sign runs
+        Box::new(AlwaysRequireTls),
+        Box::new(UnusedTransport),
+    )
+    .with_sender_guard(guard);
+
+    let payload = Payload {
+        from: IdentityKey::generate().public(),
+        sig: Vec::new(),
+        headers: Headers::default(),
+        body: b"conformance-runner leg-03 outbound relay attempt".to_vec(),
+        refs: vec![],
+        attach: vec![],
+        expires: None,
+    };
+
+    // "acct-stranger" has no GatewayAuthz relationship and no postage — exactly the open-relay
+    // scenario this case forbids, regardless of the mail payload's own well-formedness.
+    match gateway.send_authenticated(
+        &payload,
+        "alice@undelegated.example",
+        "bob@legacy.example",
+        "acct-stranger",
+        1_700_000_000_000,
+    ) {
+        GovernedSend::Blocked(SenderVerdict::Refuse { .. }) => Ok(()),
+        other => Err(format!(
+            "expected GovernedSend::Blocked(SenderVerdict::Refuse) (open-relay refused fail-closed), \
+             got {other:?}"
+        )),
+    }
+}
+
 /// Every `id` this dispatcher recognizes (used by tests to keep the executed-set and the reason
 /// table honest against each other and against `suite.json`).
 pub fn recognized_ids() -> BTreeMap<&'static str, ()> {
@@ -2848,9 +3082,9 @@ pub fn recognized_ids() -> BTreeMap<&'static str, ()> {
         "DMTAP-ATTEST-01", "DMTAP-ATTEST-02", "DMTAP-IDENT-04", "DMTAP-ORG-02", "DMTAP-ALIAS-03",
         "DMTAP-KTV1-02", "DMTAP-KTV1-03", "DMTAP-AUTH-01", "DMTAP-AUTH-02", "DMTAP-AUTH-03",
         "DMTAP-AUTH-04", "DMTAP-AUTH-05", "DMTAP-DENIABLE-03", "DMTAP-GRP-01", "DMTAP-GRP-03",
-        "DMTAP-RESOLVE-01", "DMTAP-RESOLVE-02",
-        "DMTAP-RESOLVE-03", "DMTAP-ALIAS-01", "DMTAP-ALIAS-02",
-        "DMTAP-FILE-06", "DMTAP-FILE-07", "DMTAP-FILE-08", "DMTAP-FILE-09",
+        "DMTAP-LEG-01", "DMTAP-LEG-02", "DMTAP-LEG-03", "DMTAP-RESOLVE-01", "DMTAP-RESOLVE-02",
+        "DMTAP-RESOLVE-03", "DMTAP-ALIAS-01", "DMTAP-ALIAS-02", "DMTAP-GWALIAS-01",
+        "DMTAP-GWALIAS-03", "DMTAP-FILE-06", "DMTAP-FILE-07", "DMTAP-FILE-08", "DMTAP-FILE-09",
         "DMTAP-SYNC-01", "DMTAP-SYNC-02", "DMTAP-SYNC-03", "DMTAP-SYNC-04", "DMTAP-SYNC-05",
     ]
     .into_iter()

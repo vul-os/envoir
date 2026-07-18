@@ -87,19 +87,17 @@ machine-readable data (`suite.json`), and byte-exact known-answer vectors
 - **124 numbered cases** across the conformance levels (Core, Private, Groups & Files, Legacy,
   Clients, Auth) — mirrored against the spec's own catalog of **132 registered error codes**
   (§21.3–§21.11).
-- **110 execute and pass today** — 67 backed by committed byte-exact vectors (content addressing,
+- **116 execute and pass today** — 67 backed by committed byte-exact vectors (content addressing,
   the key-name checksum, safety numbers, Ed25519 sign/verify with two RFC 8032 cross-checks,
   canonical CBOR of the four core signed objects, suite fail-closed behavior, and the MOTE
-  content-address + signature validation order) plus 43 more exercised directly against
+  content-address + signature validation order) plus 49 more exercised directly against
   `dmtap-core`'s (and `dmtap-naming`'s) public API — including the pluggable resolver-type
   dispatch, the `name-chain` bidirectional-binding guardrail, and canonical-CBOR's rejection of
   non-shortest integers, indefinite-length items, and out-of-order map keys. Zero failures.
-- **14 are skipped with a documented, per-case reason** — an exact pointer to what's missing (e.g.
-  "no Profile/avatar module in `dmtap-core`," "TOFU-pin comparison is caller policy," "no
-  auth-assertion module yet") rather than a silent gap — covering mixnet freshness/replay,
-  MLS/group handshake bytes, key-transparency quorum, device attestation, gateway/DKIM-delegation,
-  auth-assertion, alias/gateway-alias/device-sync construction recipes not yet wired into the
-  runner, and push-subscription cases not yet reduced to a fixed-input known-answer test in this
+- **8 are skipped with a documented, per-case reason** — an exact pointer to what's missing (e.g.
+  "no Profile/avatar module in `dmtap-core`," "TOFU-pin comparison is caller policy") rather than
+  a silent gap — covering mixnet freshness/replay and cover-traffic cases, MLS/group handshake
+  bytes, and client/organization cases not yet reduced to a fixed-input known-answer test in this
   crate. `cargo run -p conformance-runner` prints every skip and its reason verbatim.
 
 [`crates/conformance-runner`](../crates/conformance-runner) is the reference runner: it drives the
@@ -140,7 +138,7 @@ directly:
   built without persistence) — a restarted node reloads the same anti-rollback/anti-abuse state
   rather than starting over at a weaker baseline an attacker could force by causing a crash.
 - **The gateway fails closed against SSRF.** `envoir-gateway`'s outbound MX/MTA-STS resolution
-  (in the separate `env-oir/envoir-gateway` repo) refuses to connect to a destination that resolves only to a
+  (`gateway/src/outbound_tcp.rs`) refuses to connect to a destination that resolves only to a
   loopback, private, link-local, or cloud-metadata address (including an IPv4-mapped IPv6 address
   judged by its embedded v4 form) — otherwise a legacy sender could aim the gateway at the
   operator's own internal network. An explicitly configured pinned address is the one deliberate,

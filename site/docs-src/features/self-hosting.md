@@ -24,7 +24,7 @@ Onboarding has three tiers (spec §3.8), so you can start free and grow into ful
 ## Running your own gateway
 
 To exchange mail with the legacy world (`@gmail.com` and the like), you need a gateway — either
-your own, self-hosted (built and run from its own env-oir/envoir-gateway repo, see
+your own, self-hosted (`cargo run -p envoir-gateway -- run`, see
 [getting-started.md](../getting-started.md#run-the-gateway-optional)), in which case you bear only
 the IP-reputation warmup cost and owe nobody a bill, or a third-party operator's.
 

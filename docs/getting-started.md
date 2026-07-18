@@ -1,9 +1,9 @@
 # Getting Started
 
 This walks through building the workspace and running the real, working pieces: the reference
-node's delivery engine, its demo mail servers, the legacy gateway (now its own repo), and the web
-client. Every command below is copied from the actual CLI entry points (`node/src/main.rs`) —
-nothing aspirational.
+node's delivery engine, its demo mail servers, the legacy gateway, and the web client. Every
+command below is copied from the actual CLI entry points (`node/src/main.rs`,
+`gateway/src/main.rs`) — nothing aspirational.
 
 ## Prerequisites
 
@@ -19,9 +19,8 @@ cd envoir
 cargo build --workspace
 ```
 
-The workspace ([`Cargo.toml`](../Cargo.toml)) has three member groups: `node`,
-`integration` (cross-component tests), and every crate under `crates/*`. (The `envoir-gateway`
-crate has been split out into its own `env-oir/envoir-gateway` repo and is no longer a member here.)
+The workspace ([`Cargo.toml`](../Cargo.toml)) has four member groups: `node`, `gateway`,
+`integration` (cross-component tests), and every crate under `crates/*`.
 
 ## Run the node
 
@@ -37,7 +36,7 @@ cargo run -p envoir-node -- <command>
 | `run` | Run the delivery engine: two in-process nodes exchange a real, end-to-end-encrypted MOTE over an in-memory transport (seal → validate → decrypt → ack) |
 | `serve-mail` | Run the client-protocol servers — **real** IMAP (`:1143`), POP3 (`:1110`), and SMTP-submission (`:1587`) listeners against an in-memory mailbox, with a fixed demo app-password (`owner@dmtap.local` / `app-password`) |
 | `init` | Not yet implemented — will generate a root identity key + recovery policy |
-| `gateway` | Points you at the dedicated `envoir-gateway` binary, now in its own `env-oir/envoir-gateway` repo |
+| `gateway` | Points you at the dedicated `envoir-gateway` binary below |
 | `help` | Usage |
 
 Try the delivery demo first — it's the clearest illustration of what's real today:
@@ -60,10 +59,13 @@ cargo run -p envoir-node -- serve-mail
 ## Run the gateway (optional)
 
 `envoir-gateway` is the legacy SMTP bridge — only needed if you want to exchange mail with the
-existing email world. Its source now lives in its own repository (env-oir/envoir-gateway); build
-and run it from there rather than from this workspace.
+existing email world:
 
-It is configured with environment variables:
+```sh
+cargo run -p envoir-gateway -- run
+```
+
+Configure it with environment variables:
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -75,8 +77,8 @@ It is configured with environment variables:
 
 The reference gateway wires up a real inbound MX listener, a real outbound SMTP-over-STARTTLS
 transport, real DNS-based MX resolution, and real MTA-STS policy fetching. The recipient directory
-and mesh-delivery hookup are left as operator-supplied seams (see the env-oir/envoir-gateway
-repo) — until wired to a real directory/mesh, inbound mail
+and mesh-delivery hookup are left as operator-supplied seams (see
+[`gateway/README.md`](../gateway/README.md)) — until wired to a real directory/mesh, inbound mail
 is refused (`550`, the safe default) and outbound never durably acks (`451`, so the legacy
 sender's own queue retries).
 
@@ -112,7 +114,7 @@ cargo test --workspace              # everything that builds without extra tooli
 cargo test -p dmtap-core            # canonical CBOR, conformance vectors, known-answer tests
 cargo test -p dmtap-mail            # IMAP/POP3/SMTP/JMAP protocol core
 cargo test -p dmtap-mail --features net   # + the real TCP literal-reader tests
-# envoir-gateway's inbound/outbound flow tests run in its own env-oir/envoir-gateway repo
+cargo test -p envoir-gateway        # inbound/outbound gateway flows
 cargo test -p integration           # cross-component adversarial + end-to-end tests
 ```
 

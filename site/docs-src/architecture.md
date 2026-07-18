@@ -1,8 +1,7 @@
 # Architecture
 
 Envoir has exactly two pieces of software, plus DNS (which it doesn't run): the **node** and the
-**gateway** (the gateway's source now lives in its own `env-oir/envoir-gateway` repo, no longer in
-this workspace). Everything else in this repository — the web client, the admin consoles, the status
+**gateway**. Everything else in this repository — the web client, the admin consoles, the status
 page — is a client of one or the other.
 
 ## The whole picture
@@ -30,7 +29,7 @@ flowchart LR
     end
 
     subgraph Legacy["Legacy email — optional"]
-        Gateway["envoir-gateway (separate repo)<br/>the one component that speaks SMTP"]
+        Gateway["envoir-gateway (gateway/)<br/>the one component that speaks SMTP"]
         SMTP["SMTP / the existing internet"]
     end
 

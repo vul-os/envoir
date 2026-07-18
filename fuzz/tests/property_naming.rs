@@ -1,11 +1,12 @@
-//! Stable (non-nightly, `cargo test`-only) property/round-trip tests mirroring the naming
-//! `cargo-fuzz` targets added alongside this file (`naming_classify`, `namechain_resolve`) — see
-//! each target's doc comment in `fuzz_targets/` for the full rationale. `cargo +nightly fuzz
-//! build`/`run` needs the nightly toolchain + libFuzzer sanitizer instrumentation; this file
-//! re-checks the identical properties with a small dependency-free pseudo-random driver so the same
-//! coverage is real on **any** stable toolchain, not only one with `cargo-fuzz` installed (this
-//! package deliberately takes no `proptest`/`quickcheck` dependency — see `fuzz/Cargo.toml`'s header
-//! comment on why this whole package stays a minimal, detached, cargo-fuzz-convention crate).
+//! Stable (non-nightly, `cargo test`-only) property/round-trip tests mirroring the four new
+//! `cargo-fuzz` targets added alongside this file (`naming_classify`, `namechain_resolve`,
+//! `gateway_alias`, `gateway_admission`) — see each target's doc comment in `fuzz_targets/` for the
+//! full rationale. `cargo +nightly fuzz build`/`run` needs the nightly toolchain + libFuzzer
+//! sanitizer instrumentation; this file re-checks the identical properties with a small dependency-
+//! free pseudo-random driver so the same coverage is real on **any** stable toolchain, not only one
+//! with `cargo-fuzz` installed (this package deliberately takes no `proptest`/`quickcheck`
+//! dependency — see `fuzz/Cargo.toml`'s header comment on why this whole package stays a minimal,
+//! detached, cargo-fuzz-convention crate).
 //!
 //! `run with: RUSTFLAGS="-D warnings" cargo test` from `fuzz/` (stable toolchain, no `+nightly`).
 
@@ -13,6 +14,10 @@ use dmtap_core::id::ContentId;
 use dmtap_core::identity::{Identity, IdentityKey, KeyPackageBundleRef};
 use dmtap_naming::namechain::{InMemoryNameChain, NameChainResolver};
 use dmtap_naming::restype::{classify, Chain, ResolverType};
+
+use dmtap::naming::{gateway_alias_local, ik_from_gateway_alias};
+
+use envoir_gateway::authz::{AdmissionError, IdentityRegistry};
 
 /// A tiny, dependency-free splitmix64-based PRNG — good enough to generate varied byte strings
 /// deterministically (no external `rand`/`proptest` dependency; reproducible across runs from a
@@ -43,6 +48,15 @@ impl Rng {
                 }
             })
             .collect()
+    }
+
+    fn array32(&mut self) -> [u8; 32] {
+        let mut out = [0u8; 32];
+        for chunk in out.chunks_mut(8) {
+            let v = self.next_u64().to_le_bytes();
+            chunk.copy_from_slice(&v[..chunk.len()]);
+        }
+        out
     }
 }
 
@@ -138,4 +152,57 @@ fn namechain_resolve_fails_closed_and_never_panics_on_arbitrary_records() {
     chain.register(name.clone(), claimed_ik.clone());
     let resolver = NameChainResolver::new(chain);
     assert!(resolver.resolve(&name, &identity).is_ok());
+}
+
+// --- node key-derived gateway alias (mirrors gateway_alias.rs) -----------------------------------
+
+#[test]
+fn gateway_alias_decode_never_panics_on_arbitrary_local_parts() {
+    let mut rng = Rng(0x6A7E_A11A5);
+    for _ in 0..ITERS {
+        let bytes = rng.bytes(80);
+        let local = String::from_utf8_lossy(&bytes).into_owned();
+        let _ = ik_from_gateway_alias(&local); // must not panic
+    }
+}
+
+#[test]
+fn gateway_alias_round_trips_arbitrary_32_byte_keys() {
+    let mut rng = Rng(0x6A7E_A11B6);
+    for _ in 0..ITERS {
+        let ik = rng.array32();
+        let alias = gateway_alias_local(&ik);
+        let recovered = ik_from_gateway_alias(&alias).expect("self-produced alias must decode");
+        assert_eq!(recovered, ik, "encode/decode must be a bijection");
+
+        let upper = alias.to_uppercase();
+        assert_eq!(
+            ik_from_gateway_alias(&upper).as_deref(),
+            Some(ik.as_slice()),
+            "case-folded alias must still decode to the same key"
+        );
+    }
+}
+
+// --- gateway admission challenge (mirrors gateway_admission.rs) ---------------------------------
+
+#[test]
+fn gateway_admission_never_panics_on_arbitrary_key_and_signature_bytes() {
+    let mut rng = Rng(0xADD1_71ED);
+    let reg = IdentityRegistry::key_registered();
+    let challenge = reg.issue_challenge([0x11; 32], 1_000_000);
+
+    for _ in 0..ITERS {
+        let presented_key = rng.bytes(96);
+        let sig = rng.bytes(96);
+        match reg.admit(&challenge, &presented_key, &sig, 1_000_100) {
+            Ok(_) | Err(AdmissionError::BadSignature) | Err(AdmissionError::UnknownKey) => {}
+            Err(AdmissionError::ChallengeExpired) => {
+                panic!("fixed challenge/now are inside the default TTL window")
+            }
+            Err(AdmissionError::UnknownOrConsumedChallenge) => {
+                panic!("random bytes never verify, so the single-use nonce is never consumed")
+            }
+        }
+    }
 }

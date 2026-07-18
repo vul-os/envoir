@@ -159,7 +159,7 @@ fn main() {
             Ok(())
         }
         "gateway" => {
-            eprintln!("run the dedicated `envoir-gateway` binary — see the env-oir/envoir-gateway repo and spec §7");
+            eprintln!("run the dedicated `envoir-gateway` binary — see ../gateway/ and spec §7");
             Ok(())
         }
         _ => {

@@ -194,7 +194,7 @@ flowchart LR
     end
 
     subgraph Legacy["Legacy email — optional"]
-        Gateway["envoir-gateway (separate repo)<br/>the one component that speaks SMTP"]
+        Gateway["envoir-gateway (gateway/)<br/>the one component that speaks SMTP"]
         SMTP["SMTP / the existing internet"]
     end
 
@@ -220,7 +220,7 @@ functional standalone — the operator seam and any hosted operator are optional
 | Path | What it is |
 |---|---|
 | [`node/`](node) | **envoir-node** — the whole client side: identity, mailbox, mesh, messaging, files, and the IMAP/POP3/SMTP-submission/JMAP client servers |
-| *(separate repo)* | **envoir-gateway** — the optional legacy SMTP bridge; the only component that isn't content-blind. Split out of this monorepo into its own **env-oir/envoir-gateway** repo |
+| [`gateway/`](gateway) | **envoir-gateway** — the optional legacy SMTP bridge; the only component that isn't content-blind; lives here by design, kept loosely coupled for a future split into its own repo (see [`gateway/SEPARATION.md`](gateway/SEPARATION.md)) |
 | [`crates/dmtap-core`](crates/dmtap-core) | Identity, MOTE, content addressing, canonical CBOR, delegated capability tokens — the shared primitives |
 | [`crates/dmtap-auth`](crates/dmtap-auth) | DMTAP-Auth — decentralized, key-based sign-in |
 | [`crates/dmtap-deniable`](crates/dmtap-deniable) | Deniable 1:1 messaging (X3DH + Double Ratchet) |
@@ -246,7 +246,7 @@ workspace, and it never gates a protocol, client, or privacy feature.
 ## Quickstart
 
 ```sh
-# Build the whole workspace (node and every crate)
+# Build the whole workspace (node, gateway, and every crate)
 cargo build --workspace
 
 # Two in-process nodes exchange a real, end-to-end-encrypted MOTE
@@ -254,10 +254,10 @@ cargo run -p envoir-node -- run
 
 # Demo IMAP (1143) / POP3 (1110) / SMTP-submission (1587) servers against an in-memory mailbox
 cargo run -p envoir-node -- serve-mail
-```
 
-The optional legacy-email bridge (`envoir-gateway`) now lives in its own **env-oir/envoir-gateway**
-repo — build and run it from there.
+# The optional legacy-email bridge (see gateway/README.md for the 2-command personal quickstart)
+cargo run -p envoir-gateway -- run
+```
 
 The web client needs no build step — no framework, no npm, no CDNs:
 

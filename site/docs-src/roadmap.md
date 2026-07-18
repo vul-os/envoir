@@ -16,7 +16,7 @@ the spec's own roadmap markers, it doesn't belong here.
   [`crates/dmtap-mail/README.md`](../crates/dmtap-mail/README.md) for exactly what's done vs.
   explicitly deferred (real TLS, DEFLATE compression, cross-server CATENATE URLFETCH, JMAP push
   transport).
-- **The legacy gateway** (the `envoir-gateway` crate, now in its own `env-oir/envoir-gateway` repo) — a real inbound MX
+- **The legacy gateway** (`gateway/`, backed by the `envoir-gateway` crate) — a real inbound MX
   listener with STARTTLS, a real pre-`DATA` anti-abuse gate, real gateway attestation sealing,
   real delegated-selector DKIM signing, real MX/MTA-STS resolution over DNS, and the
   ack-before-`250`/`451`-on-no-ack rule. The recipient directory and mesh-delivery hookup are left
@@ -46,10 +46,9 @@ the spec's own roadmap markers, it doesn't belong here.
 - **v1 key-transparency hardening** (federated multi-log gossip, quorum-audited bindings,
   equivocation halt) — v0's single-log, TOFU+pinning model is what's implemented; see
   [privacy.md](privacy.md#what-this-project-does-not-claim).
-- **14 of 124 conformance cases** carry an exact construction recipe and expected error code but
+- **8 of 124 conformance cases** carry an exact construction recipe and expected error code but
   aren't yet executed here (mostly mixnet, MLS handshake bytes, and auth subsystems not yet reduced
-  to a fixed-input known-answer test, plus the legacy-gateway cases now run in the separate
-  `env-oir/envoir-gateway` repo) — see [security.md](security.md#conformance-suite).
+  to a fixed-input known-answer test) — see [security.md](security.md#conformance-suite).
 - **Real TLS, JMAP push transport, and DEFLATE compression** in the mail-protocol layer —
   explicitly out of scope for the std-only protocol core, deferred to the node binary's transport
   layer.
