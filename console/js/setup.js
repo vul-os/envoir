@@ -37,7 +37,8 @@ export function renderSetup(onDone) {
         if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain)) { di.focus(); toast(`${icon('warn')} Enter a valid domain, e.g. abc.com`); return; }
         step = 1; draw();
       };
-      di.addEventListener('keydown', e => { if (e.key === 'Enter') o.querySelector('#next').click(); });
+      di.addEventListener('keydown', e => { if (e.isComposing || e.keyCode === 229) return; // Enter that commits a CJK IME conversion must not advance
+        if (e.key === 'Enter') o.querySelector('#next').click(); });
     } else {
       o.innerHTML = `<div class="ob-card wide">
         <div class="ob-brand">${brandMark(46)}<div><span class="ob-word">Envoir</span><span class="ob-kicker">Management Console</span></div></div>

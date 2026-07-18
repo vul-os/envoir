@@ -6,12 +6,15 @@
 export const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
 export const esc = (s) => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// Relative times localize via Intl.RelativeTimeFormat (narrow stays compact: en "5m ago",
+// ja "5分前") — same thresholds as before, calendar date past a week.
+const _rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto', style: 'narrow' });
 export const timeAgo = (t) => {
   const s = (Date.now() - t) / 1000;
-  if (s < 45) return 'just now';
-  if (s < 3600) return Math.floor(s / 60) + 'm ago';
-  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-  if (s < 7 * 86400) return Math.floor(s / 86400) + 'd ago';
+  if (s < 45) return _rtf.format(0, 'second'); // numeric:'auto' → "now"
+  if (s < 3600) return _rtf.format(-Math.floor(s / 60), 'minute');
+  if (s < 86400) return _rtf.format(-Math.floor(s / 3600), 'hour');
+  if (s < 7 * 86400) return _rtf.format(-Math.floor(s / 86400), 'day');
   return new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
 };
 export const fmtDate = (t) => new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
@@ -19,18 +22,21 @@ export const fmtLong = (t) => new Date(t).toLocaleDateString([], { weekday: 'sho
   ' · ' + new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
 // ---- byte + number formatting (billing) ---------------------------------------------------
+// Decimals render via toLocaleString so the separator is locale-correct ("1,5 GB" in de/fr);
+// the compact k/M unit style is kept as-is.
+const _dec = (v, d) => v.toLocaleString([], { minimumFractionDigits: d, maximumFractionDigits: d });
 export function fmtBytes(n) {
   if (n == null) return '—';
   const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
   let i = 0, v = n;
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-  return (v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)) + ' ' + u[i];
+  return (v >= 100 || i === 0 ? _dec(Math.round(v), 0) : _dec(v, 1)) + ' ' + u[i];
 }
 export function fmtNum(n) {
   if (n == null) return '—';
-  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M';
-  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k';
-  return String(n);
+  if (n >= 1e6) return _dec(n / 1e6, n >= 1e7 ? 0 : 1) + 'M';
+  if (n >= 1e3) return _dec(n / 1e3, n >= 1e4 ? 0 : 1) + 'k';
+  return n.toLocaleString();
 }
 export function fmtUsd(n) {
   return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -122,8 +128,10 @@ export function sparkline(values, opts = {}) {
 // ---- Avatars: deterministic gradient + initials -----------------------------------------
 export function initials(name) {
   const parts = (name || '?').replace(/^@/, '').split(/[\s.@]+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return (parts[0] || '?').slice(0, 2).toUpperCase();
+  // [...s][0] takes the first CODE POINT — s[0] would split an astral-plane char (emoji,
+  // rare CJK) into a lone surrogate that renders as U+FFFD.
+  if (parts.length >= 2) return ([...parts[0]][0] + [...parts[1]][0]).toUpperCase();
+  return [...(parts[0] || '?')].slice(0, 2).join('').toUpperCase();
 }
 export function avatar(name, hue = 220, size = 34) {
   return `<span class="av" style="--h:${hue};width:${size}px;height:${size}px;font-size:${Math.round(size * 0.38)}px" title="${esc(name)}">${esc(initials(name))}</span>`;

@@ -54,7 +54,7 @@ export function render(root) {
       const row = el(`<button class="list-row ${on ? 'sel' : ''} ${m.status === 'offboarded' ? 'off' : ''}" data-id="${m.id}"${on ? ' aria-current="true"' : ''}>
         ${avatar(m.name, m.hue, 38)}
         <div class="list-row-main">
-          <span class="lr-name">${esc(m.name)}${!m.dirVerified && m.status === 'active' ? ` <span class="pill bad sm" title="Does not resolve forward via DNS+KT">${icon('warn')} unverified</span>` : ''}</span>
+          <span class="lr-name"><bdi>${esc(m.name)}</bdi>${!m.dirVerified && m.status === 'active' ? ` <span class="pill bad sm" title="Does not resolve forward via DNS+KT">${icon('warn')} unverified</span>` : ''}</span>
           <span class="lr-sub mono">${esc(m.address)}</span>
         </div>
         ${custodyBadge(m.custody, true)}

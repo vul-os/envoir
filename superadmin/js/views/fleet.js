@@ -155,7 +155,9 @@ function attestCopy(c) {
 function kindMetrics(c) {
   const tile = (ic, label, value, sub = '') => `<div class="metric"><span class="metric-ic">${icon(ic)}</span><div><span class="metric-v">${esc(value)}</span><span class="metric-l">${esc(label)}${sub ? ` · ${esc(sub)}` : ''}</span></div></div>`;
   if (c.kind === 'node') return tile('users', 'Hosted mailboxes', fmtNum(c.mailboxes)) + tile('database', 'Stored', fmtBytes(c.storageBytes)) + tile('cpu', 'Memory', c.memGB + ' GB');
-  if (c.kind === 'gateway') return tile('gateway', 'Sends (24h)', fmtNum(c.sends24h)) + tile('up', 'Bounce rate', c.bounceRate.toFixed(2) + '%', c.bounceRate > 4 ? 'high' : 'ok') + tile('flame', 'Complaint rate', c.complaintRate.toFixed(3) + '%');
+  // rate decimals via toLocaleString so the separator is locale-correct ("4,20 %" in de/fr)
+  const rate = (v, d) => v.toLocaleString([], { minimumFractionDigits: d, maximumFractionDigits: d }) + '%';
+  if (c.kind === 'gateway') return tile('gateway', 'Sends (24h)', fmtNum(c.sends24h)) + tile('up', 'Bounce rate', rate(c.bounceRate, 2), c.bounceRate > 4 ? 'high' : 'ok') + tile('flame', 'Complaint rate', rate(c.complaintRate, 3));
   if (c.kind === 'mix') return tile('mix', 'Layer', 'L' + c.layer + ' of 3') + tile('activity', 'Forwarded (24h)', fmtNum(c.forwarded24h)) + tile('clock', 'Mix latency', c.latencyMs + ' ms');
   if (c.kind === 'relay') return tile('relay', 'Bandwidth (24h)', fmtBytes(c.bandwidth24h)) + tile('wifi', 'Active tunnels', fmtNum(c.tunnels)) + tile('cpu', 'Memory', c.memGB + ' GB');
   return '';

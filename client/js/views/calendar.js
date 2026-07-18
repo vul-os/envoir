@@ -92,7 +92,23 @@ function shift(dir) {
   else c.setDate(c.getDate() + 7 * dir);
   state.ui.calCursor = c.getTime(); bus.rerender();
 }
-function startOfWeek(d) { const x = new Date(d); x.setDate(x.getDate() - x.getDay()); x.setHours(0, 0, 0, 0); return x; }
+// Locale-aware first day of week via Intl.Locale#weekInfo (1=Mon … 7=Sun). weekInfo is a getter
+// on V8/JSC but shipped as getWeekInfo() elsewhere — feature-detect both inside a try/catch and
+// fall back to Sunday. Converted to JS getDay() numbering (0=Sun … 6=Sat) for the grid math.
+const WEEK_START = (() => {
+  try {
+    const loc = new Intl.Locale(navigator.language);
+    const wi = loc.weekInfo ?? loc.getWeekInfo?.();
+    return ((wi && wi.firstDay) || 7) % 7;
+  } catch { return 0; }
+})();
+function startOfWeek(d) { const x = new Date(d); x.setDate(x.getDate() - ((x.getDay() - WEEK_START + 7) % 7)); x.setHours(0, 0, 0, 0); return x; }
+// The 7 weekday column labels, starting from the locale's first day, in the locale's own words —
+// same toLocaleDateString(…{weekday:'short'}) the week header already uses.
+function weekdayLabels() {
+  const s = startOfWeek(new Date());
+  return Array.from({ length: 7 }, (_, i) => { const d = new Date(s); d.setDate(d.getDate() + i); return d.toLocaleDateString([], { weekday: 'short' }); });
+}
 function sameDay(a, b) { return new Date(a).toDateString() === new Date(b).toDateString(); }
 function eventsOn(day) { return state.events.filter(e => sameDay(e.start, day)).sort((a, b) => a.start - b.start); }
 function splitAllDay(evs) { return { allDay: evs.filter(e => e.allDay), timed: evs.filter(e => !e.allDay) }; }
@@ -208,7 +224,7 @@ function drawMonth(body) {
   const cells = Array.from({ length: 42 }, (_, i) => new Date(first.getTime() + i * DAY));
   body.className = 'cal-body month';
   body.innerHTML = `
-    <div class="mo-dow">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<span>${d}</span>`).join('')}</div>
+    <div class="mo-dow">${weekdayLabels().map(d => `<span>${esc(d)}</span>`).join('')}</div>
     <div class="mo-grid">${cells.map(d => {
       const evs = eventsOn(d);
       const other = d.getMonth() !== new Date(state.ui.calCursor).getMonth();
@@ -383,6 +399,7 @@ export function newEventModal(presetDay, existing, presetGuestAddrs) {
   invq.addEventListener('focus', () => { if (invq.value.trim()) searchResults(); });
   invq.addEventListener('blur', () => setTimeout(() => { resultsEl.hidden = true; }, 150));
   invq.addEventListener('keydown', (e) => {
+    if (e.isComposing || e.keyCode === 229) return; // Enter that commits a CJK IME conversion must not add a guest
     if (e.key === 'Enter') { e.preventDefault(); const first = resultsEl.querySelector('[data-addr]'); if (first) addGuest(first.dataset.addr); else if (invq.value.trim()) addGuest(invq.value.trim()); }
     else if (e.key === 'Escape') { resultsEl.hidden = true; }
   });

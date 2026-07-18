@@ -101,6 +101,8 @@ function drawMain(root) {
   const pins = getPins(c);
   const members = isCh && g ? g.members.filter(m => !m.hidden).map(m => person(m.address)) : [];
 
+  // pin-bar preview truncates via [...body].slice — code points, so an astral-plane emoji at the
+  // cut is never split into U+FFFD; dir="auto" lets an RTL (Arabic/Hebrew) pin read right-aligned.
   wrap.innerHTML = `
     <header class="chat-head">
       <button class="icon-btn mobile-back" id="chat-back" aria-label="Back to conversation list" title="Back">${icon('reply')}</button>
@@ -114,12 +116,12 @@ function drawMain(root) {
       ${members.length ? `<div class="chat-members">${members.slice(0, 4).map(m => avatar(m, 26, { ring: false })).join('')}${g.members.length > members.length ? `<span class="chat-more-m">+${g.members.length - members.length}</span>` : ''}</div>` : ''}
     </header>
     ${chatSearch.open ? `<div class="chat-search">${icon('search')}<input id="csearch" placeholder="Search in this conversation…" value="${esc(chatSearch.q)}" autocomplete="off" spellcheck="false" aria-label="Search in this conversation"><span class="chat-search-count" id="cscount"></span><div class="chat-search-nav"><button class="icon-btn sm" id="csprev" title="Previous match (Shift+Enter)" aria-label="Previous match">${icon('chevUp')}</button><button class="icon-btn sm" id="csnext" title="Next match (Enter)" aria-label="Next match">${icon('chevDown')}</button></div><button class="icon-btn sm" id="csclose" title="Close search" aria-label="Close search">${icon('x')}</button></div>` : ''}
-    ${pins.length ? `<div class="pin-bar" id="pinbar">${icon('pin')} <b>${pins.length}</b> pinned · <span class="pin-prev">${esc(pins[0].body.slice(0, 60))}</span></div>` : ''}
+    ${pins.length ? `<div class="pin-bar" id="pinbar">${icon('pin')} <b>${pins.length}</b> pinned · <span class="pin-prev" dir="auto">${esc([...pins[0].body].slice(0, 60).join(''))}</span></div>` : ''}
     <div class="bubbles" id="bubbles"></div>
     ${c.typing ? `<div class="typing-row">${avatar(p || { name: '?', hue: 200 }, 22)}<span class="typing"><i></i><i></i><i></i></span></div>` : ''}
     <div class="chat-input">
       <button class="icon-btn ci-emoji" id="ciemoji" title="Emoji" aria-label="Insert emoji">${icon('smile')}</button>
-      <input id="ci" placeholder="Message ${isCh ? '#' + esc(g.handle?.replace('@', '') || convTitle(c)) : esc(convTitle(c))} — sealed, kind=chat" autocomplete="off">
+      <input id="ci" dir="auto" placeholder="Message ${isCh ? '#' + esc(g.handle?.replace('@', '') || convTitle(c)) : esc(convTitle(c))} — sealed, kind=chat" autocomplete="off">
       <button class="btn primary" id="cs" aria-label="Send">${icon('send')}</button>
     </div>`;
 
@@ -142,7 +144,8 @@ function drawMain(root) {
   wrap.querySelector('#chat-back').onclick = () => { state.ui.mobileDetail = false; bus.rerender(); };
   wrap.querySelector('#protopill').onclick = () => protocolModal(c, isCh, g);
   wrap.querySelector('#cs').onclick = send;
-  inp.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
+  inp.onkeydown = e => { if (e.isComposing || e.keyCode === 229) return; // Enter that commits a CJK IME conversion must not send
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
   wrap.querySelector('#ciemoji').onclick = (e) => { e.stopPropagation(); emojiPanel(wrap.querySelector('#ciemoji'), (emo) => { inp.value += emo; inp.focus(); }); };
   wrap.querySelector('#pinbar')?.addEventListener('click', () => pinnedModal(c));
 
@@ -183,6 +186,7 @@ function drawMain(root) {
   if (searchInput) {
     searchInput.oninput = () => { chatSearch.q = searchInput.value; chatSearch.idx = 0; runSearch(); };
     searchInput.onkeydown = (e) => {
+      if (e.isComposing || e.keyCode === 229) return; // Enter that commits a CJK IME conversion must not walk matches
       if (e.key === 'Enter') { e.preventDefault(); chatSearch.idx += e.shiftKey ? -1 : 1; runSearch(); }
       else if (e.key === 'Escape') { e.preventDefault(); chatSearch.open = false; chatSearch.q = ''; bus.rerender(); }
     };
@@ -216,7 +220,7 @@ function bubble(c, m, i) {
     ${!m.me ? avatar(p, 26) : ''}
     <div class="bwrap">
       ${!m.me && c.type === 'channel' ? `<div class="bname">${esc(p.name)}</div>` : ''}
-      <div class="bubble">${m.pinned ? `<i class="bpin" title="Pinned">${icon('pin')}</i>` : ''}${mentionize(m.body)}
+      <div class="bubble" dir="auto">${m.pinned ? `<i class="bpin" title="Pinned">${icon('pin')}</i>` : ''}${mentionize(m.body)}
         <div class="bactions">
           <button class="ba" data-act="react" title="React">${icon('smile')}</button>
           <button class="ba" data-act="thread" title="Reply in thread">${icon('reply')}</button>
@@ -247,20 +251,20 @@ function drawThread(wrap, c, idx) {
     <header class="thread-head"><b>${icon('reply')} Thread</b><button class="icon-btn sm" id="thclose" aria-label="Close thread">${icon('x')}</button></header>
     <div class="thread-scroll" id="thscroll">
       <div class="thread-parent">
-        <div class="brow them"><div class="bwrap"><div class="bname">${esc(p.name)}</div><div class="bubble">${mentionize(m.body)}</div><div class="btime">${fmtClock(m.t)}</div></div></div>
+        <div class="brow them"><div class="bwrap"><div class="bname">${esc(p.name)}</div><div class="bubble" dir="auto">${mentionize(m.body)}</div><div class="btime">${fmtClock(m.t)}</div></div></div>
       </div>
       <div class="thread-count">${(m.thread || []).length} ${(m.thread || []).length === 1 ? 'reply' : 'replies'}</div>
       <div class="thread-replies" id="threplies"></div>
     </div>
     <div class="chat-input thread-input">
-      <input id="thi" placeholder="Reply in thread…" autocomplete="off">
+      <input id="thi" dir="auto" placeholder="Reply in thread…" autocomplete="off">
       <button class="btn primary" id="ths" aria-label="Send reply">${icon('send')}</button>
     </div>
   </aside>`);
   const rep = panel.querySelector('#threplies');
   (m.thread || []).forEach(r => {
     const rp = r.me ? { name: 'You', hue: 220 } : person(r.from);
-    rep.appendChild(el(`<div class="brow them"><div class="bwrap"><div class="bname">${esc(rp.name)}</div><div class="bubble">${mentionize(r.body)}</div><div class="btime">${fmtClock(r.t)}</div></div></div>`));
+    rep.appendChild(el(`<div class="brow them"><div class="bwrap"><div class="bname">${esc(rp.name)}</div><div class="bubble" dir="auto">${mentionize(r.body)}</div><div class="btime">${fmtClock(r.t)}</div></div></div>`));
   });
   wrap.appendChild(panel);
   panel.querySelector('#thclose').onclick = () => { state.ui.chatThread = null; bus.rerender(); };
@@ -271,7 +275,8 @@ function drawThread(wrap, c, idx) {
     bus.rerender();
   };
   panel.querySelector('#ths').onclick = sendReply;
-  thi.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(); } };
+  thi.onkeydown = e => { if (e.isComposing || e.keyCode === 229) return; // Enter that commits a CJK IME conversion must not send
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(); } };
   panel.querySelector('#thscroll').scrollTop = 9999;
   setTimeout(() => thi.focus(), 30);
 }
@@ -319,7 +324,7 @@ function pinnedModal(c) {
     if (!pins.length) { listEl.innerHTML = '<div class="id-empty-inline">Nothing pinned. Hover a message and pin it.</div>'; return; }
     listEl.innerHTML = pins.map((m, i) => `<div class="pin-item" draggable="true" data-i="${i}">
       <div class="pin-grip" title="Drag to reorder">${icon('grip')}</div>
-      <div class="pin-item-main"><div class="pin-who">${esc(m.me ? 'You' : person(m.from).name)} · ${fmtClock(m.t)}</div><div class="pin-body">${mentionize(m.body)}</div></div>
+      <div class="pin-item-main"><div class="pin-who">${esc(m.me ? 'You' : person(m.from).name)} · ${fmtClock(m.t)}</div><div class="pin-body" dir="auto">${mentionize(m.body)}</div></div>
       <div class="pin-reorder">
         <button class="icon-btn sm" data-up="${i}" title="Move up" aria-label="Move up" ${i === 0 ? 'disabled' : ''}>${icon('chevUp')}</button>
         <button class="icon-btn sm" data-down="${i}" title="Move down" aria-label="Move down" ${i === pins.length - 1 ? 'disabled' : ''}>${icon('chevDown')}</button>

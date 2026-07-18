@@ -6,27 +6,33 @@
 export const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
 export const esc = (s) => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// Relative times localize via Intl.RelativeTimeFormat (narrow stays compact: en "5m ago",
+// ja "5分前") — same thresholds as before, calendar date past a week.
+const _rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto', style: 'narrow' });
 export const timeAgo = (t) => {
   const s = (Date.now() - t) / 1000;
-  if (s < 0) return 'in ' + Math.abs(Math.round(s / 60)) + 'm';
-  if (s < 45) return 'just now';
-  if (s < 3600) return Math.floor(s / 60) + 'm ago';
-  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-  if (s < 7 * 86400) return Math.floor(s / 86400) + 'd ago';
+  if (s < 0) return _rtf.format(Math.max(1, Math.round(-s / 60)), 'minute'); // future → "in 5m"
+  if (s < 45) return _rtf.format(0, 'second'); // numeric:'auto' → "now"
+  if (s < 3600) return _rtf.format(-Math.floor(s / 60), 'minute');
+  if (s < 86400) return _rtf.format(-Math.floor(s / 3600), 'hour');
+  if (s < 7 * 86400) return _rtf.format(-Math.floor(s / 86400), 'day');
   return new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
 };
 export const fmtLong = (t) => new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' }) +
   ', ' + new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 export const fmtDate = (t) => new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 
+// Decimals render via toLocaleString so the separator is locale-correct ("99,99 %" territory);
+// the compact unit style is kept as-is.
+const _dec = (v, d) => v.toLocaleString([], { minimumFractionDigits: d, maximumFractionDigits: d });
 export function fmtBytes(n) {
   if (n == null) return '—';
   const u = ['B', 'KB', 'MB', 'GB', 'TB'];
   let i = 0, v = n;
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-  return (v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)) + ' ' + u[i];
+  return (v >= 100 || i === 0 ? _dec(Math.round(v), 0) : _dec(v, 1)) + ' ' + u[i];
 }
-export const pct = (n) => (Math.round(n * 100) / 100).toFixed(n >= 99.995 ? 3 : 2) + '%';
+export const pct = (n) => _dec(Math.round(n * 100) / 100, n >= 99.995 ? 3 : 2) + '%';
 
 // ---- Icon set (stroke SVGs) ---------------------------------------------------------------
 const P = {

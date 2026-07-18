@@ -7,12 +7,15 @@ import { fmtBytes } from './seed.js';
 export const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
 export const esc = (s) => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// Relative times localize via Intl.RelativeTimeFormat (narrow keeps list columns compact:
+// en "5m ago", ja "5分前") — same thresholds as before, calendar date past a week.
+const _rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto', style: 'narrow' });
 export const timeAgo = (t) => {
   const s = (Date.now() - t) / 1000;
-  if (s < 45) return 'now';
-  if (s < 3600) return Math.floor(s / 60) + 'm';
-  if (s < 86400) return Math.floor(s / 3600) + 'h';
-  if (s < 7 * 86400) return Math.floor(s / 86400) + 'd';
+  if (s < 45) return _rtf.format(0, 'second'); // numeric:'auto' → "now"
+  if (s < 3600) return _rtf.format(-Math.floor(s / 60), 'minute');
+  if (s < 86400) return _rtf.format(-Math.floor(s / 3600), 'hour');
+  if (s < 7 * 86400) return _rtf.format(-Math.floor(s / 86400), 'day');
   return new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
 };
 export const fmtClock = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -116,8 +119,10 @@ export function brandMark(size = 28, opts = {}) {
 // ---- Avatars: deterministic gradient + initials -----------------------------------------
 export function initials(name) {
   const parts = (name || '?').replace(/^@/, '').split(/[\s.@]+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return (parts[0] || '?').slice(0, 2).toUpperCase();
+  // [...s][0] takes the first CODE POINT — s[0] would split an astral-plane char (emoji,
+  // rare CJK) into a lone surrogate that renders as U+FFFD.
+  if (parts.length >= 2) return ([...parts[0]][0] + [...parts[1]][0]).toUpperCase();
+  return [...(parts[0] || '?')].slice(0, 2).join('').toUpperCase();
 }
 // A photo avatar (p.avatarUrl — a user-set public URL — or p._avatarSrc, the resolved
 // identity-avatar ladder from avatar.js) falls back to the initials tile on load error,
@@ -265,6 +270,8 @@ export function renderBody(m) {
 }
 
 // ---- MOTE inspector (three-layer visualization, spec §2.1) --------------------------------
+// from/body previews truncate via [...s].slice — code points, not UTF-16 units — so an
+// astral-plane emoji is never split into a lone surrogate rendering as U+FFFD.
 export function showInspector(mote, plan) {
   const insp = document.getElementById('inspector');
   const hops = plan.path.map((h, i) => `<span class="hop" data-h="${i}">${esc(h)}</span>`).join('<i class="arrow">→</i>');
@@ -294,10 +301,10 @@ export function showInspector(mote, plan) {
     </div>
     <div class="layer pay">
       <div class="layer-h">${icon('key')} PAYLOAD — end-to-end encrypted</div>
-      <div class="kv"><span class="k">from</span><span class="v">${esc(mote.payload.from.slice(0, 22))}…</span></div>
+      <div class="kv"><span class="k">from</span><span class="v">${esc([...mote.payload.from].slice(0, 22).join(''))}…</span></div>
       <div class="kv"><span class="k">signature</span><span class="v">${mote.sigLen ? '✓ real ' + (mote.payload.from ? '' : '') + 'Ed25519/ECDSA, ' + mote.sigLen + ' bytes' : '(unsigned — key unavailable)'}</span></div>
       <div class="kv"><span class="k">subject</span><span class="v">${esc(mote.payload.headers.subject || '—')}</span></div>
-      <div class="kv"><span class="k">body</span><span class="v">${esc((mote.payload.body || '').slice(0, 46))}…</span></div>
+      <div class="kv"><span class="k">body</span><span class="v">${esc([...(mote.payload.body || '')].slice(0, 46).join(''))}…</span></div>
       <div class="layer-note">Only the recipient can decrypt this. Sender identity + signature live inside.</div>
     </div>
     <div class="insp-path-h">Delivery path <span class="sim-tag">simulated network</span></div>
@@ -376,6 +383,7 @@ export function commandMenu(anchor, opts = {}) {
   const run = (i) => { const it = filtered[i]; if (!it) return; if (!it.keepOpen) close(); it.run(); };
   const applyFilter = () => { const q = (input?.value || '').trim().toLowerCase(); filtered = q ? items.filter(it => (it.label + ' ' + (it.sub || '')).toLowerCase().includes(q)) : items; cur = 0; draw(); };
   const onKey = (e) => {
+    if (e.isComposing || e.keyCode === 229) return; // Enter that commits a CJK IME conversion must not run the item
     if (e.key === 'ArrowDown') { e.preventDefault(); cur = Math.min(filtered.length - 1, cur + 1); highlight(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); cur = Math.max(0, cur - 1); highlight(); }
     else if (e.key === 'Enter') { e.preventDefault(); run(cur); }
@@ -458,6 +466,7 @@ export function emojiPanel(anchor, onPick, opts = {}) {
   panel.querySelectorAll('.emoji-quick [data-e]').forEach(b => b.onclick = () => { onPick(b.dataset.e); close(); });
   input.addEventListener('input', filter);
   input.addEventListener('keydown', (e) => {
+    if (e.isComposing || e.keyCode === 229) return; // Enter that commits a CJK IME conversion must not pick an emoji
     if (e.key === 'Enter') { e.preventDefault(); if (list[0]) { onPick(list[0][0]); close(); } }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
   });

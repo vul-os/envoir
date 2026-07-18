@@ -211,6 +211,7 @@ function openPalette() {
     cur = 0; draw();
   };
   input.onkeydown = (e) => {
+    if (e.isComposing || e.keyCode === 229) return; // Enter that commits a CJK IME conversion must not run a command
     if (e.key === 'ArrowDown') { e.preventDefault(); cur = Math.min(filtered.length - 1, cur + 1); draw(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); cur = Math.max(0, cur - 1); draw(); }
     else if (e.key === 'Enter') { e.preventDefault(); run(cur); }

@@ -67,7 +67,8 @@ function history(seed, blips, todayStatus) {
     if (blips.includes(i)) status = rnd() < 0.4 ? 'down' : 'degraded';
     if (i === 0 && todayStatus) status = todayStatus;
     const up = status === 'up' ? 100 : status === 'degraded' ? 97 + rnd() * 2 : 88 + rnd() * 6;
-    days.push({ status, up, label: `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} · ${status === 'up' ? '100% uptime' : up.toFixed(2) + '% uptime'}` });
+    // toLocaleString: decimal separator must be locale-correct ("97,41" in de/fr)
+    days.push({ status, up, label: `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} · ${status === 'up' ? '100% uptime' : up.toLocaleString([], { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '% uptime'}` });
   }
   return days;
 }

@@ -305,5 +305,6 @@ export function fmtBytes(n) {
   if (n < 1024) return n + ' B';
   const u = ['KB', 'MB', 'GB', 'TB']; let i = -1;
   do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
-  return n.toFixed(1) + ' ' + u[i];
+  // toLocaleString so the decimal separator is locale-correct ("1,5 MB" in de/fr, "1.5 MB" in en)
+  return n.toLocaleString([], { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' ' + u[i];
 }

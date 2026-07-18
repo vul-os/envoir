@@ -3,7 +3,7 @@
 // reading pane with per-message verified badges, legacy-origin marking, and the MOTE inspector.
 
 import { state, threadsIn, thread, unreadCount, lastTime, parseSearch, matchThread, searchIsGlobal, blockSender, allowSender, threadSender, uid, saveSettings } from '../store.js';
-import { FOLDERS, LABELS, person } from '../seed.js';
+import { FOLDERS, LABELS, person, fmtBytes } from '../seed.js';
 import { el, esc, icon, avatar, timeAgo, fmtLong, trustPill, emptyState, verifiedGlyph, showInspector, litHop, toast, renderBody, commandMenu } from '../ui.js';
 import { buildMote, KIND } from '../mote.js';
 import { planDelivery, animatePath } from '../mesh-sim.js';
@@ -115,11 +115,11 @@ function drawList(root) {
       ${avatar(p, dense ? 28 : 36, { ring: true })}
       <div class="tmain">
         <div class="trow-top">
-          <span class="tfrom">${esc(names)}${t.verified ? verifiedGlyph() : ''}${t.msgs.length > 1 ? `<i class="tcount">${t.msgs.length}</i>` : ''}${pathBadge(prov)}</span>
+          <span class="tfrom"><bdi>${esc(names)}</bdi>${t.verified ? verifiedGlyph() : ''}${t.msgs.length > 1 ? `<i class="tcount">${t.msgs.length}</i>` : ''}${pathBadge(prov)}</span>
           <span class="ttime">${t.scheduledAt ? icon('clock') : ''}${timeAgo(lastTime(t))}</span>
         </div>
-        <div class="tsubj">${esc(t.subject)}</div>
-        <div class="tprev">${esc(last.body.split('\n')[0])}</div>
+        <div class="tsubj" dir="auto">${esc(t.subject)}</div>
+        <div class="tprev" dir="auto">${esc(last.body.split('\n')[0])}</div>
         <div class="tchips">${t.labels.map(id => { const l = LABELS.find(x => x.id === id); return l ? `<i class="chip-lbl" style="--h:${l.hue}">${esc(l.name)}</i>` : ''; }).join('')}${t.snoozeUntil ? `<i class="chip-lbl snoozed">${icon('snooze')} snoozed</i>` : ''}${t.legacy ? `<i class="chip-lbl legacy">legacy-origin</i>` : ''}${t.calendarEventId ? `<i class="chip-lbl invite">${icon('calendar')} invite</i>` : ''}</div>
       </div>
       <button class="tstar ${t.starred ? 'on' : ''}" data-star="${t.id}" aria-label="Star">${icon('star')}</button>
@@ -177,7 +177,7 @@ function drawRead(root) {
     <header class="read-head">
       <button class="icon-btn mobile-back" id="m-back" aria-label="Back to conversation list" title="Back">${icon('reply')}</button>
       <div class="read-title">
-        <h1 class="display">${esc(t.subject)}</h1>
+        <h1 class="display" dir="auto">${esc(t.subject)}</h1>
         <div class="read-tags">
           ${t.labels.map(id => { const l = LABELS.find(x => x.id === id); return l ? `<i class="chip-lbl" style="--h:${l.hue}">${esc(l.name)}</i>` : ''; }).join('')}
           ${t.tier === 'private' ? `<span class="pill priv">${icon('shield')} metadata-private</span>` : ''}
@@ -238,8 +238,8 @@ function drawRead(root) {
         </div>
       </div>
       ${legacyMsg ? `<div class="legacy-note">${icon('shield')} Arrived from the legacy world via the gateway — authenticated (DKIM) but not end-to-end encrypted before the gateway (spec §7.2).</div>` : ''}
-      <div class="msg-body">${renderBody(m)}</div>
-      ${(m.attach || []).length ? `<div class="msg-attach">${m.attach.map(a => `<span class="att">${icon('files')} ${esc(a.name)} · ${fmt(a.size)}</span>`).join('')}</div>` : ''}
+      <div class="msg-body" dir="auto">${renderBody(m)}</div>
+      ${(m.attach || []).length ? `<div class="msg-attach">${m.attach.map(a => `<span class="att">${icon('files')} ${esc(a.name)} · ${fmtBytes(a.size)}</span>`).join('')}</div>` : ''}
       ${pathGraphHtml(m.provenance, m.from === 'you' ? null : p, m.id)}
     </article>`);
     card.querySelector('[data-insp]').onclick = () => inspectMessage(t, m);
@@ -347,8 +347,6 @@ function popover(anchor, items) {
   items.forEach((it, i) => pop.querySelector(`[data-i="${i}"]`).onclick = () => { pop.remove(); it.run(); });
   setTimeout(() => document.addEventListener('click', function h(e) { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', h); } }), 0);
 }
-
-function fmt(n) { const u = ['B', 'KB', 'MB', 'GB']; let i = 0; while (n >= 1024 && i < 3) { n /= 1024; i++; } return n.toFixed(i ? 1 : 0) + ' ' + u[i]; }
 
 // Expand/collapse the per-message transport-path graph (spec §7.8/§8.6). DOM-only ephemeral UI
 // state — like the command menu, it doesn't live in `state`.

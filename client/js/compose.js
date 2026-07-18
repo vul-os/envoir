@@ -64,7 +64,7 @@ export function openCompose(opts = {}) {
       <label class="cfield"><span>From</span><div class="from-chip">${avatar(selfPerson(), 22)}${esc(displayAddress(id))}</div></label>
       <label class="cfield"><span>To</span><div class="ac-wrap"><input id="cto" value="${esc(draft.to)}" placeholder="name@domain, a key-name, alice.eth/.sol, @handle, or a group address" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false"><div class="ac-list" id="cac" role="listbox"></div></div></label>
       <div class="resolver-hint" id="cresolver"></div>
-      <label class="cfield"><span>Subject</span><input id="csubj" value="${esc(draft.subject)}" placeholder="Subject"></label>
+      <label class="cfield"><span>Subject</span><input id="csubj" dir="auto" value="${esc(draft.subject)}" placeholder="Subject"></label>
       <div class="rt-toolbar" role="toolbar" aria-label="Formatting">
         <button class="rt-btn" data-cmd="bold" title="Bold (Ctrl-B)"><b>B</b></button>
         <button class="rt-btn" data-cmd="italic" title="Italic (Ctrl-I)"><i>I</i></button>
@@ -75,7 +75,7 @@ export function openCompose(opts = {}) {
         <button class="rt-btn" data-cmd="createLink" title="Insert link">${icon('key')}</button>
         <button class="rt-btn" data-cmd="removeFormat" title="Clear formatting">${icon('x')}</button>
       </div>
-      <div id="cbody" class="rt-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message body" data-ph="Write your message — sealed to the recipient's key and routed privately.">${sanitizeHtml(draft.body)}</div>
+      <div id="cbody" class="rt-body" dir="auto" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message body" data-ph="Write your message — sealed to the recipient's key and routed privately.">${sanitizeHtml(draft.body)}</div>
       <div id="cattach" class="attach-row"></div>
       <div class="compose-foot">
         <button class="btn primary" id="csend">${icon('send')} Send</button>
@@ -197,7 +197,8 @@ function wireAutocomplete(input, listEl, onChange, onPick) {
     const parts = input.value.split(','); const frag = parts[parts.length - 1].trim().toLowerCase();
     matches = frag ? suggestions.filter(s => (s.name + ' ' + s.addr).toLowerCase().includes(frag)).slice(0, 6) : [];
     if (!matches.length) return close();
-    listEl.innerHTML = matches.map((m, i) => `<button class="ac-item ${i === active ? 'on' : ''}" data-i="${i}" role="option"><span class="ac-av" style="--h:${m.hue}"></span><span class="ac-main"><b>${esc(m.name)}</b><span class="mono">${esc(m.addr)}</span></span><i class="ac-kind">${m.kind}</i></button>`).join('');
+    // <bdi> bidi-isolates the display name so an RTL (Arabic/Hebrew) name can't visually reorder the LTR address next to it
+    listEl.innerHTML = matches.map((m, i) => `<button class="ac-item ${i === active ? 'on' : ''}" data-i="${i}" role="option"><span class="ac-av" style="--h:${m.hue}"></span><span class="ac-main"><b><bdi>${esc(m.name)}</bdi></b><span class="mono">${esc(m.addr)}</span></span><i class="ac-kind">${m.kind}</i></button>`).join('');
     listEl.querySelectorAll('[data-i]').forEach(b => b.onmousedown = (e) => { e.preventDefault(); pick(Number(b.dataset.i)); });
     listEl.classList.add('show'); input.setAttribute('aria-expanded', 'true');
   };
@@ -209,6 +210,7 @@ function wireAutocomplete(input, listEl, onChange, onPick) {
   };
   input.oninput = () => { draw(); onChange && onChange(); };
   input.onkeydown = (e) => {
+    if (e.isComposing || e.keyCode === 229) return; // Enter that commits a CJK IME conversion must not pick a recipient
     if (!listEl.classList.contains('show')) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(matches.length - 1, active + 1); draw(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(0, active - 1); draw(); }
@@ -249,7 +251,9 @@ function upsertDraft(draft, text) {
   state.mail.unshift(t);
   draft.threadId = t.id;
 }
-const splitRecips = (s) => (s || '').split(',').map(x => x.trim()).filter(Boolean);
+// Split on ASCII, full-width (，) and ideographic (、) commas — CJK keyboards type the latter two.
+// Exported for the headless harness.
+export const splitRecips = (s) => (s || '').split(/[,，、]/).map(x => x.trim()).filter(Boolean);
 
 // Send with an UNDO window (Gmail's undo-send — a client-side pre-dispatch delay, spec §17#17).
 let _pending = null;

@@ -142,7 +142,7 @@ function drawDetail(root) {
     <div class="fd-head"><b>Details</b><button class="icon-btn sm" id="fdclose" aria-label="Close details">${icon('x')}</button></div>
     <div class="fd-preview ${preview.cls}">${preview.html}</div>
     <div class="fd-name">${esc(f.name)}</div>
-    <div class="fd-sub">${esc(fmtBytes(f.size))} · added ${esc(timeAgo(f.ts))} ago</div>
+    <div class="fd-sub">${esc(fmtBytes(f.size))} · added ${esc(timeAgo(f.ts))}</div>
     <div class="fd-actions">
       <button class="btn sm" id="fddl">${icon('download')} Download</button>
       <button class="btn sm" id="fdshare">${icon('share')} Share</button>
