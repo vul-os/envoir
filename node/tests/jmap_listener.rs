@@ -41,6 +41,29 @@ fn basic(user: &str, pass: &str) -> String {
     format!("Basic {}", base64_encode(format!("{user}:{pass}").as_bytes()))
 }
 
+/// Like [`roundtrip`] but returns the raw response text (status line + headers + body) so tests can
+/// assert on headers (CORS, Retry-After) too.
+async fn roundtrip_raw(
+    addr: SocketAddr,
+    method: &str,
+    path: &str,
+    auth: Option<&str>,
+    body: &[u8],
+) -> String {
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let mut head = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\n");
+    if let Some(a) = auth {
+        head.push_str(&format!("Authorization: {a}\r\n"));
+    }
+    head.push_str(&format!("Content-Length: {}\r\nConnection: close\r\n\r\n", body.len()));
+    stream.write_all(head.as_bytes()).await.unwrap();
+    stream.write_all(body).await.unwrap();
+    stream.flush().await.unwrap();
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).await.unwrap();
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
 /// One HTTP/1.1 request→response round trip over a fresh `Connection: close` socket. Returns the
 /// status code and the response body bytes.
 async fn roundtrip(
@@ -195,4 +218,114 @@ async fn client_authenticates_and_reads_genuinely_delivered_mail_over_tcp() {
         preview.contains(secret_str) || body_val.contains(secret_str),
         "the JMAP client sees the exact delivered plaintext; preview={preview:?} body={body_val:?}"
     );
+}
+
+/// The flagship browser-send path, end-to-end over a real TCP socket: the client holds ONE base URL
+/// — the JMAP listener's — and drives the real browser sequence against it: (1) a credential-less
+/// CORS preflight for `/v1/send` (answered 204 + the CORS grant, never a fail-closed 401), (2) the
+/// real `POST /v1/send` with a capability **Bearer** token (NOT a Basic app-password — the request
+/// must reach the Send API's own gate, not die at the JMAP Basic gate: the exact bug this guards
+/// against), and (3) an unauthenticated send, still refused fail-closed by the Send API. The
+/// authorized send routes a real MOTE into the node's §20.1 outbound path and onto the mesh.
+#[tokio::test]
+async fn browser_client_sends_through_the_jmap_listener_with_a_bearer_token() {
+    use dmtap::send_api::SendApi;
+    use dmtap::transport::{Frame, Transport};
+    use dmtap_send::{Environment, SendScope};
+
+    // The live listener stamps requests with the REAL wall clock (`daemon::now_ms`), so the key must
+    // be issued against that same clock — a fixed test epoch would (rightly) read as expired.
+    let now = dmtap::daemon::now_ms();
+
+    // A node whose identity the Send API shares (as the daemon builds them from one keystore).
+    let net = InMemoryNetwork::new();
+    let node_ik = IdentityKey::from_seed(&[21u8; 32]);
+    let node_ik_pub = node_ik.public();
+    let node_t = net.endpoint(node_ik_pub.clone());
+    let mut node = Node::with_identity(node_ik, SealKeypair::generate(), node_t);
+
+    // A native recipient the node knows, registered on the fabric so the dispatched MOTE lands.
+    let rik = IdentityKey::generate();
+    let rseal = SealKeypair::generate();
+    let rt = net.endpoint(rik.public());
+    node.add_contact(&rik.public(), *rseal.public());
+    let to = dmtap::names::base64url::encode(&rik.public());
+
+    let mut send_api = SendApi::new(IdentityKey::from_seed(&[21u8; 32]), None);
+    let key = send_api.service_mut().issue_key(
+        SendScope::account(Environment::Prod),
+        now,
+        365 * 24 * 60 * 60 * 1000,
+    );
+    let secret = key.secret().to_string();
+
+    let jmap = JmapApi::new(
+        ACCOUNT,
+        "http://127.0.0.1",
+        node_ik_pub,
+        &[(ACCOUNT.to_string(), APP_PW.to_string())],
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let done = Arc::new(AtomicBool::new(false));
+    let done_client = done.clone();
+    let bearer = format!("Bearer {secret}");
+    let client = tokio::spawn(async move {
+        // 1. The browser's preflight: OPTIONS, no credentials.
+        let preflight = roundtrip_raw(addr, "OPTIONS", "/v1/send", None, b"").await;
+
+        // 2. The real send: Bearer capability token against the JMAP listener's /v1/send.
+        let body = serde_json::to_vec(&json!({
+            "from": "hello@example.com", "to": to, "subject": "hi", "body": "sent from the browser"
+        }))
+        .unwrap();
+        let sent = roundtrip_raw(addr, "POST", "/v1/send", Some(&bearer), &body).await;
+
+        // 3. No token at all: the Send API's own gate refuses, fail-closed.
+        let body = serde_json::to_vec(&json!({
+            "from": "hello@example.com", "to": "whoever", "subject": "x", "body": "y"
+        }))
+        .unwrap();
+        let unauthed = roundtrip_raw(addr, "POST", "/v1/send", None, &body).await;
+
+        done_client.store(true, Ordering::SeqCst);
+        (preflight, sent, unauthed)
+    });
+
+    run_loop_with_apis(
+        &mut node,
+        Some(&mut send_api),
+        None, // the standalone :4610 listener is not needed for the one-base-URL path
+        Some(&jmap),
+        Some(listener),
+        Duration::from_millis(5),
+        async {
+            while !done.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        },
+    )
+    .await;
+    let (preflight, sent, unauthed) = client.await.unwrap();
+
+    assert!(preflight.starts_with("HTTP/1.1 204"), "preflight is 204, was: {preflight}");
+    assert!(preflight.contains("Access-Control-Allow-Origin: *"), "preflight grants CORS: {preflight}");
+    assert!(
+        preflight.to_ascii_lowercase().contains("access-control-allow-headers: authorization"),
+        "preflight advertises the Authorization header: {preflight}"
+    );
+
+    assert!(sent.starts_with("HTTP/1.1 200"), "the Bearer-authed send succeeded, was: {sent}");
+    assert!(sent.contains("Access-Control-Allow-Origin: *"), "the browser can read the result: {sent}");
+    let sent_body: Value =
+        serde_json::from_str(sent.split("\r\n\r\n").nth(1).unwrap_or("")).expect("JSON send receipt");
+    assert_eq!(sent_body["native"], json!(true));
+
+    assert!(unauthed.starts_with("HTTP/1.1 401"), "no token ⇒ the Send API refuses: {unauthed}");
+
+    // The MOTE genuinely traversed the node's outbound path onto the mesh to the recipient.
+    assert_eq!(node.outbound_len(), 1, "the send entered the node's real §20.1 outbound queue");
+    let got_mote = rt.drain().iter().any(|(_, f)| matches!(f, Frame::Mote(_)));
+    assert!(got_mote, "the recipient's endpoint received the dispatched MOTE frame");
 }

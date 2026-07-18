@@ -28,6 +28,11 @@
 //!   Bearer token ([`SendApi::new`]'s `admin_token`); with no admin token configured they are
 //!   **disabled** (fail-closed), so `/v1/send` still works but keys can never be minted without an
 //!   explicit secret.
+//! - `OPTIONS *` — the CORS preflight a browser/webview client sends before its real request; every
+//!   response also carries the permissive CORS grant (see [`response_head`] — CORS is not the
+//!   security boundary, the Bearer gates are). This whole surface is additionally reachable at
+//!   `/v1/*` on the node's JMAP listener ([`crate::jmap_api::JmapApi::handle`]) so a browser client
+//!   needs only one base URL; the standalone listener here keeps working unchanged.
 //!
 //! ## Fail-closed authentication
 //! Every unknown / revoked / expired / not-yet-valid / foreign / out-of-scope / rate-limited key
@@ -103,6 +108,15 @@ impl SendApi {
         req: &HttpRequest,
         now: TimestampMs,
     ) -> HttpResponse {
+        // CORS preflight: a browser/webview client (the desktop shell's webview, a web app) sends an
+        // `OPTIONS` probe — with NO credentials, the browser strips Authorization — before its real
+        // Bearer-carrying request, so it MUST be answered before any auth gate (dmtap-send's adapter
+        // would otherwise answer 405 and the browser would never issue the real request). Fail-safe:
+        // the preflight unlocks nothing — every real route below keeps its fail-closed Bearer/admin
+        // gate; the CORS grant itself rides on every response via [`response_head`].
+        if req.method.eq_ignore_ascii_case("OPTIONS") {
+            return HttpResponse { status: 204, body: Vec::new() };
+        }
         // The send route is delegated wholesale to dmtap-send's adapter (it does its own method/path
         // + Bearer + scope + rate checks, fail-closed).
         if req.path == "/v1/send" {
@@ -439,15 +453,32 @@ pub(crate) async fn read_request(stream: &mut TcpStream) -> io::Result<Option<Ht
     Ok(Some(HttpRequest { method, path, authorization, body }))
 }
 
-/// Write an [`HttpResponse`] as an HTTP/1.1 `Connection: close` reply with a JSON body.
-async fn write_response(stream: &mut TcpStream, resp: &HttpResponse) -> io::Result<()> {
-    let head = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+/// Build the HTTP/1.1 response head (status line + headers + blank line). Split out from
+/// [`write_response`] so the CORS treatment is unit-testable without a socket.
+///
+/// Every response carries the same permissive CORS grant the JMAP listener emits
+/// ([`crate::jmap_api::JmapResponse`]): the client fetch sets `Authorization` explicitly (not
+/// `credentials: 'include'`), so the request is not credentialed in the CORS sense and `*` is
+/// honoured by the browser. CORS is **not** the security boundary — the fail-closed Bearer
+/// capability / admin gates above are; the grant only lets the browser *read* the (already-gated)
+/// response instead of masking every status as an opaque CORS error.
+pub(crate) fn response_head(resp: &HttpResponse) -> String {
+    format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Access-Control-Allow-Methods: POST, OPTIONS\r\n\
+         Access-Control-Allow-Headers: authorization, content-type, accept\r\n\
+         Access-Control-Max-Age: 600\r\n\
+         Vary: Origin\r\n\r\n",
         resp.status,
         reason_phrase(resp.status),
         resp.body.len()
-    );
-    stream.write_all(head.as_bytes()).await?;
+    )
+}
+
+/// Write an [`HttpResponse`] as an HTTP/1.1 `Connection: close` reply with a JSON body.
+async fn write_response(stream: &mut TcpStream, resp: &HttpResponse) -> io::Result<()> {
+    stream.write_all(response_head(resp).as_bytes()).await?;
     stream.write_all(&resp.body).await?;
     stream.flush().await
 }
@@ -464,6 +495,7 @@ fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
 fn reason_phrase(status: u16) -> &'static str {
     match status {
         200 => "OK",
+        204 => "No Content",
         400 => "Bad Request",
         401 => "Unauthorized",
         403 => "Forbidden",

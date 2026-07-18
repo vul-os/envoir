@@ -18,6 +18,7 @@
 //! | `ENVOIR_KT_ANCHORS`    | `kt_anchors`    | `https://kt.invalid/log` (placeholder) |
 //! | `ENVOIR_KEYPKGS_LOC`   | `keypkgs_loc`   | `/mesh/kp/self`    |
 //! | `ENVOIR_TICK_SECS`     | `tick_secs`     | `15`               |
+//! | `ENVOIR_SUPERVISED`    | `supervised`    | `false` (`1` ⇒ stdin EOF is a shutdown signal — for a supervising desktop shell) |
 //! | `ENVOIR_SEND_API`      | `send_api_enabled` | `false` (opt-in) |
 //! | `ENVOIR_SEND_API_BIND` | `send_api_bind` | `0.0.0.0:4610`     |
 //! | `ENVOIR_SEND_ADMIN_TOKEN` | `send_admin_token` | *(none ⇒ key-management disabled)* |
@@ -60,6 +61,13 @@ pub struct NodeConfig {
     pub keypkgs_loc: String,
     /// How often the daemon fires its retry/poll/deadline tick.
     pub tick: Duration,
+    /// Supervised mode (`ENVOIR_SUPERVISED=1`): the daemon treats **stdin EOF as a shutdown
+    /// signal**. Set by a supervisor (the desktop shell) that spawns the node as a sidecar and holds
+    /// its stdin pipe — if the supervisor dies abnormally the OS closes the pipe and the daemon
+    /// self-terminates instead of orphaning ([`crate::daemon::shutdown_signal_supervised`]). Off by
+    /// default: an interactive `envoir-node run` must NOT exit just because stdin is closed or
+    /// redirected from `/dev/null`.
+    pub supervised: bool,
     /// Whether to expose the Envoir Send HTTP API (spec §13.5.1). **Off by default** — it is a
     /// privileged programmatic send surface, opt-in via `ENVOIR_SEND_API`.
     pub send_api_enabled: bool,
@@ -98,6 +106,7 @@ impl Default for NodeConfig {
             kt_anchors: vec![PLACEHOLDER_KT.to_string()],
             keypkgs_loc: "/mesh/kp/self".to_string(),
             tick: Duration::from_secs(15),
+            supervised: false,
             send_api_enabled: false,
             send_api_bind: DEFAULT_SEND_API_BIND.to_string(),
             send_admin_token: None,
@@ -143,6 +152,9 @@ impl NodeConfig {
         if let Some(secs) = std::env::var("ENVOIR_TICK_SECS").ok().and_then(|v| v.parse::<u64>().ok())
         {
             c.tick = Duration::from_secs(secs.max(1));
+        }
+        if let Ok(v) = std::env::var("ENVOIR_SUPERVISED") {
+            c.supervised = matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on");
         }
         if let Ok(v) = std::env::var("ENVOIR_SEND_API") {
             c.send_api_enabled = matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on");
@@ -261,6 +273,13 @@ mod tests {
         assert!(c.node_bind.starts_with("0.0.0.0"));
         assert_eq!(c.keystore_path(), PathBuf::from("./envoir-data/keystore.json"));
         assert_eq!(c.journal_path(), PathBuf::from("./envoir-data/journal.json"));
+    }
+
+    #[test]
+    fn supervised_mode_is_off_by_default() {
+        // An interactive `envoir-node run` must not exit on a closed/redirected stdin; only an
+        // explicit ENVOIR_SUPERVISED=1 (the desktop shell's sidecar spawn) opts into EOF-shutdown.
+        assert!(!NodeConfig::default().supervised);
     }
 
     #[test]

@@ -196,6 +196,61 @@ async fn running_daemon_resolves_and_delivers_by_name() {
     assert!(raw.windows(body.len()).any(|w| w == body), "correct plaintext delivered");
 }
 
+/// Supervised mode (`ENVOIR_SUPERVISED=1`): the daemon watches its stdin and treats **EOF as a
+/// shutdown signal** — the supervisor (the desktop shell) holds the pipe's write end, so its death,
+/// even an abnormal one that sends no signal, closes the pipe and the sidecar terminates itself
+/// instead of orphaning. This drives the real pieces (`watch_reader_eof` + `flag_raised` feeding
+/// `run_loop`) over a controllable stand-in for the stdin pipe, and proves both halves: an OPEN
+/// pipe (live supervisor, even a chatty one) never triggers shutdown, and EOF shuts the loop down
+/// gracefully with a final durable checkpoint.
+#[tokio::test]
+async fn supervised_stdin_eof_triggers_graceful_shutdown_but_an_open_pipe_does_not() {
+    use dmtap::daemon::{flag_raised, watch_reader_eof};
+    use std::sync::mpsc;
+
+    /// A `Read` whose EOF the test controls, shaped exactly like the stdin pipe: `read` blocks
+    /// while the "supervisor" (the sender) is alive, yields any bytes it writes, and returns
+    /// `Ok(0)` (EOF) once the sender is dropped — the OS behavior when the pipe's writer dies.
+    struct PipeStandIn(mpsc::Receiver<Vec<u8>>);
+    impl std::io::Read for PipeStandIn {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            match self.0.recv() {
+                Ok(data) => {
+                    let n = data.len().min(buf.len());
+                    buf[..n].copy_from_slice(&data[..n]);
+                    Ok(n)
+                }
+                Err(_) => Ok(0), // sender dropped ⇒ the pipe closed ⇒ EOF
+            }
+        }
+    }
+
+    let (supervisor, pipe) = mpsc::channel::<Vec<u8>>();
+    let flag = watch_reader_eof(PipeStandIn(pipe));
+
+    // A live supervisor — including one that writes to the pipe — must NOT look like a death: the
+    // watcher discards bytes (stdin is a liveness channel, not a command channel) and keeps waiting.
+    supervisor.send(b"noise the watcher must swallow".to_vec()).unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !flag.load(std::sync::atomic::Ordering::SeqCst),
+        "an open pipe (live supervisor) must not signal shutdown"
+    );
+
+    // The supervisor dies abnormally: nothing is written, the sender is simply dropped. The pipe
+    // EOFs and the daemon loop — a real run_loop over a real on-disk journal — shuts down cleanly.
+    drop(supervisor);
+    let net = InMemoryNetwork::new();
+    let ik = IdentityKey::generate();
+    let t = net.endpoint(ik.public());
+    let dir = temp_dir("supervised");
+    let journal = Box::new(FileJournal::new(dir.join("journal.json")));
+    let mut node = Node::with_journal(ik, SealKeypair::generate(), t, journal).unwrap();
+    let stats = run_loop(&mut node, Duration::from_millis(5), flag_raised(flag)).await;
+    assert!(stats.flushed_ok, "EOF-triggered shutdown still commits the final durable checkpoint");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 /// Sanity: two consecutive `Keystore` loads of the same encrypted keystore reconstruct an identical
 /// node identity — the property daemon restart relies on (spec §1.2).
 #[test]

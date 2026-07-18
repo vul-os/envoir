@@ -21,6 +21,10 @@
 //! - `GET  /jmap/download/{accountId}/{blobId}/{name}` — the raw RFC 5322 bytes of an Email blob.
 //! - `POST /jmap/upload/{accountId}/` — a blob upload (content-addressed id, RFC 8620 §6.1).
 //! - `GET  /jmap/eventsource/…` — a single StateChange event carrying the current state (see below).
+//! - `/v1/*` — **delegated wholesale to the node's Envoir Send API** ([`crate::send_api::SendApi`],
+//!   spec §13.5.1) when it is enabled, so the browser/webview client can `POST /v1/send` against the
+//!   ONE base URL it already holds (this listener) instead of a second port. See
+//!   [`JmapApi::handle`] for why this dispatch happens *before* the Basic-auth gate.
 //!
 //! ## Authentication
 //! HTTP **Basic** auth carrying `username:app-password` (spec §8.2 — "legacy clients authenticate
@@ -29,6 +33,18 @@
 //! be this node's identity. Any missing / malformed / unknown / wrong credential yields `401` with a
 //! `WWW-Authenticate: Basic` challenge — never a silent accept. With **no** app-passwords configured
 //! the listener authenticates nobody (fail-closed).
+//!
+//! ## Failed-auth throttling (online-guessing bound)
+//! CORS is **not** the security boundary here — the permissive `Access-Control-Allow-Origin: *`
+//! means any drive-by web page can *reach* this loopback listener; the app-password is the boundary.
+//! What CORS-wildcarding does change is the *online guessing* budget, so the Basic-auth gate carries
+//! a small in-memory fixed-window throttle: after [`AUTH_THROTTLE_MAX_FAILURES`] consecutive
+//! failures within [`AUTH_THROTTLE_WINDOW_MS`], every request hitting the gate answers `429` with a
+//! `Retry-After` until the window passes; any successful authentication resets the counter. That
+//! bounds a drive-by guesser to ~10 attempts/minute regardless of connection volume. The `/v1/*`
+//! delegation is deliberately outside this throttle: its capability/admin tokens are high-entropy
+//! machine-minted secrets with their own fail-closed (constant-time) gates and per-key rate caveats,
+//! whereas app-passwords are the human-scale secret this throttle exists to protect.
 //!
 //! ## TLS
 //! This listener speaks plain HTTP and is bound to **loopback** by default (a native client on the
@@ -47,8 +63,10 @@
 
 use std::future::Future;
 use std::io;
+use std::sync::Mutex;
 use std::time::Duration;
 
+use dmtap_core::TimestampMs;
 use dmtap_mail::jmap;
 use dmtap_mail::util::base64_decode;
 use dmtap_mail::{Authenticator, MailStore, StaticAuthenticator};
@@ -68,6 +86,56 @@ const READ_TIMEOUT: Duration = Duration::from_secs(10);
 /// Bound the write too: a slow-reading client must not pin the inline task and stall the daemon.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How many consecutive Basic-auth failures within one window trip the throttle (see module doc).
+/// Small enough to bound a drive-by guesser to a uselessly slow rate against any credential with
+/// real entropy; large enough that a human mistyping a password never plausibly hits it.
+const AUTH_THROTTLE_MAX_FAILURES: u32 = 10;
+/// The throttle's fixed window. After tripping, `429 Retry-After` is answered until it elapses.
+const AUTH_THROTTLE_WINDOW_MS: u64 = 60_000;
+
+/// Fixed-window failed-auth counter guarding the Basic-auth gate (see the module doc's
+/// "Failed-auth throttling" section). In-memory only — a restart forgets it, which is fine: the
+/// throttle bounds *online* guessing rate, it is not an account-lockout ledger.
+#[derive(Debug, Default)]
+struct AuthThrottle {
+    /// Start of the current failure window (ms). Meaningless while `failures == 0`.
+    window_start: TimestampMs,
+    /// Failures recorded since `window_start`.
+    failures: u32,
+}
+
+impl AuthThrottle {
+    /// If the gate is currently throttled at `now`, the whole seconds to advertise in `Retry-After`
+    /// (always ≥ 1 so a client never busy-loops on `Retry-After: 0`). An elapsed window forgives all
+    /// recorded failures — the fixed window is the entire memory of this throttle.
+    fn retry_after_secs(&mut self, now: TimestampMs) -> Option<u64> {
+        if self.failures > 0 && now.saturating_sub(self.window_start) >= AUTH_THROTTLE_WINDOW_MS {
+            self.failures = 0;
+        }
+        if self.failures >= AUTH_THROTTLE_MAX_FAILURES {
+            let remaining = (self.window_start + AUTH_THROTTLE_WINDOW_MS).saturating_sub(now);
+            Some(remaining.div_ceil(1000).max(1))
+        } else {
+            None
+        }
+    }
+
+    /// Record one failed authentication at `now`, opening a fresh window if none is live.
+    fn record_failure(&mut self, now: TimestampMs) {
+        if self.failures == 0 || now.saturating_sub(self.window_start) >= AUTH_THROTTLE_WINDOW_MS {
+            self.window_start = now;
+            self.failures = 1;
+        } else {
+            self.failures += 1;
+        }
+    }
+
+    /// A successful authentication resets the counter (the legitimate client is clearly present).
+    fn record_success(&mut self) {
+        self.failures = 0;
+    }
+}
+
 /// The node-hosted JMAP service: the account identity it presents, the base URL it advertises, and
 /// the app-password table that authenticates clients — all bound to **this node's** identity key.
 pub struct JmapApi {
@@ -75,6 +143,11 @@ pub struct JmapApi {
     base_url: String,
     auth: StaticAuthenticator,
     identity_pub: Vec<u8>,
+    /// The failed-Basic-auth throttle (module doc). A `Mutex` only because [`Self::handle`] takes
+    /// `&self`; the listener actually runs single-tasked on the daemon's own `!Send` loop, so the
+    /// lock is uncontended. A poisoned lock (impossible without a panic mid-`handle`) recovers via
+    /// `into_inner` — the counter state stays usable either way, never silently un-throttled.
+    throttle: Mutex<AuthThrottle>,
 }
 
 impl JmapApi {
@@ -91,7 +164,13 @@ impl JmapApi {
         for (user, secret) in app_passwords {
             auth.issue(user.clone(), secret.clone(), identity_pub.clone(), "jmap");
         }
-        JmapApi { account_id: account_id.into(), base_url: base_url.into(), auth, identity_pub }
+        JmapApi {
+            account_id: account_id.into(),
+            base_url: base_url.into(),
+            auth,
+            identity_pub,
+            throttle: Mutex::new(AuthThrottle::default()),
+        }
     }
 
     /// The account id this service presents (`accountId`/`username`).
@@ -132,24 +211,74 @@ impl JmapApi {
         }
     }
 
-    /// Route + serve one parsed request against the live `node`. The whole surface: auth gate first
+    /// Route + serve one parsed request against the live `node`. The whole surface: the `/v1/*`
+    /// Send-API delegation and the CORS preflight first, then the throttled Basic-auth gate
     /// (fail-closed), then the JMAP routes over the node's live store. Synchronous + unit-testable.
-    pub fn handle<T: Transport>(&self, node: &mut Node<T>, req: &HttpRequest) -> JmapResponse {
+    ///
+    /// `send_api` is the node's Envoir Send service when enabled (`None` ⇒ `/v1/*` is `404`), and
+    /// `now` is the caller's clock (the daemon passes [`now_ms`]; tests inject their own).
+    pub fn handle<T: Transport>(
+        &self,
+        node: &mut Node<T>,
+        send_api: Option<&mut SendApi>,
+        req: &HttpRequest,
+        now: TimestampMs,
+    ) -> JmapResponse {
         // CORS preflight (spec-neutral, transport concern): a browser/webview client on a different
         // origin (a Tauri app is `tauri://localhost`) sends an `OPTIONS` preflight before the real
         // `Authorization`-bearing request. Preflights **never** carry credentials — the browser strips
         // the Authorization header — so this MUST be answered before the auth gate, and it is
         // fail-safe to do so: this listener is loopback-only and every real route is still
         // app-password gated, so CORS is not the security boundary — the app-password is. See
-        // [`JmapResponse`]'s CORS headers (added on every response).
+        // [`JmapResponse`]'s CORS headers (added on every response). Answered before the `/v1/*`
+        // dispatch too, so the browser's `/v1/send` preflight succeeds without touching the Send API.
         if req.method.eq_ignore_ascii_case("OPTIONS") {
             return JmapResponse::preflight();
         }
-        if !self.authorized(req) {
-            return JmapResponse::unauthorized();
-        }
         // Strip any query string for route matching (the EventSource URL carries `?types=…`).
         let path = req.path.split('?').next().unwrap_or(&req.path);
+        // `/v1/*` — the Envoir Send API family, served on THIS listener so the client's one base URL
+        // (`http://127.0.0.1:4700`) covers both sync (JMAP) and send (§13.5.1). Dispatched **before**
+        // the Basic-auth gate, and that pre-gate dispatch is deliberate and safe: the two families
+        // authenticate with different credentials (Basic app-password vs. Bearer capability/admin
+        // token), so gating `/v1/*` behind Basic here would 401 every legitimate Bearer-only client —
+        // exactly the bug that broke real browser send. Nothing is opened up by skipping the Basic
+        // gate: every `/v1/*` route keeps its own fail-closed enforcement inside [`SendApi::handle`]
+        // (capability verification for `/v1/send`, the constant-time admin token for `/v1/keys*`),
+        // so an unauthenticated request still dies at that gate — each family owns its boundary.
+        if path == "/v1" || path.starts_with("/v1/") {
+            return match send_api {
+                Some(api) => {
+                    // Wrap the Send API's JSON reply unchanged; [`JmapResponse::header_block`] then
+                    // adds the same permissive CORS headers every response on this listener carries,
+                    // so the browser can actually read the delegated /v1/* result.
+                    let resp = api.handle(node, req, now);
+                    JmapResponse::raw(resp.status, "application/json", resp.body)
+                }
+                // Honest 404 (not 401): the surface is disabled by config, not locked.
+                None => JmapResponse::json(
+                    404,
+                    json!({
+                        "error": "not_found",
+                        "detail": "the Envoir Send API is not enabled on this node (set ENVOIR_SEND_API=1)"
+                    }),
+                ),
+            };
+        }
+        // The throttled Basic-auth gate (module doc: this bounds online guessing; CORS is not the
+        // boundary). While throttled we answer 429 WITHOUT evaluating the credential — even a correct
+        // one — so a tripped window yields a guesser zero verification oracle until it passes (and
+        // costs a legitimate client at most one window).
+        let mut throttle = self.throttle.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(secs) = throttle.retry_after_secs(now) {
+            return JmapResponse::too_many_auth_failures(secs);
+        }
+        if !self.authorized(req) {
+            throttle.record_failure(now);
+            return JmapResponse::unauthorized();
+        }
+        throttle.record_success();
+        drop(throttle);
         match (req.method.as_str(), path) {
             ("GET", "/jmap/session") | ("GET", "/.well-known/jmap") => self.session(node),
             ("POST", "/jmap/api") | ("POST", "/jmap/api/") => self.api(node, &req.body),
@@ -241,14 +370,16 @@ impl JmapApi {
 
     /// Serve one accepted connection: read the request (bounded), dispatch it against the live node,
     /// and write the response. Framing errors become `400`/`408` rather than propagating — one bad
-    /// client never takes down the daemon loop.
+    /// client never takes down the daemon loop. `send_api` is threaded through so `/v1/*` requests
+    /// arriving on this listener reach the real Send API (see [`Self::handle`]).
     pub async fn handle_connection<T: Transport>(
         &self,
         node: &mut Node<T>,
+        send_api: Option<&mut SendApi>,
         mut stream: TcpStream,
     ) -> io::Result<()> {
         let resp = match tokio::time::timeout(READ_TIMEOUT, read_request(&mut stream)).await {
-            Ok(Ok(Some(req))) => self.handle(node, &req),
+            Ok(Ok(Some(req))) => self.handle(node, send_api, &req, now_ms()),
             Ok(Ok(None)) => return Ok(()),
             Ok(Err(e)) => {
                 JmapResponse::json(400, json!({ "type": "notRequest", "detail": e.to_string() }))
@@ -271,12 +402,14 @@ pub struct JmapResponse {
     pub content_type: &'static str,
     pub body: Vec<u8>,
     pub www_authenticate: bool,
+    /// `Some(secs)` emits a `Retry-After` header — set only by the failed-auth throttle's `429`.
+    pub retry_after_secs: Option<u64>,
 }
 
 impl JmapResponse {
     /// A response with an explicit content type and raw body.
     pub fn raw(status: u16, content_type: &'static str, body: Vec<u8>) -> Self {
-        JmapResponse { status, content_type, body, www_authenticate: false }
+        JmapResponse { status, content_type, body, www_authenticate: false, retry_after_secs: None }
     }
 
     /// A JSON response from an already-built [`Value`].
@@ -308,6 +441,21 @@ impl JmapResponse {
         r
     }
 
+    /// The throttled `429` (module doc: online-guessing bound). Carries `Retry-After` so a
+    /// well-behaved client backs off for the remainder of the window; deliberately **no** Basic
+    /// challenge — this is not an invitation to retry a credential, it is a refusal to look at one.
+    fn too_many_auth_failures(retry_after_secs: u64) -> Self {
+        let mut r = JmapResponse::json(
+            429,
+            json!({
+                "type": "urn:ietf:params:jmap:error:limit",
+                "detail": "too many failed authentication attempts — retry after the window passes"
+            }),
+        );
+        r.retry_after_secs = Some(retry_after_secs);
+        r
+    }
+
     /// Build the HTTP/1.1 response head (status line + headers, terminated by the blank line). Split
     /// out from [`Self::write`] so the CORS + auth headers are unit-testable without a socket.
     fn header_block(&self) -> String {
@@ -332,6 +480,9 @@ impl JmapResponse {
         if self.www_authenticate {
             head.push_str("WWW-Authenticate: Basic realm=\"dmtap-jmap\"\r\n");
         }
+        if let Some(secs) = self.retry_after_secs {
+            head.push_str(&format!("Retry-After: {secs}\r\n"));
+        }
         head.push_str("\r\n");
         head
     }
@@ -348,7 +499,10 @@ impl JmapResponse {
 /// delivery tick, all **inline on this one task** (a [`Node`] is `!Send`): the delivery/retry/
 /// deadline tick, plus — behind their config flags — the Envoir Send API and the native JMAP
 /// listener. Either listener may be absent (`None`); with both absent it is exactly
-/// [`crate::daemon::run_loop`]. Runs until `shutdown`, then flushes a final durable checkpoint.
+/// [`crate::daemon::run_loop`]. When both APIs are enabled, the JMAP listener additionally serves
+/// the `/v1/*` Send routes (one client-facing base URL — see [`JmapApi::handle`]) while the
+/// standalone Send listener keeps working unchanged. Runs until `shutdown`, then flushes a final
+/// durable checkpoint.
 ///
 /// The `select!` is **not** `biased`: ranking `accept` above the delivery `tick` would starve the
 /// tick under a stream of connections (each is handled inline). Fair polling keeps delivery/retry
@@ -377,7 +531,9 @@ pub async fn run_loop_with_apis<T: Transport>(
             }
             accepted = maybe_accept(jmap_listener.as_ref()) => {
                 if let (Some(api), Ok((stream, _peer))) = (jmap_api, accepted) {
-                    let _ = api.handle_connection(node, stream).await;
+                    // The Send API is threaded into the JMAP handler so `/v1/*` on THIS listener
+                    // reaches the real capability-gated send path (see `JmapApi::handle`).
+                    let _ = api.handle_connection(node, send_api.as_deref_mut(), stream).await;
                 }
             }
             _ = interval.tick() => {
@@ -404,17 +560,23 @@ async fn maybe_accept(listener: Option<&TcpListener>) -> io::Result<(TcpStream, 
     }
 }
 
-/// A conventional reason phrase for the status codes the JMAP surface emits (cosmetic).
+/// A conventional reason phrase for the status codes this surface emits (cosmetic). Includes the
+/// codes the delegated `/v1/*` Send API family answers (403/422/429/502) and the throttle's 429.
 fn reason_phrase(status: u16) -> &'static str {
     match status {
         200 => "OK",
         201 => "Created",
+        204 => "No Content",
         400 => "Bad Request",
         401 => "Unauthorized",
+        403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
         408 => "Request Timeout",
+        422 => "Unprocessable Entity",
+        429 => "Too Many Requests",
         500 => "Internal Server Error",
+        502 => "Bad Gateway",
         _ => "",
     }
 }
@@ -460,6 +622,9 @@ mod tests {
     use dmtap_core::identity::IdentityKey;
     use dmtap_core::mote::SealKeypair;
 
+    /// The tests' injected clock (the handler never reads a wall clock).
+    const NOW: u64 = 1_752_000_000_000;
+
     fn node_with_mail() -> (Node<InMemoryTransport>, Vec<u8>) {
         let net = InMemoryNetwork::new();
         let ik = IdentityKey::from_seed(&[9u8; 32]);
@@ -471,9 +636,34 @@ mod tests {
             "INBOX",
             b"From: Alice <alice@example.com>\r\nSubject: Live mail\r\nMessage-ID: <m1@x>\r\n\r\nHi from the live store".to_vec(),
             vec![],
-            1_752_000_000_000,
+            NOW,
         );
         (node, ik_pub)
+    }
+
+    /// A node + Send API sharing one identity (as the daemon builds them), with a native recipient
+    /// this node knows and a minted capability key — the fixture for the `/v1/*` delegation tests.
+    fn node_with_send_api() -> (Node<InMemoryTransport>, Vec<u8>, SendApi, String, String) {
+        use dmtap_send::{Environment, SendScope};
+        let net = InMemoryNetwork::new();
+        let ik = IdentityKey::from_seed(&[9u8; 32]);
+        let ik_pub = ik.public();
+        let transport = net.endpoint(ik_pub.clone());
+        let mut node = Node::with_identity(ik, SealKeypair::generate(), transport);
+        // A native recipient the resolver can seal to (registered on the fabric so dispatch lands).
+        let rik = IdentityKey::from_seed(&[5u8; 32]);
+        let rseal = SealKeypair::generate();
+        let _rt = net.endpoint(rik.public());
+        node.add_contact(&rik.public(), *rseal.public());
+        let to = crate::names::base64url::encode(&rik.public());
+        let mut send = SendApi::new(IdentityKey::from_seed(&[9u8; 32]), None);
+        let key = send.service_mut().issue_key(
+            SendScope::account(Environment::Prod),
+            NOW,
+            365 * 24 * 60 * 60 * 1000,
+        );
+        let secret = key.secret().to_string();
+        (node, ik_pub, send, secret, to)
     }
 
     fn api(ik_pub: &[u8]) -> JmapApi {
@@ -503,17 +693,17 @@ mod tests {
         let (mut node, ik_pub) = node_with_mail();
         let a = api(&ik_pub);
         // No Authorization header.
-        let r = a.handle(&mut node, &req("GET", "/jmap/session", None, json!({})));
+        let r = a.handle(&mut node, None, &req("GET", "/jmap/session", None, json!({})), NOW);
         assert_eq!(r.status, 401);
         assert!(r.www_authenticate, "a 401 must carry the Basic challenge");
         // Wrong secret.
-        let r = a.handle(&mut node, &req("GET", "/jmap/session", Some(basic("user@dmtap.local", "nope")), json!({})));
+        let r = a.handle(&mut node, None, &req("GET", "/jmap/session", Some(basic("user@dmtap.local", "nope")), json!({})), NOW);
         assert_eq!(r.status, 401);
         // Unknown user.
-        let r = a.handle(&mut node, &req("GET", "/jmap/session", Some(basic("mallory", "app-pw")), json!({})));
+        let r = a.handle(&mut node, None, &req("GET", "/jmap/session", Some(basic("mallory", "app-pw")), json!({})), NOW);
         assert_eq!(r.status, 401);
         // Non-Basic scheme.
-        let r = a.handle(&mut node, &req("GET", "/jmap/session", Some("Bearer app-pw".into()), json!({})));
+        let r = a.handle(&mut node, None, &req("GET", "/jmap/session", Some("Bearer app-pw".into()), json!({})), NOW);
         assert_eq!(r.status, 401);
     }
 
@@ -521,7 +711,7 @@ mod tests {
     fn no_app_passwords_authenticates_nobody() {
         let (mut node, ik_pub) = node_with_mail();
         let a = JmapApi::new("user@dmtap.local", "http://127.0.0.1:4700", ik_pub.clone(), &[]);
-        let r = a.handle(&mut node, &req("GET", "/jmap/session", Some(basic("user@dmtap.local", "app-pw")), json!({})));
+        let r = a.handle(&mut node, None, &req("GET", "/jmap/session", Some(basic("user@dmtap.local", "app-pw")), json!({})), NOW);
         assert_eq!(r.status, 401, "with no credentials configured, even a plausible one fails closed");
     }
 
@@ -529,7 +719,7 @@ mod tests {
     fn session_reflects_live_store_state() {
         let (mut node, ik_pub) = node_with_mail();
         let a = api(&ik_pub);
-        let r = a.handle(&mut node, &req("GET", "/jmap/session", Some(basic("user@dmtap.local", "app-pw")), json!({})));
+        let r = a.handle(&mut node, None, &req("GET", "/jmap/session", Some(basic("user@dmtap.local", "app-pw")), json!({})), NOW);
         assert_eq!(r.status, 200);
         let v: Value = serde_json::from_slice(&r.body).unwrap();
         assert_eq!(v["primaryAccounts"][jmap::CAP_MAIL], json!("user@dmtap.local"));
@@ -548,7 +738,7 @@ mod tests {
             "using": [jmap::CAP_CORE, jmap::CAP_MAIL],
             "methodCalls": [["Mailbox/get", { "accountId": "user@dmtap.local", "ids": null }, "c1"]]
         });
-        let r = a.handle(&mut node, &req("POST", "/jmap/api/", Some(auth.clone()), body));
+        let r = a.handle(&mut node, None, &req("POST", "/jmap/api/", Some(auth.clone()), body), NOW);
         assert_eq!(r.status, 200);
         let v: Value = serde_json::from_slice(&r.body).unwrap();
         let inbox = v["methodResponses"][0][1]["list"].as_array().unwrap().iter()
@@ -563,7 +753,7 @@ mod tests {
                 ["Email/get", { "accountId": "user@dmtap.local", "#ids": { "resultOf": "q", "name": "Email/query", "path": "/ids" } }, "g"]
             ]
         });
-        let r = a.handle(&mut node, &req("POST", "/jmap/api/", Some(auth), body));
+        let r = a.handle(&mut node, None, &req("POST", "/jmap/api/", Some(auth), body), NOW);
         let v: Value = serde_json::from_slice(&r.body).unwrap();
         let email = &v["methodResponses"][1][1]["list"][0];
         assert_eq!(email["subject"], json!("Live mail"));
@@ -576,12 +766,12 @@ mod tests {
         let a = api(&ik_pub);
         let auth = basic("user@dmtap.local", "app-pw");
         // The Email id is `INBOX|1`; percent-encode the '|' as a client might.
-        let r = a.handle(&mut node, &req("GET", "/jmap/download/user@dmtap.local/INBOX%7C1/mail.eml", Some(auth.clone()), json!({})));
+        let r = a.handle(&mut node, None, &req("GET", "/jmap/download/user@dmtap.local/INBOX%7C1/mail.eml", Some(auth.clone()), json!({})), NOW);
         assert_eq!(r.status, 200);
         assert_eq!(r.content_type, "application/octet-stream");
         assert!(String::from_utf8_lossy(&r.body).contains("Hi from the live store"));
         // A foreign accountId is refused (isolation).
-        let r = a.handle(&mut node, &req("GET", "/jmap/download/someone-else/INBOX%7C1/mail.eml", Some(auth), json!({})));
+        let r = a.handle(&mut node, None, &req("GET", "/jmap/download/someone-else/INBOX%7C1/mail.eml", Some(auth), json!({})), NOW);
         assert_eq!(r.status, 404);
     }
 
@@ -589,7 +779,7 @@ mod tests {
     fn unknown_route_is_404_when_authenticated() {
         let (mut node, ik_pub) = node_with_mail();
         let a = api(&ik_pub);
-        let r = a.handle(&mut node, &req("GET", "/jmap/bogus", Some(basic("user@dmtap.local", "app-pw")), json!({})));
+        let r = a.handle(&mut node, None, &req("GET", "/jmap/bogus", Some(basic("user@dmtap.local", "app-pw")), json!({})), NOW);
         assert_eq!(r.status, 404);
     }
 
@@ -599,7 +789,7 @@ mod tests {
         let a = api(&ik_pub);
         // A preflight carries NO Authorization header (the browser strips it) — it must still be
         // answered (204), never a fail-closed 401, so the real authenticated request can follow.
-        let r = a.handle(&mut node, &req("OPTIONS", "/jmap/api/", None, json!({})));
+        let r = a.handle(&mut node, None, &req("OPTIONS", "/jmap/api/", None, json!({})), NOW);
         assert_eq!(r.status, 204);
         assert!(!r.www_authenticate, "a preflight is not an auth challenge");
         assert!(r.body.is_empty());
@@ -610,18 +800,18 @@ mod tests {
         let (mut node, ik_pub) = node_with_mail();
         let a = api(&ik_pub);
         // The preflight advertises the headers the JMAP client sends.
-        let pre = a.handle(&mut node, &req("OPTIONS", "/jmap/api/", None, json!({})));
+        let pre = a.handle(&mut node, None, &req("OPTIONS", "/jmap/api/", None, json!({})), NOW);
         let head = pre.header_block();
         assert!(head.contains("Access-Control-Allow-Origin: *"));
         assert!(head.to_ascii_lowercase().contains("access-control-allow-headers: authorization"));
         assert!(head.contains("Access-Control-Allow-Methods: GET, POST, OPTIONS"));
         // A real (authenticated) response ALSO carries the allow-origin header, else the browser
         // discards the body.
-        let ok = a.handle(&mut node, &req("GET", "/jmap/session", Some(basic("user@dmtap.local", "app-pw")), json!({})));
+        let ok = a.handle(&mut node, None, &req("GET", "/jmap/session", Some(basic("user@dmtap.local", "app-pw")), json!({})), NOW);
         assert_eq!(ok.status, 200);
         assert!(ok.header_block().contains("Access-Control-Allow-Origin: *"));
         // Even the 401 carries CORS (so the browser surfaces the status instead of a CORS error).
-        let no = a.handle(&mut node, &req("GET", "/jmap/session", None, json!({})));
+        let no = a.handle(&mut node, None, &req("GET", "/jmap/session", None, json!({})), NOW);
         assert_eq!(no.status, 401);
         let nohead = no.header_block();
         assert!(nohead.contains("Access-Control-Allow-Origin: *"));
@@ -633,5 +823,123 @@ mod tests {
         assert_eq!(percent_decode("INBOX%7C1"), "INBOX|1");
         assert_eq!(percent_decode("plain"), "plain");
         assert_eq!(percent_decode("100%"), "100%"); // trailing lone % passes through
+    }
+
+    // --- /v1/* delegation to the Send API (the flagship browser-send path) ----------------------
+
+    #[test]
+    fn bearer_authed_v1_send_reaches_the_send_api_through_the_jmap_handler() {
+        let (mut node, ik_pub, mut send, secret, to) = node_with_send_api();
+        let a = api(&ik_pub);
+        // The exact request the browser client issues: POST {jmap base}/v1/send with a capability
+        // Bearer token — and NO Basic app-password. It must reach the real send pipeline.
+        let body = json!({ "from": "hello@example.com", "to": to, "subject": "hi", "body": "from the browser" });
+        let r = a.handle(&mut node, Some(&mut send), &req("POST", "/v1/send", Some(format!("Bearer {secret}")), body), NOW);
+        assert_eq!(r.status, 200, "a Bearer-authed /v1/send must not die at the Basic gate: {:?}", String::from_utf8_lossy(&r.body));
+        let v: Value = serde_json::from_slice(&r.body).unwrap();
+        assert_eq!(v["native"], json!(true));
+        // The MOTE genuinely entered the node's §20.1 outbound path via the delegated SendApi.
+        assert_eq!(node.outbound_len(), 1);
+        // The delegated response still carries the CORS headers, else the browser drops the body.
+        assert!(r.header_block().contains("Access-Control-Allow-Origin: *"));
+    }
+
+    #[test]
+    fn v1_send_keeps_the_send_apis_own_fail_closed_gate() {
+        let (mut node, ik_pub, mut send, _secret, to) = node_with_send_api();
+        let a = api(&ik_pub);
+        let body = json!({ "from": "hello@example.com", "to": to, "subject": "hi", "body": "x" });
+        // No Bearer at all: rejected by the SEND API's gate (not the Basic gate — no Basic challenge).
+        let r = a.handle(&mut node, Some(&mut send), &req("POST", "/v1/send", None, body.clone()), NOW);
+        assert_eq!(r.status, 401);
+        assert!(!r.www_authenticate, "a /v1 401 is the Send API's, not a Basic challenge");
+        // A bogus Bearer likewise dies at the capability verification, and nothing is dispatched.
+        let r = a.handle(&mut node, Some(&mut send), &req("POST", "/v1/send", Some("Bearer envoir_live_bogus".into()), body), NOW);
+        assert_eq!(r.status, 401);
+        assert_eq!(node.outbound_len(), 0, "no MOTE for an unauthenticated /v1/send");
+    }
+
+    #[test]
+    fn v1_routes_are_404_when_the_send_api_is_disabled() {
+        let (mut node, ik_pub) = node_with_mail();
+        let a = api(&ik_pub);
+        // With no SendApi wired (config off) the route is honestly absent — 404, not a Basic 401.
+        let r = a.handle(&mut node, None, &req("POST", "/v1/send", Some("Bearer x".into()), json!({})), NOW);
+        assert_eq!(r.status, 404);
+        assert!(!r.www_authenticate);
+    }
+
+    #[test]
+    fn v1_preflight_is_answered_with_cors_before_any_gate() {
+        let (mut node, ik_pub, mut send, _secret, _to) = node_with_send_api();
+        let a = api(&ik_pub);
+        // The browser preflights /v1/send with NO credentials; it must get 204 + the CORS grant.
+        let r = a.handle(&mut node, Some(&mut send), &req("OPTIONS", "/v1/send", None, json!({})), NOW);
+        assert_eq!(r.status, 204);
+        let head = r.header_block();
+        assert!(head.contains("Access-Control-Allow-Origin: *"));
+        assert!(head.to_ascii_lowercase().contains("access-control-allow-headers: authorization"));
+    }
+
+    // --- the failed-Basic-auth throttle (online-guessing bound; CORS is not the boundary) --------
+
+    /// Trip the throttle: `n` bad-password requests at `now`.
+    fn hammer(a: &JmapApi, node: &mut Node<InMemoryTransport>, n: u32, now: u64) {
+        for _ in 0..n {
+            let r = a.handle(node, None, &req("GET", "/jmap/session", Some(basic("user@dmtap.local", "WRONG")), json!({})), now);
+            assert_eq!(r.status, 401);
+        }
+    }
+
+    #[test]
+    fn throttle_answers_429_with_retry_after_after_max_failures() {
+        let (mut node, ik_pub) = node_with_mail();
+        let a = api(&ik_pub);
+        hammer(&a, &mut node, AUTH_THROTTLE_MAX_FAILURES, NOW);
+        // The next attempt — even with the CORRECT password — is refused without evaluating it:
+        // a tripped window is a zero-oracle refusal, not an invitation to keep guessing.
+        let r = a.handle(&mut node, None, &req("GET", "/jmap/session", Some(basic("user@dmtap.local", "app-pw")), json!({})), NOW + 1_000);
+        assert_eq!(r.status, 429);
+        assert_eq!(r.retry_after_secs, Some(59), "Retry-After = the window's remaining whole seconds");
+        assert!(r.header_block().contains("Retry-After: 59"));
+        assert!(!r.www_authenticate, "429 carries no Basic challenge");
+    }
+
+    #[test]
+    fn throttle_resets_after_the_window_passes() {
+        let (mut node, ik_pub) = node_with_mail();
+        let a = api(&ik_pub);
+        hammer(&a, &mut node, AUTH_THROTTLE_MAX_FAILURES, NOW);
+        // Window elapsed: the correct credential authenticates again (fixed window fully forgives).
+        let r = a.handle(&mut node, None, &req("GET", "/jmap/session", Some(basic("user@dmtap.local", "app-pw")), json!({})), NOW + AUTH_THROTTLE_WINDOW_MS);
+        assert_eq!(r.status, 200, "an elapsed window unthrottles the gate");
+    }
+
+    #[test]
+    fn a_success_resets_the_failure_counter() {
+        let (mut node, ik_pub) = node_with_mail();
+        let a = api(&ik_pub);
+        // One failure short of the limit, then a success: the counter must reset…
+        hammer(&a, &mut node, AUTH_THROTTLE_MAX_FAILURES - 1, NOW);
+        let ok = a.handle(&mut node, None, &req("GET", "/jmap/session", Some(basic("user@dmtap.local", "app-pw")), json!({})), NOW + 1);
+        assert_eq!(ok.status, 200);
+        // …so the next bad attempt is an ordinary 401, not a 429.
+        let r = a.handle(&mut node, None, &req("GET", "/jmap/session", Some(basic("user@dmtap.local", "WRONG")), json!({})), NOW + 2);
+        assert_eq!(r.status, 401);
+    }
+
+    #[test]
+    fn throttle_does_not_block_preflights_or_v1_dispatch() {
+        let (mut node, ik_pub, mut send, secret, to) = node_with_send_api();
+        let a = api(&ik_pub);
+        hammer(&a, &mut node, AUTH_THROTTLE_MAX_FAILURES, NOW);
+        // OPTIONS is answered before the gate — a throttled listener still preflights.
+        let pre = a.handle(&mut node, None, &req("OPTIONS", "/jmap/api/", None, json!({})), NOW + 1);
+        assert_eq!(pre.status, 204);
+        // /v1/* keeps working: its Bearer gate (high-entropy capability tokens, per-key rate
+        // caveats) is a separate boundary the Basic throttle deliberately does not police.
+        let body = json!({ "from": "hello@example.com", "to": to, "subject": "hi", "body": "x" });
+        let r = a.handle(&mut node, Some(&mut send), &req("POST", "/v1/send", Some(format!("Bearer {secret}")), body), NOW + 1);
+        assert_eq!(r.status, 200);
     }
 }

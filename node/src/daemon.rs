@@ -30,6 +30,9 @@
 //!   bind is refused fail-closed (JMAP terminates TLS on the node, spec §8.2 — front it with TLS).
 
 use std::future::Future;
+use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use dmtap_core::identity::{Identity, IdentityKey, KeyPackageBundleRef};
@@ -160,6 +163,10 @@ pub async fn run_loop<T: Transport>(
     stats
 }
 
+/// How often the supervised-mode shutdown future re-checks the stdin-EOF flag. Coarse is fine: this
+/// bounds only how long an *orphaned* daemon lingers after its supervisor died, not request latency.
+const SUPERVISED_POLL: Duration = Duration::from_millis(200);
+
 /// A future that resolves on SIGINT (Ctrl-C) or, on unix, SIGTERM — the container stop signal.
 pub async fn shutdown_signal() {
     let ctrl_c = async {
@@ -185,6 +192,62 @@ pub async fn shutdown_signal() {
     }
 }
 
+/// The daemon's shutdown future, extended for **supervised mode** (`ENVOIR_SUPERVISED=1`,
+/// [`crate::config::NodeConfig::supervised`]): resolves on SIGINT/SIGTERM as always, and
+/// additionally when **stdin reaches EOF**. The supervisor (the desktop shell that spawned this
+/// daemon as a sidecar) holds the write end of the stdin pipe for the process's whole life; if the
+/// shell dies — even abnormally, with no chance to signal — the OS closes the pipe, stdin EOFs, and
+/// the daemon shuts itself down instead of lingering as an orphan. Signals alone cannot cover that
+/// case: a crashed supervisor sends nothing.
+pub async fn shutdown_signal_supervised(supervised: bool) {
+    if !supervised {
+        return shutdown_signal().await;
+    }
+    let eof = watch_reader_eof(std::io::stdin());
+    tokio::select! {
+        _ = shutdown_signal() => {}
+        _ = flag_raised(eof) => {
+            eprintln!("envoir-node: stdin closed — supervisor gone (ENVOIR_SUPERVISED=1); shutting down");
+        }
+    }
+}
+
+/// Spawn a **detached** OS thread that drains `reader` to EOF, then raise the returned flag.
+///
+/// Why a plain `std::thread` over `tokio::io::stdin()`: tokio's stdin is itself a blocking read on
+/// a worker thread, and a read blocked on an open-but-idle stdin would stall the runtime's own
+/// drop-time shutdown (blocking tasks are waited on). A detached thread costs nothing at process
+/// exit — it simply dies with the process — so a SIGTERM'd supervised daemon still exits promptly
+/// even though its supervisor never closed the pipe. Any bytes read before EOF are discarded:
+/// supervised-mode stdin is a *liveness channel*, never a command channel (commands on stdin would
+/// invite injection from whatever inherited the pipe).
+pub fn watch_reader_eof<R: io::Read + Send + 'static>(mut reader: R) -> Arc<AtomicBool> {
+    let flag = Arc::new(AtomicBool::new(false));
+    let raised = flag.clone();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 256];
+        loop {
+            match reader.read(&mut buf) {
+                // EOF — or a read error, which also means the pipe is unusable: treat both as
+                // "supervisor gone" (fail-closed toward shutting down, never toward lingering).
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+        raised.store(true, Ordering::SeqCst);
+    });
+    flag
+}
+
+/// Resolve once `flag` is raised. Polled on [`SUPERVISED_POLL`] — a plain atomic + interval rather
+/// than a channel because the node crate's tokio has no `sync` feature, and a 200ms orphan-detection
+/// latency is far below the cost of enabling one for this alone.
+pub async fn flag_raised(flag: Arc<AtomicBool>) {
+    while !flag.load(Ordering::SeqCst) {
+        tokio::time::sleep(SUPERVISED_POLL).await;
+    }
+}
+
 /// Start and run the daemon to completion: load the node and run the steady-state loop (mesh +
 /// optional Send API) until a shutdown signal. The one call `main`'s `run`/`serve` wraps in a
 /// runtime. The node is native-only (spec §8.5) — no legacy §8 servers are started here.
@@ -204,6 +267,11 @@ pub async fn serve(config: NodeConfig) -> Result<LoopStats, DaemonError> {
         "envoir-node: name resolution seam — live DNS `_dmtap` + KT clients not wired; \
          resolve/deliver-by-name available via Node::send_mail_to_name over a dmtap_naming::Resolver"
     );
+    if config.supervised {
+        eprintln!(
+            "envoir-node: supervised mode (ENVOIR_SUPERVISED=1) — stdin EOF also triggers shutdown"
+        );
+    }
     eprintln!("envoir-node: running — SIGINT/SIGTERM to stop");
 
     // The Envoir Send HTTP API (spec §13.5.1), opt-in. Owner identity = this node's identity
@@ -260,9 +328,11 @@ pub async fn serve(config: NodeConfig) -> Result<LoopStats, DaemonError> {
         let l = tokio::net::TcpListener::bind(&config.jmap_bind).await.map_err(DaemonError::Bind)?;
         eprintln!(
             "envoir-node: JMAP listener on {} (account {}) — Basic app-password auth; \
-             Session at /jmap/session, API at /jmap/api/",
+             Session at /jmap/session, API at /jmap/api/{}",
             config.jmap_bind,
-            jmap_api.as_ref().map(crate::jmap_api::JmapApi::account_id).unwrap_or("")
+            jmap_api.as_ref().map(crate::jmap_api::JmapApi::account_id).unwrap_or(""),
+            // The /v1/* Send routes ride on this listener too (one client base URL) when enabled.
+            if config.send_api_enabled { "; Envoir Send at /v1/* (capability Bearer)" } else { "" }
         );
         Some(l)
     } else {
@@ -276,7 +346,9 @@ pub async fn serve(config: NodeConfig) -> Result<LoopStats, DaemonError> {
         jmap_api.as_ref(),
         jmap_listener,
         config.tick,
-        shutdown_signal(),
+        // Supervised mode (ENVOIR_SUPERVISED=1) adds stdin-EOF to the shutdown causes, so a sidecar
+        // whose supervising shell died abnormally terminates itself instead of orphaning.
+        shutdown_signal_supervised(config.supervised),
     )
     .await;
     eprintln!(

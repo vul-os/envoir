@@ -359,6 +359,55 @@ async fn live_tcp_round_trip_delivers_a_real_mote() {
     assert!(matches!(validate(&Hpke, &env, &ctx).unwrap(), Outcome::Accepted(_)));
 }
 
+/// A browser/webview client's CORS preflight against the standalone Send listener: `OPTIONS` is
+/// answered `204` (it carries no credentials — the browser strips `Authorization` — so a fail-closed
+/// 401/405 would block every real request), and BOTH the preflight and the real gated response carry
+/// the CORS grant, else the browser masks the Bearer-gated result as an opaque CORS error. CORS is
+/// not the boundary: the real request below still dies at the fail-closed Bearer gate.
+#[tokio::test]
+async fn options_preflight_and_cors_headers_on_the_standalone_listener() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let mut f = fixture();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    // --- the preflight: no Authorization header at all. ---
+    let client = tokio::spawn(async move {
+        let head = "OPTIONS /v1/send HTTP/1.1\r\nHost: node\r\nOrigin: https://evil.example\r\nAccess-Control-Request-Method: POST\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string();
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        stream.write_all(head.as_bytes()).await.unwrap();
+        let mut resp = Vec::new();
+        stream.read_to_end(&mut resp).await.unwrap();
+        String::from_utf8_lossy(&resp).into_owned()
+    });
+    let (stream, _peer) = listener.accept().await.unwrap();
+    f.api.handle_connection(&mut f.node, stream, NOW).await.unwrap();
+    let text = client.await.unwrap();
+    assert!(text.starts_with("HTTP/1.1 204"), "preflight is 204, was: {text}");
+    assert!(text.contains("Access-Control-Allow-Origin: *"), "preflight grants CORS: {text}");
+    assert!(
+        text.to_ascii_lowercase().contains("access-control-allow-headers: authorization"),
+        "preflight must advertise the Authorization header the real request sends: {text}"
+    );
+
+    // --- the real (unauthenticated) request after the preflight: still fail-closed, CORS-readable. ---
+    let client = tokio::spawn(async move {
+        let head = "POST /v1/send HTTP/1.1\r\nHost: node\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".to_string();
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        stream.write_all(head.as_bytes()).await.unwrap();
+        let mut resp = Vec::new();
+        stream.read_to_end(&mut resp).await.unwrap();
+        String::from_utf8_lossy(&resp).into_owned()
+    });
+    let (stream, _peer) = listener.accept().await.unwrap();
+    f.api.handle_connection(&mut f.node, stream, NOW).await.unwrap();
+    let text = client.await.unwrap();
+    assert!(text.starts_with("HTTP/1.1 401"), "the preflight unlocked nothing: {text}");
+    assert!(text.contains("Access-Control-Allow-Origin: *"), "gated responses carry CORS too: {text}");
+    assert_eq!(f.node.outbound_len(), 0, "no MOTE for the unauthenticated request");
+}
+
 // --- H-D: the delivery tick must not be starved by a stream of Send-API connections ----------
 
 /// The send-API serve loop handles connections INLINE (a `Node` is `!Send`); a `biased` select that
