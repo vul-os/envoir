@@ -242,6 +242,65 @@ fn admin_can_rotate_and_revoke_keys() {
 }
 
 #[test]
+fn admin_can_verify_a_live_key_without_side_effects() {
+    let mut f = fixture();
+    let issued = f.api.handle(&mut f.node, &post("/v1/keys", Some(ADMIN), json!({ "env": "prod" })), NOW);
+    let secret = parse(&issued)["secret"].as_str().unwrap().to_string();
+
+    // A live key verifies true, with its environment echoed.
+    let v = f.api.handle(&mut f.node, &post("/v1/keys/verify", Some(ADMIN), json!({ "secret": secret })), NOW + 1);
+    assert_eq!(v.status, 200);
+    assert_eq!(parse(&v)["valid"], true);
+    assert_eq!(parse(&v)["environment"], "prod");
+
+    // Verify is a pure probe: it charged no rate and mutated no key state — the key still sends.
+    let sent = f.api.handle(&mut f.node, &post("/v1/send", Some(&secret), send_body("hello@example.com", &f.to)), NOW + 2);
+    assert_eq!(sent.status, 200);
+    assert_eq!(f.node.outbound_len(), 1);
+}
+
+#[test]
+fn verify_answers_valid_false_for_dead_keys() {
+    let mut f = fixture();
+    // An unknown secret — exactly the shape of a token persisted by a supervisor (the desktop
+    // shell) across a node restart, which this memory-backed key store no longer knows. The probe
+    // answers 200 { valid: false }: a definitive "no" is a successful answer, distinct from the
+    // transport/auth failures that mean "don't mint, stay in seam mode".
+    let unknown =
+        f.api.handle(&mut f.node, &post("/v1/keys/verify", Some(ADMIN), json!({ "secret": "envoir_live_deadbeef" })), NOW);
+    assert_eq!(unknown.status, 200);
+    assert_eq!(parse(&unknown)["valid"], false);
+    assert_eq!(parse(&unknown)["reason"], "unauthorized");
+
+    // A revoked key reports its fail-closed reason too.
+    let key = f.api.service_mut().issue_key(SendScope::account(Environment::Prod), NOW, YEAR);
+    let secret = key.secret().to_string();
+    f.api.service_mut().revoke_key(&secret, NOW).unwrap();
+    let revoked = f.api.handle(&mut f.node, &post("/v1/keys/verify", Some(ADMIN), json!({ "secret": secret })), NOW + 1);
+    assert_eq!(revoked.status, 200);
+    assert_eq!(parse(&revoked)["valid"], false);
+    assert_eq!(parse(&revoked)["reason"], "revoked");
+
+    // A missing secret is a malformed request, not a probe answer.
+    let bad = f.api.handle(&mut f.node, &post("/v1/keys/verify", Some(ADMIN), json!({})), NOW);
+    assert_eq!(bad.status, 400);
+}
+
+#[test]
+fn verify_is_admin_guarded_fail_closed() {
+    let mut f = fixture();
+    // Missing / wrong admin bearer: the probe would otherwise be a key-liveness oracle.
+    let r1 = f.api.handle(&mut f.node, &post("/v1/keys/verify", None, json!({ "secret": "x" })), NOW);
+    assert_eq!(r1.status, 401);
+    let r2 = f.api.handle(&mut f.node, &post("/v1/keys/verify", Some("not-the-admin-token"), json!({ "secret": "x" })), NOW);
+    assert_eq!(r2.status, 401);
+    // No admin token configured ⇒ the route is disabled entirely, like the rest of key management.
+    f.api = SendApi::new(IdentityKey::from_seed(&[7u8; 32]), None);
+    let r3 = f.api.handle(&mut f.node, &post("/v1/keys/verify", Some(ADMIN), json!({ "secret": "x" })), NOW);
+    assert_eq!(r3.status, 403);
+}
+
+#[test]
 fn unknown_route_is_404() {
     let mut f = fixture();
     let key = f.api.service_mut().issue_key(SendScope::account(Environment::Prod), NOW, YEAR);

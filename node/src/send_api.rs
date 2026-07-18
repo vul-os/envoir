@@ -22,9 +22,12 @@
 //!   verifies the key, enforces the [`dmtap_send::SendScope`], charges the rate caveat, resolves the
 //!   recipient, seals the MOTE, and hands it to the node-backed [`Delivery`] seam.
 //! - `POST /v1/keys` — issue a scoped key; `POST /v1/keys/rotate` — rotate; `POST /v1/keys/revoke` —
-//!   revoke. These management routes are guarded by a separate **admin** Bearer token
-//!   ([`SendApi::new`]'s `admin_token`); with no admin token configured they are **disabled**
-//!   (fail-closed), so `/v1/send` still works but keys can never be minted without an explicit secret.
+//!   revoke; `POST /v1/keys/verify` — a side-effect-free liveness probe for a held secret (lets a
+//!   supervisor such as the desktop shell reuse a persisted key only when it is still honored,
+//!   instead of injecting a dead token). These management routes are guarded by a separate **admin**
+//!   Bearer token ([`SendApi::new`]'s `admin_token`); with no admin token configured they are
+//!   **disabled** (fail-closed), so `/v1/send` still works but keys can never be minted without an
+//!   explicit secret.
 //!
 //! ## Fail-closed authentication
 //! Every unknown / revoked / expired / not-yet-valid / foreign / out-of-scope / rate-limited key
@@ -108,7 +111,7 @@ impl SendApi {
 
         // Admin-guarded key-management routes.
         let route = match req.path.as_str() {
-            "/v1/keys" | "/v1/keys/rotate" | "/v1/keys/revoke" => req.path.clone(),
+            "/v1/keys" | "/v1/keys/rotate" | "/v1/keys/revoke" | "/v1/keys/verify" => req.path.clone(),
             _ => return json_response(404, json!({ "error": "not_found", "detail": req.path })),
         };
         if req.method != "POST" {
@@ -121,6 +124,7 @@ impl SendApi {
             "/v1/keys" => self.handle_issue(req, now),
             "/v1/keys/rotate" => self.handle_rotate(req, now),
             "/v1/keys/revoke" => self.handle_revoke(req, now),
+            "/v1/keys/verify" => self.handle_verify(req, now),
             _ => unreachable!("route matched above"),
         }
     }
@@ -190,6 +194,31 @@ impl SendApi {
         match self.service.rotate_key(&secret, now, YEAR_MS) {
             Ok(key) => json_response(200, json!({ "secret": key.secret(), "id": hex(key.content_id().as_bytes()) })),
             Err(e) => send_error_response(&e),
+        }
+    }
+
+    /// `POST /v1/keys/verify`: a **side-effect-free** liveness probe. Body: `{ "secret": "..." }`;
+    /// response `{ "valid": true, "environment": ... }` or `{ "valid": false, "reason": <slug> }`.
+    ///
+    /// Why 200-with-`valid:false` rather than the send route's fail-closed non-2xx: the caller here
+    /// is the *admin* asking a question about a key it holds (e.g. the desktop shell deciding at
+    /// startup whether a persisted send token from a previous run is still honored by this node's
+    /// key store, spec §13.5.1, or must be re-minted). A definitive "no" is a successful answer, and
+    /// keeping it distinct from transport/auth failures lets the supervisor separate "key is dead ⇒
+    /// mint a new one" from "API unreachable / admin misconfigured ⇒ stay in seam mode". The check
+    /// itself is the same fail-closed [`SendService::verify_key`] the send route enforces — verify
+    /// never charges rate, never mutates key state.
+    fn handle_verify(&mut self, req: &HttpRequest, now: TimestampMs) -> HttpResponse {
+        let secret = match body_secret(req) {
+            Ok(s) => s,
+            Err(resp) => return resp,
+        };
+        match self.service.verify_key(&secret, now) {
+            Ok(auth) => json_response(
+                200,
+                json!({ "valid": true, "environment": auth.environment.as_str() }),
+            ),
+            Err(e) => json_response(200, json!({ "valid": false, "reason": error_slug(&e) })),
         }
     }
 

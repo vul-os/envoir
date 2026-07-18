@@ -11,11 +11,17 @@
 //!    restarts) and — if there is no keystore yet — runs `envoir-node init` once to mint the
 //!    identity keystore.
 //! 3. Spawns `envoir-node run` as a Tauri sidecar with the node's real environment (loopback binds,
-//!    JMAP on, the generated app-password, the Send API on), draining its stdout/stderr to the log.
-//! 4. Creates the main window with an initialization script that injects `window.__ENVOIR_NODE__`
+//!    JMAP on, the generated app-password, the Send API on with a generated admin token), draining
+//!    its stdout/stderr to the log.
+//! 4. Provisions the **send capability token** (spec §13.5.1) the client needs for real outbound
+//!    send: reuses the persisted token from a previous launch if the node still honors it
+//!    (`POST /v1/keys/verify`), otherwise mints a fresh scoped key (`POST /v1/keys`, admin-guarded)
+//!    and persists it next to the app-password. Bounded retries, never fatal: on failure the token
+//!    is simply omitted and the client keeps its honest "seam" send mode (`client/js/net/send.js`).
+//! 5. Creates the main window with an initialization script that injects `window.__ENVOIR_NODE__`
 //!    — the exact shape `client/js/store.js::resolveNodeConfig()` reads — so `js/net/sync.js`
-//!    auto-connects in REAL mode with no user configuration.
-//! 5. Kills the sidecar on app exit (`RunEvent::Exit`).
+//!    auto-connects in REAL mode, with real send, with no user configuration.
+//! 6. Kills the sidecar on app exit (`RunEvent::Exit`).
 //!
 //! The node's JMAP listener is loopback-bound and app-password gated; a small CORS allowance on that
 //! listener (see `node/src/jmap_api.rs`) lets the `tauri://` webview origin reach it. CORS is not the
@@ -24,6 +30,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -44,6 +51,15 @@ const APP_USER: &str = "envoir";
 /// externalBin (`binaries/envoir-node-<target-triple>`, see `tauri.conf.json`) next to the app
 /// executable with the triple stripped, so at runtime it is resolved by this **base name**.
 const SIDECAR: &str = "envoir-node";
+/// How many times to poll the just-spawned sidecar's Send API when provisioning the send token
+/// (the listener binds within the daemon's first few hundred ms; each miss waits
+/// [`SEND_TOKEN_RETRY_DELAY`]).
+const SEND_TOKEN_ATTEMPTS: u32 = 25;
+/// Pause between provisioning attempts: 25 × 200 ms ⇒ a ≤ 5 s *bounded* wait — provisioning may
+/// delay first paint slightly on a slow first run, but can never hang startup.
+const SEND_TOKEN_RETRY_DELAY: Duration = Duration::from_millis(200);
+/// Per-request socket budget (connect + read + write) for the one-shot loopback HTTP calls.
+const SEND_API_IO_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Holds the running sidecar child so it can be killed on exit.
 #[derive(Default)]
@@ -111,15 +127,21 @@ fn start_node_and_window(app: &tauri::AppHandle) -> Result<(), Box<dyn std::erro
         .expect("node process lock poisoned")
         .replace(child);
 
-    // Inject the node config the client reads (store.js::resolveNodeConfig). The exact shape:
-    // { enabled, baseUrl, username, appPassword }. serde_json renders a valid JS object literal
-    // (and escapes the secret safely).
-    let node_cfg = serde_json::json!({
-        "enabled": true,
-        "baseUrl": JMAP_BASE_URL,
-        "username": APP_USER,
-        "appPassword": app_password,
-    });
+    // Provision the send capability token (spec §13.5.1) against the just-spawned daemon: reuse the
+    // persisted one when the node still honors it, else mint via the admin-guarded POST /v1/keys.
+    // Fail-safe by design — `None` just omits `sendToken` from the injected config, so the client
+    // stays in its honest seam send mode; a provisioning failure never blocks app startup.
+    let send_token = provision_send_token(&app_data, &send_admin_token);
+    if send_token.is_none() {
+        eprintln!(
+            "envoir-desktop: no send token provisioned — real outbound send disabled, \
+             the client stays in its honest seam send mode"
+        );
+    }
+
+    // Inject the node config the client reads (store.js::resolveNodeConfig). serde_json renders a
+    // valid JS object literal (and escapes the secrets safely).
+    let node_cfg = node_config_json(&app_password, send_token.as_deref());
     let init_script = format!("window.__ENVOIR_NODE__ = {node_cfg};");
 
     WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
@@ -149,6 +171,145 @@ fn node_env(node_dir: &Path, app_password: &str, send_admin_token: &str) -> Hash
     env.insert("ENVOIR_SEND_API_BIND".into(), SEND_API_BIND.into());
     env.insert("ENVOIR_SEND_ADMIN_TOKEN".into(), send_admin_token.into());
     env
+}
+
+/// The `window.__ENVOIR_NODE__` object the client reads (`store.js::resolveNodeConfig`):
+/// `{ enabled, baseUrl, username, appPassword }` plus `sendToken` only when one was actually
+/// provisioned. An *absent* key — not a placeholder — is what keeps `client/js/net/send.js` in its
+/// honest seam mode: the client never gets a token that would 401 on every real send.
+fn node_config_json(app_password: &str, send_token: Option<&str>) -> serde_json::Value {
+    let mut cfg = serde_json::json!({
+        "enabled": true,
+        "baseUrl": JMAP_BASE_URL,
+        "username": APP_USER,
+        "appPassword": app_password,
+    });
+    if let Some(tok) = send_token {
+        cfg["sendToken"] = serde_json::Value::String(tok.to_string());
+    }
+    cfg
+}
+
+/// Obtain the send capability token (spec §13.5.1) that authorizes the client's `POST /v1/send`.
+///
+/// Order of preference, polled for up to [`SEND_TOKEN_ATTEMPTS`] × [`SEND_TOKEN_RETRY_DELAY`]
+/// while the just-spawned daemon's Send API comes up:
+/// 1. **Reuse** the token persisted by a previous launch — but only after the node confirms it is
+///    still honored (`POST /v1/keys/verify`). The node's send-key store is memory-backed today, so
+///    a persisted secret is dead after every node restart; injecting it unverified would turn each
+///    send into a `401` instead of the client's honest no-token seam mode. Ask, don't assume.
+/// 2. **Mint** a fresh account-scoped prod key (`POST /v1/keys`, node-side default 1-year TTL) and
+///    persist it next to the app-password (0600) so the next launch can attempt reuse.
+///
+/// Every failure path — API never comes up, admin routes disabled, malformed response — logs and
+/// returns `None` (⇒ seam mode). Startup is delayed at most by the bounded retry budget, never
+/// blocked indefinitely.
+fn provision_send_token(app_data: &Path, admin_token: &str) -> Option<String> {
+    let token_path = app_data.join("send-token");
+    let persisted = std::fs::read_to_string(&token_path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    for attempt in 0..SEND_TOKEN_ATTEMPTS {
+        if attempt > 0 {
+            std::thread::sleep(SEND_TOKEN_RETRY_DELAY);
+        }
+        // Reuse path: a definitive `valid:false` falls through to minting a replacement in this same
+        // attempt; a transport error means the API is not up yet, so retry the whole attempt.
+        if let Some(tok) = &persisted {
+            match send_api_post("/v1/keys/verify", admin_token, &serde_json::json!({ "secret": tok })) {
+                Ok((200, v)) if v["valid"] == true => return Some(tok.clone()),
+                Ok((200, _)) => {} // node no longer honors it (e.g. restarted) → mint below
+                Ok((status @ (401 | 403), v)) => {
+                    // The admin gate itself refused — minting would fail identically, so stop here.
+                    eprintln!("envoir-desktop: send-token verify refused (HTTP {status}): {v}");
+                    return None;
+                }
+                // Any other status (e.g. a 404 from an older sidecar without /v1/keys/verify): the
+                // probe is inconclusive but the mint route may still work — fall through and mint.
+                Ok((_, _)) => {}
+                Err(_) => continue,
+            }
+        }
+        match send_api_post("/v1/keys", admin_token, &serde_json::json!({ "env": "prod" })) {
+            Ok((200, v)) => {
+                let Some(secret) = v["secret"].as_str() else {
+                    eprintln!("envoir-desktop: /v1/keys returned 200 without a secret: {v}");
+                    return None;
+                };
+                // Persist for the next launch's reuse attempt; a write failure is not fatal — the
+                // in-memory token still serves this run.
+                match std::fs::write(&token_path, secret) {
+                    Ok(()) => restrict_permissions(&token_path),
+                    Err(e) => eprintln!("envoir-desktop: could not persist the send token: {e}"),
+                }
+                return Some(secret.to_string());
+            }
+            Ok((status, v)) => {
+                eprintln!("envoir-desktop: send-token mint refused (HTTP {status}): {v}");
+                return None;
+            }
+            Err(_) => continue,
+        }
+    }
+    eprintln!("envoir-desktop: Send API on {SEND_API_BIND} did not answer within the retry budget");
+    None
+}
+
+/// One-shot loopback HTTP/1.1 POST to the sidecar's Send API, hand-rolled over `std::net` — the
+/// same framework-free plumbing the node's own listeners use (`node/src/send_api.rs`); no HTTP
+/// client dependency for two loopback calls. Returns `(status, parsed JSON body)`; a non-JSON body
+/// parses as `Null` (the status still tells the caller what happened).
+fn send_api_post(
+    path: &str,
+    admin_token: &str,
+    body: &serde_json::Value,
+) -> std::io::Result<(u16, serde_json::Value)> {
+    use std::io::{Read as _, Write as _};
+    let addr: std::net::SocketAddr = SEND_API_BIND
+        .parse()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("bad bind: {e}")))?;
+    let mut stream = std::net::TcpStream::connect_timeout(&addr, SEND_API_IO_TIMEOUT)?;
+    stream.set_read_timeout(Some(SEND_API_IO_TIMEOUT))?;
+    stream.set_write_timeout(Some(SEND_API_IO_TIMEOUT))?;
+    let payload = serde_json::to_vec(body)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    stream.write_all(&http_post_request(path, admin_token, &payload))?;
+    // `Connection: close` on the request ⇒ the node closes after one response, so EOF frames it.
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw)?;
+    let (status, resp_body) = parse_http_response(&raw)
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "malformed HTTP response"))?;
+    Ok((status, serde_json::from_slice(&resp_body).unwrap_or(serde_json::Value::Null)))
+}
+
+/// Build the raw HTTP/1.1 request bytes for an admin-guarded Send-API POST: admin Bearer token,
+/// JSON body, and `Connection: close` so the response is EOF-delimited (no chunked/keep-alive
+/// parsing needed on our side).
+fn http_post_request(path: &str, bearer: &str, body: &[u8]) -> Vec<u8> {
+    let head = format!(
+        "POST {path} HTTP/1.1\r\nHost: {SEND_API_BIND}\r\nAuthorization: Bearer {bearer}\r\n\
+         Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let mut out = head.into_bytes();
+    out.extend_from_slice(body);
+    out
+}
+
+/// Parse a raw HTTP/1.1 response into `(status, body)`. Only the status line matters here — the
+/// request asked for `Connection: close`, so everything past the header terminator is the body.
+fn parse_http_response(raw: &[u8]) -> Option<(u16, Vec<u8>)> {
+    let header_end = raw.windows(4).position(|w| w == b"\r\n\r\n")?;
+    let head = std::str::from_utf8(&raw[..header_end]).ok()?;
+    let status_line = head.split("\r\n").next()?;
+    let mut parts = status_line.split_whitespace();
+    if !parts.next()?.starts_with("HTTP/1.") {
+        return None;
+    }
+    let status: u16 = parts.next()?.parse().ok()?;
+    Some((status, raw[header_end + 4..].to_vec()))
 }
 
 /// Run `envoir-node init` once and wait for it to finish, draining its output to the log.
@@ -303,5 +464,61 @@ mod tests {
         // Every bind is loopback — nothing exposed off the machine.
         assert!(env["ENVOIR_NODE_BIND"].starts_with("127.0.0.1"));
         assert!(env["ENVOIR_SEND_API_BIND"].starts_with("127.0.0.1"));
+    }
+
+    #[test]
+    fn injected_config_carries_send_token_only_when_provisioned() {
+        // With a provisioned token: the full REAL-mode shape store.js::resolveNodeConfig reads.
+        let with = node_config_json("pw", Some("envoir_live_abc"));
+        assert_eq!(with["enabled"], true);
+        assert_eq!(with["baseUrl"], "http://127.0.0.1:4700");
+        assert_eq!(with["username"], "envoir");
+        assert_eq!(with["appPassword"], "pw");
+        assert_eq!(with["sendToken"], "envoir_live_abc");
+
+        // Without: the KEY is absent (not empty/placeholder) — that's what keeps the client's
+        // net/send.js in its honest seam mode instead of 401-ing on a dead token.
+        let without = node_config_json("pw", None);
+        assert!(without.get("sendToken").is_none());
+        assert_eq!(without["appPassword"], "pw");
+    }
+
+    #[test]
+    fn injected_config_renders_as_a_safe_js_object_literal() {
+        // The init script embeds the JSON directly; serde_json must escape hostile secret bytes so
+        // they can never break out of the string literal into script context.
+        let cfg = node_config_json("p\"w</script>", Some("t'ok\\en"));
+        let rendered = format!("window.__ENVOIR_NODE__ = {cfg};");
+        assert!(!rendered.contains("p\"w"), "quote must be escaped: {rendered}");
+        let round: serde_json::Value =
+            serde_json::from_str(rendered.trim_start_matches("window.__ENVOIR_NODE__ = ").trim_end_matches(';'))
+                .unwrap();
+        assert_eq!(round["appPassword"], "p\"w</script>");
+        assert_eq!(round["sendToken"], "t'ok\\en");
+    }
+
+    #[test]
+    fn http_post_request_is_wellformed() {
+        let req = http_post_request("/v1/keys", "admintok", b"{\"env\":\"prod\"}");
+        let text = String::from_utf8(req).unwrap();
+        assert!(text.starts_with("POST /v1/keys HTTP/1.1\r\n"));
+        assert!(text.contains("\r\nHost: 127.0.0.1:4610\r\n"));
+        assert!(text.contains("\r\nAuthorization: Bearer admintok\r\n"));
+        assert!(text.contains("\r\nContent-Length: 14\r\n"));
+        // Connection: close is load-bearing: send_api_post frames the response by EOF.
+        assert!(text.contains("\r\nConnection: close\r\n"));
+        assert!(text.ends_with("\r\n\r\n{\"env\":\"prod\"}"));
+    }
+
+    #[test]
+    fn parse_http_response_extracts_status_and_body() {
+        let ok = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"secret\":\"s\"}";
+        assert_eq!(parse_http_response(ok), Some((200, b"{\"secret\":\"s\"}".to_vec())));
+        // Status without a body (the admin-refused case still carries its code).
+        assert_eq!(parse_http_response(b"HTTP/1.1 403 Forbidden\r\n\r\n").unwrap().0, 403);
+        // Malformed responses are None, never a bogus (status, body).
+        assert!(parse_http_response(b"no header terminator here").is_none());
+        assert!(parse_http_response(b"SMTP 220 hi\r\n\r\n").is_none());
+        assert!(parse_http_response(b"HTTP/1.1 notanumber OK\r\n\r\n").is_none());
     }
 }
