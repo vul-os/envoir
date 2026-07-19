@@ -149,7 +149,8 @@ malformed. Different bugs, different fixes — and a caller that has to regex-ma
 
 | Artifact | Raw | Gzipped |
 |---|---|---|
-| `pkg-node/dmtap_sync_bg.wasm` | 577 KB | 223 KB |
+| `pkg-node/dmtap_sync_bg.wasm` (`--target nodejs`) | 577 KB | 223 KB |
+| `pkg/dmtap_sync_bg.wasm` (`--target bundler`) | 601 KB | 232 KB |
 
 Reported honestly rather than rounded down: **this is bigger than it needs to be.** The Sync algebra
 itself is small; the bulk is `dmtap-core`'s suite-`0x02` post-quantum stack (`ml-dsa`, `x-wing`,
