@@ -2,10 +2,12 @@
   "name": "envoir",
   "private": true,
   "version": "0.0.0",
-  "description": "Envoir monorepo tooling. See docs/SCREENSHOTS.md for the screenshotter.",
+  "description": "Envoir monorepo tooling. See docs/SCREENSHOTS.md for the screenshotter and crates/dmtap-sync-wasm/README.md for the WASM sync binding.",
   "type": "module",
   "scripts": {
     "screenshotter": "node docs/capture-screenshots.mjs",
-    "test:client": "node --test 'client/test/**/*.test.mjs'"
+    "test:client": "node --test 'client/test/**/*.test.mjs'",
+    "test:sync-wasm": "node --test 'crates/dmtap-sync-wasm/test/*.test.mjs'",
+    "build:sync-wasm": "./crates/dmtap-sync-wasm/build.sh"
   }
 }

@@ -1,0 +1,163 @@
+{
+  "note": "Recorded by `cargo test -p dmtap-sync-wasm --test native_trace` from dmtap-sync directly (no wasm, no JS). `test/vectors.test.mjs` asserts the WASM binding reproduces every value here byte-for-byte — see substrate/BINDINGS.md §4.",
+  "receiver_now_ms": 1700000900000,
+  "trace": {
+    "sync_author_unauthorized": {
+      "admitted_0_ok": "true",
+      "admitted_1_ok": "true",
+      "op_author": "814722de71c5b14e748dff322ae7f7c415cee558766495292cd6c4c0a6a9df28",
+      "refusal": "0x0A01 ERR_SYNC_AUTHOR_UNAUTHORIZED FAIL_CLOSED_BLOCK"
+    },
+    "sync_death_domination": {
+      "add_outranks_death": "true",
+      "present_add_first": "false",
+      "present_death_first": "false"
+    },
+    "sync_death_tie_failsafe": {
+      "hlcs_tie": "true",
+      "state_death_first": "deleted:redact",
+      "state_live_first": "deleted:redact"
+    },
+    "sync_gc_stability_cut": {
+      "cut": "a3011b0000018bcfe6eea0020a035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb",
+      "cut_counter": "10",
+      "pruned_something": "true",
+      "stale_drags_cut_down": "true",
+      "state_after_gc": "86808080808080",
+      "state_before_gc": "86808080808080",
+      "unknown_watermark_cut": "null",
+      "with_stale": "a3011b0000018bcfe6eea0020303582068460ebef3b138164ec7fd8610e95800df7598f70f2f2ea7db5172ac74ebc144"
+    },
+    "sync_lww_exact_tie": {
+      "forward_root": "1e975bd1a001091cb4f223323fb3b6b09342e40743b5defe9fdf4ab96d77165ff5",
+      "reverse_root": "1e975bd1a001091cb4f223323fb3b6b09342e40743b5defe9fdf4ab96d77165ff5",
+      "reverse_winner_hlc": "a3011b0000018bcfe6eea00205035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb",
+      "reverse_winner_value": "616e",
+      "winner_hlc": "a3011b0000018bcfe6eea00205035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb",
+      "winner_value": "616e",
+      "winner_value_text": "n"
+    },
+    "sync_lww_hlc_winner": {
+      "forward_root": "1e975bd1a001091cb4f223323fb3b6b09342e40743b5defe9fdf4ab96d77165ff5",
+      "reverse_root": "1e975bd1a001091cb4f223323fb3b6b09342e40743b5defe9fdf4ab96d77165ff5",
+      "reverse_winner_hlc": "a3011b0000018bcfe6eea00201035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb",
+      "reverse_winner_value": "616e",
+      "winner_hlc": "a3011b0000018bcfe6eea00201035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb",
+      "winner_value": "616e",
+      "winner_value_text": "n"
+    },
+    "sync_ns_cross_namespace_ref_rejected": {
+      "op_ns": "x",
+      "ref_target": "other-target",
+      "refusal": "0x0A0A ERR_SYNC_NS_LEAK FAIL_CLOSED_BLOCK",
+      "same_ns_ok": "true"
+    },
+    "sync_ns_sparse_scoping": {
+      "shipped": "a5010102617803656974656d3105617606a3011b0000018bcfe6eea00200035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb",
+      "shipped_ns": "x"
+    },
+    "sync_op_cose_sign1_bind": {
+      "author": "ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb",
+      "cose": "845826a20127045820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeba0583fa60103026003616104617805617606a3011b0000018bcfe6eea00200035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb584054d80d8c792de1595d7f2686efb26b5e8e8a572760091070254aa8009e36b380eb14cfbe28dfbd9b68b77727333f32bdb497fee6d692177a6927232f0fa3180a",
+      "external_aad": "444d5441502d53594e432d76302f6f7000",
+      "foreign_ds_tag": "0x0A02 ERR_SYNC_OP_SIG_INVALID FAIL_CLOSED_BLOCK",
+      "op_id": "1e0fbb168d0841e8a865e8eb2270ee6b70b4eaeb1500816e32519bbbfa4393b145",
+      "payload_bstr": "583fa60103026003616104617805617606a3011b0000018bcfe6eea00200035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb",
+      "protected_bstr": "5826a20127045820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb",
+      "sig_structure": "846a5369676e6174757265315826a20127045820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb51444d5441502d53594e432d76302f6f7000583fa60103026003616104617805617606a3011b0000018bcfe6eea00200035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb",
+      "signature": "54d80d8c792de1595d7f2686efb26b5e8e8a572760091070254aa8009e36b380eb14cfbe28dfbd9b68b77727333f32bdb497fee6d692177a6927232f0fa3180a",
+      "substituted_kid": "0x0A02 ERR_SYNC_OP_SIG_INVALID FAIL_CLOSED_BLOCK",
+      "tampered": "0x0A02 ERR_SYNC_OP_SIG_INVALID FAIL_CLOSED_BLOCK",
+      "unprotected": "a0",
+      "verified_op": "a60103026003616104617805617606a3011b0000018bcfe6eea00200035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb"
+    },
+    "sync_op_lww_canonical": {
+      "noncanonical": "0x0A03 ERR_SYNC_OP_INVALID FAIL_CLOSED_BLOCK",
+      "op_cbor": "a60103026003616104617805617606a3011b0000018bcfe6eea00200035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb",
+      "op_id": "1e0fbb168d0841e8a865e8eb2270ee6b70b4eaeb1500816e32519bbbfa4393b145",
+      "reencoded": "a60103026003616104617805617606a3011b0000018bcfe6eea00200035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb"
+    },
+    "sync_orset_add_wins": {
+      "members": "tags=626531",
+      "present_forward": "true",
+      "present_reverse": "true",
+      "surviving_count": "1",
+      "surviving_hlc": "a3011b0000018bcfe6eea00202035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb"
+    },
+    "sync_orset_future_add_remove_rejected": {
+      "ingest": "0x0A03 ERR_SYNC_OP_INVALID FAIL_CLOSED_BLOCK",
+      "validate": "0x0A03 ERR_SYNC_OP_INVALID FAIL_CLOSED_BLOCK"
+    },
+    "sync_pn_counter_convergence": {
+      "distinct_op_ids": "2",
+      "distinct_total": "3",
+      "entries": "68460ebef3b138164ec7fd8610e95800df7598f70f2f2ea7db5172ac74ebc144:0:2,ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb:5:0",
+      "replay_entries": "68460ebef3b138164ec7fd8610e95800df7598f70f2f2ea7db5172ac74ebc144:0:2,ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb:5:0",
+      "replay_total": "3",
+      "total": "3"
+    },
+    "sync_pn_counter_foreign_reject": {
+      "own_entry_ok": "true",
+      "refusal": "0x0A06 ERR_SYNC_COUNTER_FOREIGN FAIL_CLOSED_BLOCK"
+    },
+    "sync_recon_range_merkle_diff": {
+      "empty_count": "0",
+      "empty_fp": "1e0b2ce56c5d28f89f03a08014bf3b0c5270c9a2651d78ad4a9ac15a26964b31e2",
+      "full_A_count": "3",
+      "full_A_fp": "1e1e63d3895b957f993f61f629f2b9326d73030e37d3c5e54e8fb5ab4bfe360cee",
+      "full_B_count": "2",
+      "full_B_fp": "1e85fa9f4ce96c9ac595444162fa97c0abbb88c8514ee52bb72767610146536a19",
+      "op_id_r1": "1ea4937bf71467929f54da15e10b30d5a6b932b29e46d4ae9547707bbbfb28017d",
+      "op_id_r2": "1ef2567ea84c49db6b9b3dccc814cdc3e938b1eb1d400a9656a7ad43a71639d461",
+      "op_id_r3": "1ed30ff86c7dd24e1adb6329add9a9eca57bceb15dc571154e2161866ca5e5fc37",
+      "shipped_to_A": "",
+      "shipped_to_B": "1ed30ff86c7dd24e1adb6329add9a9eca57bceb15dc571154e2161866ca5e5fc37",
+      "sub1_A_count": "1",
+      "sub1_A_fp": "1ec812e47957b80a6acbb056e35044de58845ae316ef57ba30f12a603075166478",
+      "sub1_B_count": "1",
+      "sub1_B_fp": "1ec812e47957b80a6acbb056e35044de58845ae316ef57ba30f12a603075166478",
+      "sub2_A_count": "2",
+      "sub2_A_fp": "1ef4ed09234d7fd6a0db995f405ec7fcb361895542a5b15a9f6592dd844095312d",
+      "sub2_B_count": "1",
+      "sub2_B_fp": "1ecaa6e28d7304b7056d8f3e4e4ae8e8b580dac49a83ebf09a6ef001c6a91e0447"
+    },
+    "sync_rga_concurrent_sibling_order": {
+      "ids_forward": "a3011b0000018bcfe6eea00200035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb,a3011b0000018bcfe6eea00204035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb,a3011b0000018bcfe6eea00203035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb",
+      "ids_reverse": "a3011b0000018bcfe6eea00200035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb,a3011b0000018bcfe6eea00204035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb,a3011b0000018bcfe6eea00203035820ca57eed30e4a7274ef4c648f56f58f880b20d2ca25725d9e5c13c83c08c09aeb",
+      "values_forward": "atom0,Y,X",
+      "values_reverse": "atom0,Y,X"
+    },
+    "sync_rga_insert_after_tombstone": {
+      "labels": "x(tombstoned),Z",
+      "resolves": "true",
+      "visible": "Z"
+    },
+    "sync_snapshot_fast_join_equals_replay": {
+      "fast_join_state": "8681826474616773626531818364646f6331657469746c65617081836673746f636b31637174790381826472656331667265646163748182656c696e6531836561746f6d30615961588283614161426131836142606162",
+      "root": "1e89b11f055b4a1625601b5f2520ff5db25f311f265d2e84e878e39aec04854424",
+      "snapshot_root_recomputed": "1e63918ccc89f4d158e4dda9b09510876d87205348efd6093713379b598559119a"
+    },
+    "sync_snapshot_root_determinism": {
+      "diverged_root": "1e7d72152a08cdd25e671f80101c8ebe7b155a0378dee02418f7c9692304a04cbe",
+      "empty_cbor": "86808080808080",
+      "empty_root": "1e1610e4e4daff4ab509238e06cd1674e22045cade2d8e079acb167834548826b6",
+      "root": "1e63918ccc89f4d158e4dda9b09510876d87205348efd6093713379b598559119a",
+      "roundtrip_cbor": "8681826474616773626531818364646f6331657469746c65616e81836673746f636b31637174790381826472656331667265646163748182656c696e6531836561746f6d30615961588283614161426131836142606162",
+      "shuffled_cbor": "8681826474616773626531818364646f6331657469746c65616e81836673746f636b31637174790381826472656331667265646163748182656c696e6531836561746f6d30615961588283614161426131836142606162",
+      "state_cbor": "8681826474616773626531818364646f6331657469746c65616e81836673746f636b31637174790381826472656331667265646163748182656c696e6531836561746f6d30615961588283614161426131836142606162"
+    },
+    "sync_tree_concurrent_move_cycle": {
+      "acyclic_0": "true",
+      "acyclic_1": "true",
+      "acyclic_2": "true",
+      "edges_0": "A>B:1,B>:b",
+      "edges_1": "A>B:1,B>:b",
+      "edges_2": "A>B:1,B>:b",
+      "h1_before_h2": "true",
+      "skipped_0": "h2",
+      "skipped_1": "h2",
+      "skipped_2": "h2"
+    }
+  },
+  "vectors_sha_note": "traces the frozen sync_vectors.json in the sibling dmtap repo"
+}

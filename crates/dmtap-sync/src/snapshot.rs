@@ -228,6 +228,15 @@ impl Snapshot {
         p
     }
 
+    /// The DS-tagged signing preimage, for a signer that holds the key **outside this process** —
+    /// a hardware token, a remote signing service, or a browser `CryptoKey` that is deliberately
+    /// non-extractable (see the `dmtap-sync-wasm` binding). Sign these bytes with Ed25519 under
+    /// `signer`, put the result in `sig`, and [`Snapshot::verify_sig`] will accept it exactly as if
+    /// [`Snapshot::create`] had produced it.
+    pub fn signing_preimage(&self) -> Vec<u8> {
+        self.preimage()
+    }
+
     /// Mint a signed snapshot of `state` at its current vector.
     pub fn create(sk: &IdentityKey, suite: u8, ns: &str, state: &SyncState, ts: u64) -> Snapshot {
         let mut s = Snapshot {
