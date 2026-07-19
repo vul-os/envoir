@@ -55,9 +55,9 @@ COPY --from=builder /src/target/release/envoir-gateway /usr/local/bin/envoir-gat
 USER envoir
 WORKDIR /data
 
-# GATEWAY_LISTEN default is 127.0.0.1:2525 (gateway/src/main.rs) — unlike the node's serve-mail,
-# this IS operator-configurable; docker-compose.yml sets it to 0.0.0.0:2525 so the published port
-# actually works. 2525 (not 25) so no root/cap_net_bind_service is needed for this non-root user.
+# GATEWAY_LISTEN default is 127.0.0.1:2525 (gateway/src/main.rs) — operator-configurable via env,
+# same as the node's ENVOIR_NODE_BIND; docker-compose.yml sets it to 0.0.0.0:2525 so the published
+# port actually works. 2525 (not 25) so no root/cap_net_bind_service is needed for this non-root user.
 EXPOSE 2525
 
 ENTRYPOINT ["/usr/local/bin/envoir-gateway"]

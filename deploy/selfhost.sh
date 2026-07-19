@@ -51,8 +51,10 @@ case "$cmd" in
         compose up -d
         echo
         echo "Started. Gateway inbound MX listening on \${GATEWAY_PORT:-2525} (host)."
-        echo "Node's serve-mail demo is running but its ports are NOT reliably reachable via"
-        echo "docker-compose port publishing — see deploy/README.md 'Testing the node demo servers'."
+        echo "Node mesh transport listening on \${NODE_MESH_PORT:-4600} (host)."
+        echo "First time only: create the node's identity keystore with"
+        echo "  docker compose -f deploy/docker-compose.yml run --rm node init"
+        echo "See deploy/README.md for the full rundown."
         echo
         echo "  $0 logs   # follow logs"
         echo "  $0 ps     # status"

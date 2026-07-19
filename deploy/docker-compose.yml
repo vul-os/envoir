@@ -36,9 +36,9 @@ services:
       # IMPORTANT: the binary's own default is 127.0.0.1:2525 (loopback-only). We override it to
       # 0.0.0.0 here so the `ports:` mapping below actually reaches the process — verified: with
       # GATEWAY_LISTEN=127.0.0.1:2525 the published port accepts the TCP connection but the
-      # gateway never sees it (same class of issue as the node's serve-mail, see below); with
-      # 0.0.0.0:2525 a real "220 envoir-gateway DMTAP MX ready" banner comes back through the
-      # published port.
+      # gateway never sees it; with 0.0.0.0:2525 a real "220 envoir-gateway DMTAP MX ready" banner
+      # comes back through the published port. (The node service below has the same class of
+      # loopback-vs-published-port pitfall for its own opt-in listeners — see its comment.)
       - GATEWAY_LISTEN=0.0.0.0:2525
       - GATEWAY_GW_SELECTOR=${GATEWAY_GW_SELECTOR:-gw1}
       # DNS server used for outbound MX/TXT/MTA-STS lookups (a raw hand-rolled UDP client, not the
@@ -65,45 +65,39 @@ services:
     restart: unless-stopped
 
   # -----------------------------------------------------------------------------------------
-  # node — the reference DMTAP client (node/src/main.rs). Its default command, `serve-mail`, is
-  # an explicitly-labelled DEMO: an in-memory MOTE-store projection (wiped on every restart) with
-  # ONE fixed hardcoded credential (owner@dmtap.local / app-password), serving IMAP/POP3/SMTP-
-  # submission on localhost. It is useful to poke at the §8 client protocols; it is NOT a
-  # persistent, multi-user, or production mailbox.
+  # node — the reference DMTAP client (node/src/main.rs). Its default command, `run` (alias
+  # `serve`), is the real long-running daemon (node/src/daemon.rs::serve): it loads the identity
+  # keystore + durable outbound journal from $ENVOIR_DATA_DIR (the node-data volume below), binds
+  # the mesh transport on $ENVOIR_NODE_BIND (default 0.0.0.0:4600 — Docker-reachable by default),
+  # and serves until SIGINT/SIGTERM. IMAP/POP3/SMTP-submission are NOT part of this image — those
+  # legacy client protocols live only on the `gateway` service above (node/Cargo.toml).
   #
-  # PORT-PUBLISHING CAVEAT (verified empirically with `docker build`/`docker run` against these
-  # exact images): `serve-mail` hard-codes its listeners to 127.0.0.1 *inside the process* — this
-  # is not configurable via flag or env var today (node/src/main.rs has no bind-address knob at
-  # all). A container's `ports:` mapping is implemented by (in this environment) NAT'ing to the
-  # loopback interface *inside the container's own network namespace*, which some Docker network
-  # backends honor and some don't — we observed the published port accept the TCP handshake but
-  # the app never receiving the bytes (immediate EOF, no IMAP greeting), i.e. it did NOT work
-  # here. Do not assume `ports:` below makes this reachable on your host; verify it yourself
-  # (see deploy/README.md "Testing the node demo servers"), and prefer one of:
-  #   - `docker compose exec node <tool>` / another container run with
-  #     `--network container:<the node container>` (always works — same netns),
-  #   - the commented `network_mode: "host"` block below (Linux hosts only).
+  # FIRST RUN: the daemon requires a keystore to already exist and refuses to start without one
+  # (fail-closed, `DaemonError::NoKeystore`) — create it once before the first `up`:
+  #   docker compose -f deploy/docker-compose.yml run --rm node init
+  # (`init` persists a real keystore under the `node-data` volume — encrypted-at-rest if
+  # ENVOIR_PASSPHRASE is set, else a clearly-marked plaintext-for-dev keystore; see
+  # deploy/README.md "Keys, journal, and what's actually persisted" — and refuses to overwrite an
+  # existing one unless ENVOIR_FORCE_INIT=1.)
+  #
+  # The JMAP client-sync surface, the Envoir Send HTTP API, DMTAP-PUB, and the Sync surface are
+  # all opt-in (off by default) via ENVOIR_JMAP / ENVOIR_SEND_API / ENVOIR_PUB_SERVE /
+  # ENVOIR_SYNC_SERVE — see deploy/.env.example and node/src/config.rs for the full var list. None
+  # are published below; add a `ports:` entry (and the matching `ENVOIR_*_BIND=0.0.0.0:...`
+  # override for anything that defaults to loopback, e.g. JMAP) if you enable and need to reach
+  # one from outside the container.
   node:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.node
     image: envoir-node:local
+    environment:
+      - ENVOIR_DATA_DIR=/data
     ports:
-      - "1143:1143" # IMAP            — see the port-publishing caveat above
-      - "1110:1110" # POP3            — see the port-publishing caveat above
-      - "1587:1587" # SMTP submission — see the port-publishing caveat above
-    # Linux-only alternative to `ports:` above — shares the host's network namespace, so the
-    # process's 127.0.0.1:114x/1587 bindings become the HOST's own loopback (reachable at
-    # localhost on the Docker host itself, not from other machines). Comment out `ports:` above
-    # if you enable this (Compose rejects both on the same service). Not reliable on Docker
-    # Desktop for Mac/Windows depending on version — test before relying on it.
-    # network_mode: "host"
+      - "${NODE_MESH_PORT:-4600}:4600" # the mesh transport (ENVOIR_NODE_BIND)
     volumes:
-      # NOT wired to any CLI flag today (see deploy/README.md "Keys, journal, and what's actually
-      # persisted"): `envoir-node init` prints identity key material to stdout only, and the
-      # library-level durable journal (node/src/journal.rs::FileJournal) isn't yet exposed by any
-      # subcommand. This volume is reserved so you have somewhere durable to redirect/copy
-      # whatever you choose to persist by hand until that lands.
+      # Holds keystore.json (the identity, spec §1.2/§1.4) and journal.json (the durable outbound
+      # retry queue, spec §19.3.3) — both real, written by `init`/`run` respectively.
       - node-data:/data
     restart: unless-stopped
 

@@ -14,13 +14,12 @@
 # Verified against the real workspace: `cargo build --release -p envoir-node` builds the
 # `envoir-node` binary (node/src/main.rs) with no invented flags or features.
 #
-# Builder pin: the crate manifests declare rust-version = "1.75", but with no Cargo.lock
-# committed upstream, cargo resolves the newest semver-compatible transitive deps at build
-# time — and as of this writing that pulls in a `zeroize_derive` version requiring the
-# `edition2024` feature, which only stabilized in Rust 1.85. 1.90-slim-bookworm is pinned here
-# because it was verified (via `docker build`) to compile the workspace; 1.82-slim-bookworm was
-# tried first and failed with exactly that edition2024 error. Generate and commit your own
-# Cargo.lock for a reproducible, possibly-older-toolchain-compatible build.
+# Builder pin: the crate manifests declare rust-version = "1.75", but the committed workspace
+# Cargo.lock (repo root, copied in below and tracked in git — it is NOT .gitignore'd) pins a
+# transitive dep (`zeroize_derive`) that needs the edition2024 feature, which only stabilized in
+# Rust 1.85. 1.90-slim-bookworm is pinned here because it was verified (via `docker build`) to
+# compile the workspace; 1.82-slim-bookworm was tried first and failed with exactly that
+# edition2024 error.
 
 FROM rust:1.90-slim-bookworm AS builder
 WORKDIR /src
@@ -33,22 +32,24 @@ WORKDIR /src
 # conformance-runner, downgrade-tests, netsim) are copied for that manifest-resolution reason,
 # not because their code is built into this image.
 COPY Cargo.toml ./Cargo.toml
+COPY Cargo.lock ./Cargo.lock
 COPY node ./node
 COPY gateway ./gateway
 COPY crates ./crates
 COPY integration ./integration
 
-# No Cargo.lock is committed upstream (repo .gitignore excludes it), so this is a fresh
-# dependency resolution at build time, not a pinned/reproducible one — see deploy/README.md.
-RUN cargo build --release -p envoir-node
+# --locked: the root Cargo.lock is the workspace's authoritative, tested dependency resolution
+# (deploy/Dockerfile.gateway builds with it too) — fail the build rather than silently
+# re-resolving, so the image can never drift from the dependency set the test suite ran against.
+RUN cargo build --release --locked -p envoir-node
 
 # ---------------------------------------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime
 
-# envoir-node's actual runtime dependencies, verified against the crates it links:
-#   - rustls (ring provider) + embedded webpki-roots for the mail-client TLS surfaces pulled in
-#     via dmtap-mail's "net" feature — no system OpenSSL/ca-certificates needed.
-#   - the raw-socket DNS/SMTP code lives in the *gateway*, not the node.
+# envoir-node's actual runtime dependencies, verified against node/Cargo.toml and the crates it
+# links: no TLS crate (dmtap-mail's `net` feature is NOT enabled for the node — legacy
+# IMAP/POP3/SMTP-submission live only on the gateway, see node/Cargo.toml's own comment), no
+# system OpenSSL/ca-certificates, no raw-socket DNS/SMTP code (that lives in the gateway too).
 # So the runtime image needs nothing beyond glibc + libgcc, both already in debian-slim.
 RUN groupadd --system --gid 10001 envoir \
     && useradd --system --uid 10001 --gid envoir --home-dir /data --shell /usr/sbin/nologin envoir \
@@ -60,15 +61,22 @@ COPY --from=builder /src/target/release/envoir-node /usr/local/bin/envoir-node
 USER envoir
 WORKDIR /data
 
-# IMAP 1143, POP3 1110, SMTP-submission 1587 — the fixed ports `serve-mail` binds (node/src/main.rs).
-# IMPORTANT (see deploy/README.md): serve-mail hard-codes these to bind on 127.0.0.1 inside the
-# process, so a plain `-p`/`ports:` publish will NOT make them reachable from outside the
-# container (Docker's port-publish DNATs to the container's external interface, not its loopback).
-# EXPOSE is documentation of intent, not a claim that publishing works out of the box.
-EXPOSE 1143 1110 1587
+# The node's own listeners (node/src/config.rs) — legacy IMAP/POP3/SMTP-submission live only on
+# the separate `envoir-gateway` binary (see Dockerfile.gateway), not here.
+#   4600 — the mesh transport (ENVOIR_NODE_BIND, default 0.0.0.0:4600 — Docker-reachable by
+#          default, unlike a loopback default would be).
+# The rest are opt-in and off by default, so they are not EXPOSEd: the Envoir Send HTTP API
+# (ENVOIR_SEND_API / ENVOIR_SEND_API_BIND, default 0.0.0.0:4610), JMAP (ENVOIR_JMAP /
+# ENVOIR_JMAP_BIND, default 127.0.0.1:4700 — loopback, so publishing it needs an explicit
+# off-localhost bind + TLS front), DMTAP-PUB (ENVOIR_PUB_SERVE / ENVOIR_PUB_BIND, default
+# 0.0.0.0:4680), and Sync (ENVOIR_SYNC_SERVE / ENVOIR_SYNC_BIND, default 127.0.0.1:4690).
+EXPOSE 4600
 
 ENTRYPOINT ["/usr/local/bin/envoir-node"]
-# `serve-mail` is the only subcommand that behaves like a long-running server (it blocks forever);
-# `init`, `run`, and `version` each do one thing and exit — invoke them with
-# `docker compose run --rm node <subcommand>` instead of relying on the default CMD.
-CMD ["serve-mail"]
+# `run` (alias `serve`) is the long-running daemon (it blocks forever, serving until
+# SIGINT/SIGTERM) — see node/src/main.rs and node/src/daemon.rs. It requires a keystore to
+# already exist at $ENVOIR_DATA_DIR/keystore.json: run `docker compose run --rm node init` once
+# first (see deploy/README.md). `init`, `record`, and `version` each do one thing and exit —
+# invoke them with `docker compose run --rm node <subcommand>` instead of relying on the default
+# CMD.
+CMD ["run"]
