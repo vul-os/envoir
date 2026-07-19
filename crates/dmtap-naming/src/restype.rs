@@ -120,7 +120,7 @@ pub enum ResolverKind {
 ///
 /// Classification also runs the name through the [`crate::canonical`] chokepoint: a name whose
 /// form is recognized but that cannot **canonicalize** — a domain UTS-46/IDNA rejects, or any
-/// mixed-script label (`0x0121`) — is rejected here, before any resolver is consulted, so an
+/// mixed-script label (`0x0122`) — is rejected here, before any resolver is consulted, so an
 /// unnormalizable/homograph name is unresolvable under every resolver type at once.
 pub fn classify(name: &str) -> Result<ResolverType, ResolveError> {
     let ty = classify_form(name)?;
@@ -327,10 +327,10 @@ impl PetnameBook {
     /// Assign `petname` to an **already-pinned** key `ik` (the local labeling step, §3.9.3).
     ///
     /// The petname is stored in **canonical form** ([`crate::canonical`]: NFC + lowercase,
-    /// single-script labels, `0x0121` on a homograph mix) and gated by the UTS-39 **skeleton**
+    /// single-script labels, `0x0122` on a homograph mix) and gated by the UTS-39 **skeleton**
     /// check: a new petname confusable with a *different* existing one (`mum` beside Cyrillic
-    /// `мum` — or, since that mix is already `0x0121`, an all-confusable-script look-alike) is
-    /// rejected (`0x0122`) rather than silently shadowing the label the user already trusts.
+    /// `мum` — or, since that mix is already `0x0122`, an all-confusable-script look-alike) is
+    /// rejected (`0x0123`) rather than silently shadowing the label the user already trusts.
     /// Re-assigning the exact same canonical petname (rebinding it to a new key) stays allowed —
     /// that is the user's own explicit relabeling, not a spoof.
     pub fn assign(
@@ -461,10 +461,10 @@ mod tests {
     #[test]
     fn classify_rejects_mixed_script_and_folds_case_insensitively() {
         // Form is recognized (dns), but the label mixes Latin + Cyrillic — rejected at the same
-        // chokepoint (0x0121), before any resolver is consulted.
+        // chokepoint (0x0122), before any resolver is consulted.
         let err = classify("alice@p\u{0430}ypal.com").unwrap_err();
         assert!(matches!(err, ResolveError::MixedScriptLabel(_)));
-        assert_eq!(err.code(), 0x0121);
+        assert_eq!(err.code(), 0x0122);
         // The CJK exemptions pass classification.
         assert_eq!(classify("alice@東京テスト.example").unwrap(), ResolverType::Dns);
         // A single-script Cyrillic domain classifies fine.
@@ -472,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn petname_book_folds_case_and_rejects_confusables_0x0122() {
+    fn petname_book_folds_case_and_rejects_confusables_0x0123() {
         let ik = IdentityKey::from_seed(&[7; 32]).public();
         let mut book = PetnameBook::new();
         book.assign("Cop", ik.clone()).unwrap();
@@ -486,7 +486,7 @@ mod tests {
         // (с-о-р, U+0441 U+043E U+0440) is single-script, so only the skeleton gate can catch it.
         let err = book.assign("сор", ik).unwrap_err();
         assert!(matches!(err, ResolveError::ConfusableName(_)));
-        assert_eq!(err.code(), 0x0122);
+        assert_eq!(err.code(), 0x0123);
     }
 
     #[test]

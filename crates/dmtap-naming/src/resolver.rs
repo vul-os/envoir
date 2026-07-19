@@ -45,7 +45,7 @@ pub struct DmtapName {
 
 impl DmtapName {
     /// Parse `local@domain` into the **canonical** form, failing closed on a missing/empty part, a
-    /// domain that is not a real FQDN under UTS-46/IDNA, or a mixed-script label (`0x0121`). Case,
+    /// domain that is not a real FQDN under UTS-46/IDNA, or a mixed-script label (`0x0122`). Case,
     /// NFC/NFD spelling, and U-label/A-label spelling all collapse here, so `ALICE@Example.COM`,
     /// `alice@example.com`, `alice@bücher.example` and `alice@xn--bcher-kva.example` can never be
     /// distinct identities downstream.
@@ -152,7 +152,7 @@ pub struct InMemoryResolver {
     keypkgs: InMemoryKeyPackages,
     /// The name-keyed pin store (§3.4), keyed by UTS-39 **skeleton** → canonical pinned name, so a
     /// new resolution that is *confusable* with (but not equal to) an already-pinned name is
-    /// rejected (`0x0122`) instead of silently pinned beside it. `RefCell`: pinning is a resolve
+    /// rejected (`0x0123`) instead of silently pinned beside it. `RefCell`: pinning is a resolve
     /// side effect and [`Resolver::resolve`] takes `&self` (the harness is single-threaded).
     pins: RefCell<HashMap<String, String>>,
 }
@@ -298,7 +298,7 @@ impl Resolver for InMemoryResolver {
 
         // 5. PIN (name → ik, id) as a TOFU pin (§3.4) — gated by the UTS-39 confusables check:
         // a verified-but-confusable name (all-Cyrillic `аррӏе.com` beside a pinned `apple.com`)
-        // is REJECTED (`0x0122`), never silently pinned as a second, visually identical identity.
+        // is REJECTED (`0x0123`), never silently pinned as a second, visually identical identity.
         // The per-label mixed-script gate already ran at parse; this catches whole-label
         // substitutions it structurally cannot. Keyed by skeleton so lookup is O(1); an exact
         // re-resolution of the same canonical name is never a collision.
@@ -741,7 +741,7 @@ mod tests {
         assert_eq!(n.svcb_qname(), "_dmtap.example.com");
     }
 
-    // ── canonical-form + confusables hardening (i18n; 0x0121 / 0x0122) ──────────────────────────
+    // ── canonical-form + confusables hardening (i18n; 0x0122 / 0x0123) ──────────────────────────
 
     #[test]
     fn ascii_case_variants_resolve_to_one_identity() {
@@ -801,18 +801,18 @@ mod tests {
     }
 
     #[test]
-    fn mixed_script_name_is_rejected_before_resolution_0x0121() {
+    fn mixed_script_name_is_rejected_before_resolution_0x0122() {
         // `pаypal` (Latin + Cyrillic а) never reaches DNS: the parse/canonicalization chokepoint
         // rejects it, so there is nothing a spoofed zone could even serve.
         let r = InMemoryResolver::new(NOW);
         let err = r.resolve("alice@p\u{0430}ypal.com").unwrap_err();
         assert!(matches!(err, ResolveError::MixedScriptLabel(_)));
-        assert_eq!(err.code(), 0x0121);
+        assert_eq!(err.code(), 0x0122);
     }
 
     #[test]
-    fn cyrillic_whole_label_spoof_rejected_as_confusable_at_pin_time_0x0122() {
-        // `аррӏе` is ALL-Cyrillic (а-р-р-ӏ-е) — single-script, so the 0x0121 label gate passes it,
+    fn cyrillic_whole_label_spoof_rejected_as_confusable_at_pin_time_0x0123() {
+        // `аррӏе` is ALL-Cyrillic (а-р-р-ӏ-е) — single-script, so the 0x0122 label gate passes it,
         // and DNS/KT can legitimately verify it (the attacker really owns the spoof domain). The
         // pin store is the last line: its UTS-39 skeleton collides with the already-pinned
         // `apple.com`, so it must be REJECTED, not silently pinned beside it.
@@ -845,13 +845,13 @@ mod tests {
         // The confusable spoof is verified by DNS+KT — and still refused at pin time.
         let err = r.resolve(spoof).unwrap_err();
         assert!(matches!(err, ResolveError::ConfusableName(_)));
-        assert_eq!(err.code(), 0x0122);
+        assert_eq!(err.code(), 0x0123);
     }
 
     #[test]
     fn single_script_cyrillic_domain_resolves_and_pins() {
         // An honest all-Cyrillic name is not collateral damage: single-script per label passes the
-        // 0x0121 gate, and with no confusable pin beside it, it resolves and pins normally.
+        // 0x0122 gate, and with no confusable pin beside it, it resolves and pins normally.
         let name = "иван@почта.рф";
         let canonical = crate::canonical::canonical_name(name).unwrap();
         let (id, txt) = make_identity(name, 3, KeyPackageBundleRef::new("/kp", ContentId::of(b"k")));

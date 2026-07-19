@@ -11,8 +11,8 @@
 //!   hardening): local part = Unicode **NFC + lowercase**; domain = **UTS-46/IDNA** with the
 //!   canonical stored/compared form being the **A-label** (punycode) form and DNS qnames always
 //!   built from A-labels; every label **single-script** (UTS-39, with the Common/Inherited and
-//!   Han+kana/Hangul/Bopomofo exemptions — `ERR_NAME_LABEL_MIXED_SCRIPT`, `0x0121`); plus the
-//!   pin-time UTS-39 **skeleton** confusables gate (`ERR_NAME_CONFUSABLE_WITH_PIN`, `0x0122`).
+//!   Han+kana/Hangul/Bopomofo exemptions — `ERR_NAME_LABEL_MIXED_SCRIPT`, `0x0122`); plus the
+//!   pin-time UTS-39 **skeleton** confusables gate (`ERR_NAME_CONFUSABLE_WITH_PIN`, `0x0123`).
 //!   Parse, classify, `Identity.names` comparison, KT leaf computation, and pin/petname keys all
 //!   route through it — one spelling, one identity, everywhere.
 //! - [`dns`] — parse the §3.2 `_dmtap` **TXT** and **SVCB** records into fail-closed structs.

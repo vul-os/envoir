@@ -148,19 +148,19 @@ pub enum ResolveError {
     /// Han+Hangul and Han+Bopomofo combinations are admitted) — the single-label homograph attack
     /// (`pаypal.com`, Latin + Cyrillic `а`), rejected at the canonicalization chokepoint
     /// ([`crate::canonical`]) **before** any resolver runs, so a mixed-script spoof is never even
-    /// resolvable, let alone pinnable. `ERR_NAME_LABEL_MIXED_SCRIPT` (`0x0121` — next free §21.3
+    /// resolvable, let alone pinnable. `ERR_NAME_LABEL_MIXED_SCRIPT` (`0x0122` — next free §21.3
     /// code after `0x0120`; **needs spec registration**), FAIL_CLOSED_BLOCK.
-    #[error("mixed-script name label — one Unicode script per label (UTS-39), fail closed (0x0121): {0}")]
+    #[error("mixed-script name label — one Unicode script per label (UTS-39), fail closed (0x0122): {0}")]
     MixedScriptLabel(&'static str),
 
     /// A new name's UTS-39 **skeleton** ([`crate::canonical::skeleton`]) collides with a
     /// *different* name already pinned/petnamed locally — a whole-label confusable
     /// (all-Cyrillic `аррӏе.com` beside a pinned `apple.com`) that the per-label mixed-script gate
-    /// (`0x0121`) cannot catch because each name is internally single-script. Surfaced at **pin
+    /// (`0x0122`) cannot catch because each name is internally single-script. Surfaced at **pin
     /// time** instead of silently pinning a second, visually identical identity; the user must
     /// resolve the conflict out-of-band (§3.4.1) before the new name may be pinned.
-    /// `ERR_NAME_CONFUSABLE_WITH_PIN` (`0x0122` — **needs spec registration**), FAIL_CLOSED_BLOCK.
-    #[error("name confusable with an existing pinned name — UTS-39 skeleton collision, fail closed (0x0122): {0}")]
+    /// `ERR_NAME_CONFUSABLE_WITH_PIN` (`0x0123` — **needs spec registration**), FAIL_CLOSED_BLOCK.
+    #[error("name confusable with an existing pinned name — UTS-39 skeleton collision, fail closed (0x0123): {0}")]
     ConfusableName(&'static str),
 }
 
@@ -185,8 +185,8 @@ impl ResolveError {
             ResolveError::NameChainBindingUnverified(_) => 0x011E,
             ResolveError::KeyNameUnverified(_) => 0x0109,
             ResolveError::ResolverDisagreement(_) => 0x0120,
-            ResolveError::MixedScriptLabel(_) => 0x0121,
-            ResolveError::ConfusableName(_) => 0x0122,
+            ResolveError::MixedScriptLabel(_) => 0x0122,
+            ResolveError::ConfusableName(_) => 0x0123,
             ResolveError::KeyPackage(_) => 0x0109,
             ResolveError::Identity(e) => match e {
                 IdentityError::BadSignature => 0x0103,

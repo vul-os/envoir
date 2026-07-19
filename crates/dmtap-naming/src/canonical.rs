@@ -1,5 +1,5 @@
 //! The **canonical name form** + UTS-39-informed confusables defense — spec §3.9.1, §3.12.4
-//! (i18n hardening; error codes `0x0121`/`0x0122`, pending §21.3 registration).
+//! (i18n hardening; error codes `0x0122`/`0x0123`, pending §21.3 registration).
 //!
 //! Names are identity-bearing strings: they key KT leaves (§18.4.9), the `Identity.names`
 //! forward-check (§3.9.4), and the pin store (§3.4). Before this module existed they were kept
@@ -21,11 +21,11 @@
 //!     (their namespaces are not DNS, so no IDNA), same mixed-script gate;
 //!   - every label MUST be **single-script** (the UTS-39 restriction-level gate below).
 //! - [`skeleton`] / [`find_confusable`] — the **pin-time** confusable gate: a new name whose
-//!   skeleton collides with a *different* already-pinned name is rejected (`0x0122`) instead of
+//!   skeleton collides with a *different* already-pinned name is rejected (`0x0123`) instead of
 //!   silently pinned, so `аррӏе.com` (all-Cyrillic, single-script, so it passes the label gate)
 //!   cannot sit next to an existing `apple.com` pin.
 //!
-//! ## The mixed-script rule (fail-closed, `0x0121`)
+//! ## The mixed-script rule (fail-closed, `0x0122`)
 //! Each label is checked against UTS-39's single-script restriction: characters with script
 //! `Common`/`Inherited` (digits, hyphen, `+`, combining marks, …) are exempt, and the conventional
 //! East-Asian combinations **Han+Hiragana+Katakana** (Japanese), **Han+Hangul** (Korean) and
@@ -269,11 +269,11 @@ mod tests {
     }
 
     #[test]
-    fn mixed_script_label_rejected_0x0121() {
+    fn mixed_script_label_rejected_0x0122() {
         // The classic homograph: Latin p-y-p-a-l + Cyrillic а in ONE label.
         let err = canonical_name("alice@p\u{0430}ypal.com").unwrap_err();
         assert!(matches!(err, ResolveError::MixedScriptLabel(_)));
-        assert_eq!(err.code(), 0x0121);
+        assert_eq!(err.code(), 0x0122);
         // Also rejected in the local part and in bare (petname/chain) forms.
         assert!(matches!(
             canonical_name("p\u{0430}ypal@example.com"),

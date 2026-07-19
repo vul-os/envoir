@@ -120,7 +120,7 @@ impl<C: NameChainClient> NameChainResolver<C> {
         claimed: &Identity,
     ) -> Result<ResolvedBinding, ResolveError> {
         // 0. Canonicalize at the chokepoint ([`crate::canonical`]): chain names fold to NFC +
-        // lowercase with single-script labels (`0x0121` on a homograph mix), exactly as a real
+        // lowercase with single-script labels (`0x0122` on a homograph mix), exactly as a real
         // ENS/SNS client normalizes before its own lookup — so `Vitalik.ETH` and `vitalik.eth`
         // are ONE on-chain identity, and a mixed-script chain label never even reaches the RPC.
         let name = crate::canonical::canonical_name(name)?;

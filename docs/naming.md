@@ -143,7 +143,7 @@ precisely:
 - **Single script per label** (UTS-39): characters with script `Common`/`Inherited` are exempt,
   and the conventional **Han+Hiragana+Katakana**, **Han+Hangul**, and **Han+Bopomofo**
   combinations are admitted; any other multi-script label — the classic `pаypal.com` homograph
-  (Latin + Cyrillic `а`) — **fails closed** with `ERR_NAME_LABEL_MIXED_SCRIPT` (`0x0121`,
+  (Latin + Cyrillic `а`) — **fails closed** with `ERR_NAME_LABEL_MIXED_SCRIPT` (`0x0122`,
   pending §21.3 spec registration) *before any resolver runs*.
 
 The mixed-script rule cannot catch a **whole-label** substitution — all-Cyrillic `аррӏе.com` is
@@ -152,7 +152,7 @@ spoof domain). That is caught at **pin time**: the resolver keeps its name-keyed
 by a UTS-39-informed **skeleton** ([`canonical::skeleton`](../crates/dmtap-naming/src/canonical.rs)
 — lowercase + NFD, then a confusables fold), and a new name whose skeleton collides with a
 *different* already-pinned name (or petname, in the petname book) is rejected with
-`ERR_NAME_CONFUSABLE_WITH_PIN` (`0x0122`, pending registration) instead of being silently pinned
+`ERR_NAME_CONFUSABLE_WITH_PIN` (`0x0123`, pending registration) instead of being silently pinned
 as a second, visually identical identity. **Honesty:** the fold is a documented *subset* of
 UTS-39's `confusables.txt` (the high-value Cyrillic/Greek/Latin look-alike sets plus `0`/`O`,
 `1`/`l`), not the full ~6k-entry table — sufficient in v0 precisely because the mixed-script rule
