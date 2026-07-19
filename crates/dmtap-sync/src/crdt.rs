@@ -465,6 +465,15 @@ impl DeathReg {
         matches!(self.regs.get(object), Some((_, DeathState::Deleted(_))))
     }
 
+    /// The HLC of `object`'s **winning** death cell, if one has ever been written.
+    ///
+    /// This is the field §6.1.1 deliberately drops from the projection, and therefore the field a
+    /// §6.1.2 snapshot **body** has to carry: §4.5 revives only on a `Live` write with a *strictly
+    /// greater* HLC, so without it the D3 revival test has nothing to be greater than.
+    pub fn certificate_hlc(&self, object: &str) -> Option<&Hlc> {
+        self.regs.get(object).map(|(h, _)| h)
+    }
+
     /// The deleted objects with their classes, in canonical order.
     pub fn deleted(&self) -> Vec<(String, DeathClass)> {
         self.regs.iter().filter_map(|(o, (_, s))| s.class().map(|c| (o.clone(), c))).collect()
@@ -731,6 +740,19 @@ impl RgaSeq {
     /// Whether `id` is tombstoned.
     pub fn is_tombstoned(&self, id: &Hlc) -> bool {
         self.tombstones.contains(id)
+    }
+
+    /// The **left-origin** of the atom named by `id` (`None` = list head, or unknown atom) — the
+    /// edge §6.2's transitive body-retention rule walks: a tombstoned atom that is the origin of a
+    /// retained atom must itself be retained, or every replica that fast-joins from the body
+    /// strands that atom's successors in the causal-readiness buffer forever.
+    pub fn atom_origin(&self, id: &Hlc) -> Option<&Hlc> {
+        self.atoms.get(id).and_then(|a| a.origin.as_ref())
+    }
+
+    /// Every atom id this sequence knows, tombstoned or not, in element-id order.
+    pub fn atom_ids(&self) -> Vec<Hlc> {
+        self.atoms.keys().cloned().collect()
     }
 
     /// Join with `other`: union of atoms and of tombstones; the order is recomputed by the rule

@@ -12,6 +12,7 @@
 //! post-`covers` ops yields byte-identical `ObservableState` to a full replay, because the two
 //! paths can differ only in bookkeeping the projection never serializes.
 
+use crate::body::{AdoptedBody, SnapshotBody};
 use crate::detcbor::{encode, SVal};
 use crate::error::SyncError;
 use crate::state::{SyncState, VersionVector};
@@ -374,27 +375,33 @@ impl Snapshot {
 /// FastJoin = {
 ///   1 => Snapshot,   ; the §6.1 signed descriptor — bounded, so it ships INLINE
 ///   2 => Hlc,        ; floor — the responder's §6.2 cut, the caller's audit handle
-///   ? 3 => bstr,     ; OPTIONAL inline det_cbor(ObservableState), a bounded cache hint
+///   ? 3 => bstr,     ; OPTIONAL inline det_cbor(SnapshotBody) (§6.1.2), a bounded cache hint
 /// }
 /// ```
 ///
 /// The encoding split is the design: the signed descriptor is sized by the author count and
-/// carries the signature, `covers` and the `root` commitment, so it must travel inline; the
-/// observable state is unbounded (potentially megabytes) and travels **by reference** at
-/// `Snapshot.root`, fetched from `GET /sync/state/<root>`. By-reference keeps a sync round's
-/// response bounded and reuses content addressing the protocol already has — the body is immutable
-/// and self-verifying, so any holder may serve it and every peer joining at the same `covers`
-/// dedupes to the same bytes.
+/// carries the signature, `covers` and the `root` commitment, so it must travel inline; the body is
+/// unbounded (potentially megabytes) and travels **by reference** at `Snapshot.root`, fetched from
+/// `GET /sync/state/<root>`. By-reference keeps a sync round's response bounded and reuses content
+/// addressing the protocol already has — the body is immutable and self-verifying, so any holder
+/// may serve it and every peer joining at the same `covers` dedupes to the same bytes.
 ///
-/// [`FastJoin::state`] is a **cache hint, never a second source of truth**: it is hashed against
-/// `root` exactly like a fetched body and discarded on mismatch, so there is one verification path.
+/// **The body is a [`SnapshotBody`] — a compacted set of signed ops, not a state document**
+/// (§6.1.2, `SYNC-SNAP-03`). Key 3 is nonetheless a `bstr` and deliberately so: it wraps the whole
+/// body as one hash-addressed unit — the alternative to a separate `GET` — so it ships as the
+/// opaque body §5.2's seam assigns to a `bstr` rather than as a second op array spliced into the
+/// response. A decoder unwraps it once and then decodes an ordinary ops array inside.
+///
+/// [`FastJoin::state`] is a **cache hint, never a second source of truth**: it is verified against
+/// `root` by the *same* fold-then-recompute a fetched body gets, and discarded on mismatch, so
+/// there is one verification path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FastJoin {
     /// The §6.1 signed snapshot that replaced the truncated prefix (key 1).
     pub snapshot: Snapshot,
     /// The §6.2 truncation floor in force at the responder (key 2).
     pub floor: Hlc,
-    /// An OPTIONAL bounded inline copy of `det_cbor(ObservableState)` (key 3).
+    /// An OPTIONAL bounded inline copy of `det_cbor(SnapshotBody)` (key 3).
     pub state: Option<Vec<u8>>,
 }
 
@@ -442,13 +449,19 @@ impl FastJoin {
     ///    `VersionVector` (`0x0A03`), and the caller genuinely below the floor (`0x0A09`). There is
     ///    deliberately **no** floor-vs-`covers` comparison: see [`check_covers_closes_gap`] for why
     ///    that rule was removed rather than reworded (§14 C-07).
-    /// 3. **Obtain and verify the state body** — the inline copy if it hashes to `root`, otherwise
-    ///    whatever `fetch` returns for `root`, hashed the same way. `0x0A09` if a body is served
-    ///    but does not hash to `root`; `0x0A0C` if no holder can serve one at all.
+    /// 3. **Obtain and verify the body** — the inline copy if it verifies, otherwise whatever
+    ///    `fetch` returns for `root`, verified the same way. The body is a [`SnapshotBody`]: a
+    ///    compacted set of signed ops (§6.1.2), verified by **folding it into a provisional state
+    ///    and recomputing** `root` from that state's §6.1.1 projection — never by hashing the
+    ///    received bytes. `0x0A09` if a body is served but does not reproduce `root` (and it is
+    ///    then discarded **whole**, which the provisional fold makes true rather than aspirational);
+    ///    `0x0A0C` if no holder can serve one at all.
     ///
-    /// Returns the **verified** observable state. Adoption itself (step 4) and resuming the pull at
-    /// `covers` (step 5) are the caller's, under the deployment's §6.1 trust policy — this function
-    /// exists so that no caller can reach those steps with an unverified snapshot or body.
+    /// Returns the **verified** [`AdoptedBody`] — the folded state *and* its matching projection.
+    /// Promotion (step 4) and resuming the pull at `covers` (step 5) are the caller's, under the
+    /// deployment's §6.1 trust policy; this function exists so that no caller can reach those steps
+    /// with an unverified snapshot or body. Because the body is *ops*, promotion is a **merge**: a
+    /// caller that already holds some of them dedupes by `op-id`, and re-adopting is a no-op.
     ///
     /// **There is deliberately no fallback here.** Every failure path returns an error and leaves
     /// the caller's vector untouched. Falling back to the responder's surviving suffix on a failed
@@ -459,9 +472,10 @@ impl FastJoin {
         caller: &VersionVector,
         subscribed: &[String],
         admitted: &[Vec<u8>],
+        receiver_now_ms: u64,
         fetch: impl FnOnce(&ContentId) -> Option<Vec<u8>>,
-    ) -> Result<ObservableState, SyncError> {
-        self.adopt_after(None, caller, subscribed, admitted, fetch)
+    ) -> Result<AdoptedBody, SyncError> {
+        self.adopt_after(None, caller, subscribed, admitted, receiver_now_ms, fetch)
     }
 
     /// **The §5.2.1 step-5 progress MUST.** A re-pull answered with another `fast-join` carrying the
@@ -499,8 +513,9 @@ impl FastJoin {
         caller: &VersionVector,
         subscribed: &[String],
         admitted: &[Vec<u8>],
+        receiver_now_ms: u64,
         fetch: impl FnOnce(&ContentId) -> Option<Vec<u8>>,
-    ) -> Result<ObservableState, SyncError> {
+    ) -> Result<AdoptedBody, SyncError> {
         // --- step 5's loop guard, checked BEFORE any work ------------------------------------
         self.check_progress(previous)?;
         // --- step 1: the snapshot itself -----------------------------------------------------
@@ -515,19 +530,25 @@ impl FastJoin {
         // --- step 2: does it close the gap? --------------------------------------------------
         check_covers_closes_gap(&self.snapshot, &self.floor, caller)?;
 
-        // --- step 3: the state body ----------------------------------------------------------
-        // The inline copy is tried first and held to the SAME hash check as a fetched body; on
-        // mismatch it is discarded (not an error — it was only ever a hint) and the by-reference
-        // path is taken.
-        let inline = self.state.as_ref().filter(|b| state_root_of(b) == self.snapshot.root);
-        let body = match inline {
-            Some(b) => b.clone(),
-            None => fetch(&self.snapshot.root).ok_or(SyncError::SnapshotStateUnavailable)?,
+        // --- step 3: the body ----------------------------------------------------------------
+        // The inline copy is tried first and held to the SAME fold-then-recompute as a fetched
+        // body; on failure it is discarded (not an error — it was only ever a hint) and the
+        // by-reference path is taken. Note what is being verified: not `hash(bytes) == root`, but
+        // "these ops, ingested through the ordinary §4 path, PRODUCE the state `root` commits to".
+        let verify = |bytes: &[u8]| -> Result<AdoptedBody, SyncError> {
+            SnapshotBody::from_det_cbor(bytes)?.verify_against_root(
+                &self.snapshot.root,
+                Some(&self.snapshot.ns),
+                receiver_now_ms,
+            )
         };
-        if state_root_of(&body) != self.snapshot.root {
-            return Err(SyncError::SnapshotRootMismatch);
+        if let Some(hint) = &self.state {
+            if let Ok(adopted) = verify(hint) {
+                return Ok(adopted);
+            }
         }
-        ObservableState::from_det_cbor(&body)
+        let fetched = fetch(&self.snapshot.root).ok_or(SyncError::SnapshotStateUnavailable)?;
+        verify(&fetched)
     }
 }
 

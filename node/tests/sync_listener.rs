@@ -133,6 +133,28 @@ fn signed_add(sk: &IdentityKey, ns: &str, target: &str, element: &str, counter: 
     sign_op(sk, &op).unwrap().to_bytes()
 }
 
+/// A signed `lww-set` on one register — successive counters SUPERSEDE each other, which is what
+/// makes §6.2 truncation have anything to drop (live history is retained, §6.1.2's body needs it).
+fn signed_lww(sk: &IdentityKey, ns: &str, target: &str, value: &str, counter: u32) -> Vec<u8> {
+    let op = SyncOp {
+        kind: dmtap_sync::wire::OP_LWW_SET,
+        ns: ns.to_string(),
+        target: target.to_string(),
+        field: Some("title".into()),
+        value: Some(SVal::Text(value.to_string())),
+        hlc: Hlc { wall: now(), counter, author: sk.public() },
+        observed: None,
+        reference: None,
+    };
+    sign_op(sk, &op).unwrap().to_bytes()
+}
+
+/// The §6.1.2 body a truncated replica serves: the compacted set of signed ops whose fold equals
+/// the observable state — **not** `det_cbor(ObservableState)`, which §14 C-09 made non-conformant.
+fn body_of(gw: &SyncGateway) -> Vec<u8> {
+    gw.replica.snapshot_state().expect("a truncated replica holds its body").to_vec()
+}
+
 fn map_field(body: &[u8], key: u64) -> SVal {
     let SVal::Map(fields) = decode(body).expect("CBOR body") else {
         panic!("body is an integer-keyed map");
@@ -530,12 +552,11 @@ async fn a_truncated_replica_answers_pull_with_a_snapshot_over_http() {
     // Five ops, a snapshot over all of them, then truncate everything below the last two.
     let alice = IdentityKey::generate();
     for i in 0..5u32 {
-        gw.replica.ingest_cose(&signed_add(&alice, "docs", "list", &format!("e{i}"), i), now()).unwrap();
+        gw.replica.ingest_cose(&signed_lww(&alice, "docs", "doc1", &format!("v{i}"), i), now()).unwrap();
     }
     let snap = Snapshot::create(&alice, 1, "docs", gw.replica.state(), now());
-    let state_body = dmtap_sync::ObservableState::of(gw.replica.state()).det_cbor();
     let cut = Hlc { wall: now(), counter: 3, author: alice.public() };
-    let dropped = gw.replica.truncate_below(&cut, snap.clone(), state_body.clone()).unwrap();
+    let dropped = gw.replica.truncate_below(&cut, snap.clone(), now()).unwrap();
     assert!(dropped > 0, "the test only means anything if history was actually discarded");
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -591,14 +612,23 @@ async fn a_truncated_replica_answers_pull_with_a_snapshot_over_http() {
 
     // The peer completes §5.2.1 step 3 against what it was given. This body is small, so it rode
     // inline; the adopt path hashes it to `root` exactly as it would a fetched one.
-    assert!(fj.state.is_some(), "a small state body should ride inline (key 3)");
+    assert!(fj.state.is_some(), "a small body should ride inline (key 3)");
+    // What rode inline is an OP SET (§6.1.2), and it is verified by FOLD-THEN-RECOMPUTE: the ops
+    // are ingested through the ordinary §4 path and the state they PRODUCE must hash to `root`.
+    let inline = dmtap_sync::SnapshotBody::from_det_cbor(fj.state.as_deref().unwrap())
+        .expect("key 3 carries a SnapshotBody, not an ObservableState");
+    assert!(!inline.is_empty(), "a non-empty state ships non-empty ops");
     let adopted = fj
-        .adopt(&VersionVector::new(), &["docs".into()], &[], |_| None)
+        .adopt(&VersionVector::new(), &["docs".into()], &[], now(), |_| None)
         .expect("a peer must be able to actually adopt what it was handed");
     assert_eq!(
-        adopted.det_cbor(),
-        state_body,
-        "the adopted state is byte-identical to the responder's projection"
+        adopted.observable.root(),
+        snap.root,
+        "the adopted state is the one `Snapshot.root` commits to — proven by producing it"
+    );
+    assert!(
+        adopted.state.lww.cell("doc1", "title").is_some(),
+        "and the WINNING CELL'S HLC came with it — the metadata a projection would have dropped"
     );
 }
 
@@ -621,12 +651,12 @@ async fn the_state_body_is_served_by_content_address() {
 
     let alice = IdentityKey::generate();
     for i in 0..3u32 {
-        gw.replica.ingest_cose(&signed_add(&alice, "docs", "list", &format!("e{i}"), i), now()).unwrap();
+        gw.replica.ingest_cose(&signed_lww(&alice, "docs", "doc1", &format!("v{i}"), i), now()).unwrap();
     }
     let snap = Snapshot::create(&alice, 1, "docs", gw.replica.state(), now());
-    let state_body = dmtap_sync::ObservableState::of(gw.replica.state()).det_cbor();
     let cut = Hlc { wall: now(), counter: 2, author: alice.public() };
-    gw.replica.truncate_below(&cut, snap.clone(), state_body.clone()).unwrap();
+    gw.replica.truncate_below(&cut, snap.clone(), now()).unwrap();
+    let state_body = body_of(&gw);
 
     let root_hex: String = snap.root.as_bytes().iter().map(|b| format!("{b:02x}")).collect();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -668,11 +698,21 @@ async fn the_state_body_is_served_by_content_address() {
 
     let ((hit_status, _, hit_body), (miss_status, _, _)) = client.await.unwrap();
     assert_eq!(hit_status, 200);
-    assert_eq!(hit_body, state_body, "the address IS the hash of the body served");
-    assert_eq!(
+    assert_eq!(hit_body, state_body, "the address serves the body this replica holds for it");
+    // **`<root>` is NOT the hash of these bytes** (§14 C-09). It is the hash of the observable
+    // state the ops PRODUCE, so a caller verifies by folding and recomputing — which is strictly
+    // stronger: hashing the transfer bytes proves only that the sender shipped what it promised.
+    assert_ne!(
         dmtap_sync::state_root_of(&hit_body),
         snap.root,
-        "a caller re-hashes what it received rather than trusting the endpoint"
+        "the body is an op set; hashing it directly must NOT match, or the endpoint is serving a \
+         state document again"
     );
+    let served = dmtap_sync::SnapshotBody::from_det_cbor(&hit_body)
+        .expect("what is served is a SnapshotBody");
+    let adopted = served
+        .verify_against_root(&snap.root, Some("docs"), now())
+        .expect("a caller folds what it received rather than trusting the endpoint");
+    assert_eq!(adopted.observable.root(), snap.root);
     assert_eq!(miss_status, 404, "an address this replica does not hold is a miss, not a guess");
 }

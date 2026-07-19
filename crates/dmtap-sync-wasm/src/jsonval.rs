@@ -18,6 +18,12 @@
 //! | `Array` | `{"arr": [ … ]}` |
 //! | `Map` | `{"map": [[1, …], …]}` (integer keys) |
 //! | `BytesMap` | `{"bmap": [["6162", …], …]}` |
+//! | `TextMap` | `{"tmap": [["x", …], …]}` (text keys — the `ext-value` map arm, §14 C-08) |
+//!
+//! `tmap` is the newest of these and the one a *product* actually reaches for: it is §18.3.6's
+//! `{ * tstr => ext-value }` arm, which §4.1 previously omitted. Without a tag for it there is no
+//! way to *encode* a nested application object from JS at all — which is exactly the encoder-side
+//! half of the double refusal C-08 records.
 //!
 //! Integers are carried as JSON numbers and are therefore bounded by JS's exact-integer range
 //! (±2^53). That is enough for every value the substrate mints (HLC walls are milliseconds, PN
@@ -97,6 +103,13 @@ pub fn sval_to_json(v: &SVal) -> Result<Value, String> {
             }
             json!({ "bmap": out })
         }
+        SVal::TextMap(entries) => {
+            let mut out = Vec::with_capacity(entries.len());
+            for (k, val) in entries {
+                out.push(json!([k, sval_to_json(val)?]));
+            }
+            json!({ "tmap": out })
+        }
     })
 }
 
@@ -141,6 +154,16 @@ pub fn sval_from_json(v: &Value) -> Result<SVal, String> {
                 out.push((k, sval_from_json(&p[1])?));
             }
             Ok(SVal::BytesMap(out))
+        }
+        "tmap" => {
+            let items = body.as_array().ok_or("`tmap` is not an array")?;
+            let mut out = Vec::with_capacity(items.len());
+            for pair in items {
+                let p = pair.as_array().filter(|p| p.len() == 2).ok_or("`tmap` entry is not a pair")?;
+                let k = p[0].as_str().ok_or("`tmap` key is not a string")?.to_owned();
+                out.push((k, sval_from_json(&p[1])?));
+            }
+            Ok(SVal::TextMap(out))
         }
         other => Err(format!("unknown value tag `{other}`")),
     }

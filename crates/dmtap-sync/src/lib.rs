@@ -52,8 +52,40 @@
 //! *superseded* by a later op, not "deleted". A trusted-checkpoint snapshot trusts its signer for
 //! pre-`covers` history until backfilled and recomputed.
 
+//! ## Mixed-deployment note: the `ext-value` widening (§14 C-08)
+//!
+//! [`SVal::is_ext_value`](detcbor::SVal::is_ext_value) now accepts the **whole** §18.3.6
+//! `ext-value` — text-keyed maps and heterogeneous arrays included — where it previously
+//! implemented §4.1's narrower prose. That is a **widening**, and a widening has a failure mode a
+//! narrowing does not: **a mixed deployment diverges by *rejection*.** An engine on the old profile
+//! refuses, with `0x0A03`, an op an updated engine accepts and applies; the two replicas then hold
+//! different op sets and different roots, with an error raised on only one side. Nothing here can
+//! detect that from the other end — a refusal is indistinguishable from an op that never arrived.
+//!
+//! So it is a **deployment** obligation, expressed where capability negotiation lives (the `sync-1`
+//! capability, `envoir-node`'s `syncserve`), not a runtime check: see
+//! [`EXT_VALUE_PROFILE`]. Until every engine in a namespace is on profile `2`, a
+//! product SHOULD keep carrying structured content as an opaque payload (§4.1.1) — which is exactly
+//! what the first adopter did, and why C-08 was found.
+
 #![forbid(unsafe_code)]
 
+/// This engine's accepted-`ext-value` profile.
+///
+/// * `1` — §4.1's pre-C-08 prose: scalars and **homogeneous** arrays only; no map arm.
+/// * `2` — §18.3.6's full recursive `ext-value`: heterogeneous arrays **and** text-keyed maps,
+///   bounded by [`detcbor::MAX_NESTING_DEPTH`]. **This crate is profile 2.**
+///
+/// The number is this implementation's handle on the widening, **not** a wire field frozen by
+/// `SYNC.md`: the specification records C-08's mixed-deployment hazard and says a product SHOULD
+/// wait until every engine is updated, but does not define a sub-token, header or version field
+/// that would let one replica *ask* another which profile it is on. A deployment that needs the
+/// answer must carry it out of band — see `envoir-node`'s `syncserve::SYNC1_EXT_VALUE_2` for how
+/// this node expresses it as a `sync-1` sub-resource, and treat that spelling as a local convention
+/// until the specification freezes one.
+pub const EXT_VALUE_PROFILE: u8 = 2;
+
+pub mod body;
 pub mod cose;
 pub mod crdt;
 pub mod detcbor;
@@ -63,6 +95,7 @@ pub mod snapshot;
 pub mod state;
 pub mod wire;
 
+pub use body::{retention_set, AdoptedBody, SnapshotBody};
 pub use cose::{sign_op, verify_op, verify_op_bytes, CoseSign1};
 pub use crdt::{
     check_admitted, check_counter_entry, check_ns_ref, validate_op, DeathClass, DeathReg,

@@ -18,7 +18,7 @@ use dmtap_sync::{
     caller_is_below_floor, check_admitted, check_counter_entry, check_covers_closes_gap,
     check_ns_ref, cose, covers_carries_mark_for_floor_author, snapshot::ObservableState,
     stability_cut, state::SyncState, state::VersionVector, state_root_of, validate_op, DeathClass,
-    DeathState, FastJoin, Hlc, OpEntry, SyncError, SyncOp,
+    DeathState, FastJoin, Hlc, OpEntry, SnapshotBody, SyncError, SyncOp,
 };
 
 use crate::{hex, unhex, Vector, Verdict};
@@ -57,6 +57,8 @@ pub fn check(v: &Vector) -> Result<Verdict, String> {
         "sync_gc_stability_cut" => gc_stability_cut(v),
         "sync_fastjoin_pull_response" => fastjoin_pull_response(v),
         "sync_fastjoin_floor_predicate" => fastjoin_floor_predicate(v),
+        "sync_ext_value_validate" => ext_value_validate(v),
+        "sync_snapshot_body_fold" => snapshot_body_fold(v),
         other => Err(format!("no executor registered for sync operation `{other}`")),
     }
 }
@@ -1083,24 +1085,47 @@ fn fastjoin_pull_response(v: &Vector) -> Result<Verdict, String> {
     eq("state fetch address", s(&v.expected, "state_fetch_address_hex")?, s(&v.input, "snapshot_root_hex")?)?;
     eq("state fetch endpoint", s(&v.expected, "state_fetch_endpoint")?, "GET /sync/state/<root>")?;
 
-    // The inline copy is a CACHE HINT: it is hashed to `root` exactly like a fetched body, and a
-    // corrupted inline copy must be discarded (and the body fetched by reference) rather than
-    // adopted. Proven by adopting with a corrupted key 3 and a working fetcher.
+    // --- adoption: the body is an OP SET (§6.1.2 / C-09), not this vector's state document ------
+    //
+    // What this vector freezes is the RESPONSE ENCODING, and that is unchanged by C-09: key 3 is a
+    // `bstr` wrapping whatever the body bytes are, so every assertion above still reproduces
+    // byte-for-byte. What it CANNOT be used for any more is adoption. Its `observable_state_cbor_hex`
+    // is `det_cbor(ObservableState)` and its `snapshot_root_hex` is the hash of exactly those bytes
+    // — the pre-C-09 shape — and the vector was not regenerated when §6.1.2 landed (its own note
+    // still reads "?3: inline det_cbor(ObservableState)"). §10's row claims the C-09 change "does
+    // not change this vector's bytes — key 3 is absent here", which holds for
+    // `pull_response_cbor_hex` but NOT for `pull_response_with_inline_state_cbor_hex`, which the
+    // vector still carries. Recorded, not worked around: this repo does not own the vector file.
+    //
+    // So the adoption paths are exercised on a body that IS conformant — a real `SnapshotBody`
+    // built here from signed ops — and the frozen bytes are asserted to be unadoptable, which is
+    // the executable form of the statement above.
     let caller = vector_from_hex(s(&v.input, "snapshot_covers_cbor_hex")?)?;
     // A caller that lacks everything: an empty vector is below any non-empty `covers`.
     let behind = VersionVector::new();
-    let mut corrupted = state_body.clone();
-    corrupted[3] ^= 0xff;
-    let hinted = FastJoin { snapshot: snapshot.clone(), floor: floor.clone(), state: Some(corrupted) };
+
+    let (op_body, op_body_root) = conformant_body(&sk)?;
+    let mut op_snapshot = snapshot.clone();
+    op_snapshot.root = op_body_root.clone();
+    op_snapshot.sig = sk.sign_domain(&[], &op_snapshot.signing_preimage());
+
+    // A corrupted inline hint is DISCARDED in favour of the by-reference fetch — one verification
+    // path, and the hint is never a second source of truth.
+    let mut corrupted = op_body.clone();
+    let last = corrupted.len() - 1;
+    corrupted[last] ^= 0xff;
+    let hinted =
+        FastJoin { snapshot: op_snapshot.clone(), floor: floor.clone(), state: Some(corrupted) };
     let adopted = hinted
-        .adopt(&behind, &[], &[], |addr| {
-            (addr.as_bytes() == snapshot.root.as_bytes()).then(|| state_body.clone())
+        .adopt(&behind, &[], &[], RECEIVER_NOW_MS, |addr| {
+            (addr.as_bytes() == op_body_root.as_bytes()).then(|| op_body.clone())
         })
         .map_err(|e| format!("a corrupted inline hint was not discarded in favour of a fetch: {e}"))?;
+    // Fold-then-recompute, not hash-the-bytes: the adopted state is the one the ops PRODUCE.
     eq(
-        "adopted state",
-        hex(&adopted.det_cbor()).as_str(),
-        s(&v.input, "observable_state_cbor_hex")?,
+        "adopted root == snapshot root",
+        hex(adopted.observable.root().as_bytes()).as_str(),
+        hex(op_body_root.as_bytes()).as_str(),
     )?;
     eq(
         "inline_state_is_cache_hint_verified_against_root",
@@ -1109,16 +1134,235 @@ fn fastjoin_pull_response(v: &Vector) -> Result<Verdict, String> {
     )?;
     // ...and with no fetcher available, the SAME corrupted hint fails CLOSED (0x0A0C), never
     // adopting the bytes it could not verify.
-    match hinted.adopt(&behind, &[], &[], |_| None) {
+    match hinted.adopt(&behind, &[], &[], RECEIVER_NOW_MS, |_| None) {
         Err(SyncError::SnapshotStateUnavailable) => {}
         Err(e) => return Err(format!("unfetchable body gave {e}, want 0x0A0C")),
-        Ok(_) => return Err("an unverifiable inline state body was adopted".into()),
+        Ok(_) => return Err("an unverifiable inline body was adopted".into()),
+    }
+    // The C-09 statement, executed: this vector's frozen key-3 bytes are a state DOCUMENT, and a
+    // conformant caller cannot adopt them — a six-section array is not an array of COSE_Sign1
+    // envelopes, so it is refused at the framing rather than folded.
+    let pre_c09 = FastJoin { snapshot: snapshot.clone(), floor: floor.clone(), state: None };
+    match pre_c09.adopt(&behind, &[], &[], RECEIVER_NOW_MS, |_| Some(state_body.clone())) {
+        Err(_) => {}
+        Ok(_) => {
+            return Err(
+                "det_cbor(ObservableState) was adopted as a SnapshotBody — the exact C-09 defect"
+                    .into(),
+            )
+        }
     }
     // A caller already at `covers` is NOT below the floor and must not be fast-joined at all.
     if caller_is_below_floor(&snapshot, &caller) {
         return Err("a caller at `covers` was judged below the floor".into());
     }
     Ok(Verdict::Pass)
+}
+
+// --- SYNC-VAL-01 — the `ext-value` boundary (§4.1/§4.1.1, C-08) --------------------------------
+
+/// Every accept case validates, every reject case answers `false` with `0x0A03`, and validation is
+/// **recursive** — the reject list includes an integer-keyed map nested at depth 2, which a shallow
+/// check would wave through.
+///
+/// Two different refusals are at stake and the vector deliberately pins both, because conflating
+/// them is what produced C-08: a text-keyed map has no *encoder* path in a narrowed implementation
+/// (it cannot be built at all), while an integer-keyed map is *encodable* and correctly validates
+/// to `false`. So each case is driven through **decode → validate**, not validate alone: a decoder
+/// that cannot represent the value would otherwise silently masquerade as a validator that rejects
+/// it.
+fn ext_value_validate(v: &Vector) -> Result<Verdict, String> {
+    for case in arr(&v.input, "accept")? {
+        let name = s(case, "case")?;
+        let bytes = unhex(s(case, "cbor_hex")?)?;
+        let decoded = decode(&bytes)
+            .map_err(|e| format!("accept case `{name}` does not DECODE: {e} — an encoder-side refusal is still a refusal (C-08)"))?;
+        if !decoded.is_ext_value() {
+            return Err(format!("accept case `{name}` validated to false"));
+        }
+        // Canonical in both directions: what decodes must re-encode to the same bytes, or the
+        // "value" is not the one the signature covers.
+        eq(&format!("accept case `{name}` re-encodes"), hex(&encode(&decoded)).as_str(), s(case, "cbor_hex")?)?;
+    }
+    for case in arr(&v.input, "reject")? {
+        let name = s(case, "case")?;
+        let bytes = unhex(s(case, "cbor_hex")?)?;
+        // A reject may fail at either stage — floats/tags/null/undefined are not representable at
+        // all, an integer-keyed map decodes cleanly and answers `false`. Both are refusals; what is
+        // forbidden is accepting it.
+        if let Ok(decoded) = decode(&bytes) {
+            if decoded.is_ext_value() {
+                return Err(format!("reject case `{name}` was ACCEPTED as an ext-value"));
+            }
+        }
+    }
+    eq("accept_all", v.expected.get("accept_all").and_then(Value::as_bool), Some(true))?;
+    eq("reject_all", v.expected.get("reject_all").and_then(Value::as_bool), Some(true))?;
+    eq(
+        "validation_is_recursive",
+        v.expected.get("validation_is_recursive").and_then(Value::as_bool),
+        Some(true),
+    )?;
+    eq("reject error code", s(&v.expected, "reject_error_code")?, SyncError::OpInvalid.code_hex().as_str())?;
+    eq("reject error name", s(&v.expected, "reject_error_name")?, SyncError::OpInvalid.name())?;
+
+    // The carrier op: the intended end-to-end shape — one LWW register per (slide, object), with
+    // nesting used for REPRESENTATION while §4.1.1's merge boundary stays at the whole value.
+    let carrier = op_from_hex(s(&v.input, "carrier_op_cbor_hex")?)?;
+    validate_op(&carrier, RECEIVER_NOW_MS)
+        .map_err(|e| format!("the carrier op was refused: {e} — the whole point of C-08"))?;
+    eq(
+        "carrier_op_accepted",
+        v.expected.get("carrier_op_accepted").and_then(Value::as_bool),
+        Some(true),
+    )?;
+    eq("carrier op re-encodes", hex(&carrier.det_cbor()).as_str(), s(&v.input, "carrier_op_cbor_hex")?)?;
+    // And the merge boundary really is the whole value: two concurrent writes of DIFFERENT nested
+    // maps to one register do not merge per-key — one wins entire (§4.1.1).
+    let mut rival = carrier.clone();
+    rival.hlc.counter += 1;
+    rival.value = Some(SVal::TextMap(vec![("x".into(), SVal::Uint(99))]));
+    let merged = ingest_all(&[carrier.clone(), rival.clone()])?;
+    let field = carrier.field.clone().ok_or("carrier op has no field")?;
+    eq(
+        "the whole value wins, never a per-key merge",
+        merged.lww.get(&carrier.target, &field),
+        rival.value.as_ref(),
+    )?;
+    Ok(Verdict::Pass)
+}
+
+// --- SYNC-SNAP-03 — the snapshot body is an op set (§6.1.2, C-09) ------------------------------
+
+/// The body folds to `root`; a post-`covers` op that is **below** the incumbent in the §3 total
+/// order loses; and a replica that adopted §6.1.1's projection instead lands on a different root.
+///
+/// The last part is why this is normative and not stylistic, so it is executed as well as asserted:
+/// the two adoption models are both run here, and the divergence is *reproduced* rather than
+/// described.
+fn snapshot_body_fold(v: &Vector) -> Result<Verdict, String> {
+    let body = SnapshotBody::from_det_cbor(&unhex(s(&v.input, "snapshot_body_cbor_hex")?)?)
+        .map_err(|e| format!("SnapshotBody decode: {e}"))?;
+    eq("body round-trips", hex(&body.det_cbor()).as_str(), s(&v.input, "snapshot_body_cbor_hex")?)?;
+
+    // --- fold-then-recompute -----------------------------------------------------------------
+    let root = dmtap_core::id::ContentId(unhex(s(&v.input, "snapshot_root_hex")?)?);
+    let adopted = body
+        .verify_against_root(&root, Some(""), RECEIVER_NOW_MS)
+        .map_err(|e| format!("the frozen body does not fold to the frozen root: {e}"))?;
+    eq(
+        "folded state",
+        hex(&adopted.observable.det_cbor()).as_str(),
+        s(&v.expected, "folded_state_cbor_hex")?,
+    )?;
+    eq("folded root", hex(adopted.observable.root().as_bytes()).as_str(), s(&v.expected, "folded_root_hex")?)?;
+    eq("body_folds_to_root", v.expected.get("body_folds_to_root").and_then(Value::as_bool), Some(true))?;
+    // The body's fold IS the committed state — which is what makes this stronger than hashing the
+    // transfer bytes. A body whose ops do not produce `root` is `0x0A09` and discarded whole.
+    eq(
+        "body mismatch code",
+        s(&v.expected, "body_mismatch_error_code")?,
+        SyncError::SnapshotRootMismatch.code_hex().as_str(),
+    )?;
+    eq(
+        "body mismatch name",
+        s(&v.expected, "body_mismatch_error_name")?,
+        SyncError::SnapshotRootMismatch.name(),
+    )?;
+    let mut tampered = adopted.observable.clone();
+    tampered.lww[0].2 = SVal::Text("TAMPERED".into());
+    if body.verify_against_root(&tampered.root(), Some(""), RECEIVER_NOW_MS).is_ok() {
+        return Err("a body verified against a root it does not produce".into());
+    }
+    // The body's ops arrive by the ORDINARY op path: each is independently COSE-signed, so a
+    // malicious signer can omit but never forge.
+    for member in body.members() {
+        dmtap_sync::verify_op(member)
+            .map_err(|e| format!("a body member is not an authentic COSE_Sign1: {e}"))?;
+    }
+    eq("body_covers_is_well_formed", vector_from_hex(s(&v.input, "snapshot_covers_cbor_hex")?)?.marks().count() > 0, true)?;
+
+    // --- the ordering demo: (W,3,B) after `covers`, but BELOW the incumbent (W,4,A) ------------
+    let post = dmtap_sync::verify_op_bytes(&unhex(s(&v.input, "post_covers_op_cbor_hex")?)?)
+        .map_err(|e| format!("post-covers op does not verify: {e}"))?;
+    let covers = vector_from_hex(s(&v.input, "snapshot_covers_cbor_hex")?)?;
+    if !covers.lacks(&post.hlc) {
+        return Err("the post-`covers` op is not actually after `covers`".into());
+    }
+    let incumbent = dmtap_sync::verify_op(&body.members()[0]).map_err(|e| e.to_string())?;
+    if post.hlc >= incumbent.hlc {
+        return Err(
+            "the post-`covers` op is not BELOW the incumbent — the vector's whole point is lost"
+                .into(),
+        );
+    }
+
+    // The conformant replica: folded the body, so it HAS the incumbent's HLC to compare against.
+    let mut conformant = adopted.state.clone();
+    conformant.ingest(&post, RECEIVER_NOW_MS).map_err(|e| format!("ingest: {e}"))?;
+    let after = ObservableState::of(&conformant);
+    eq("state after post op", hex(&after.det_cbor()).as_str(), s(&v.expected, "state_after_post_op_cbor_hex")?)?;
+    eq("root after post op", hex(after.root().as_bytes()).as_str(), s(&v.expected, "root_after_post_op_hex")?)?;
+    let field = incumbent.field.clone().ok_or("incumbent has no field")?;
+    eq(
+        "winning value after post op",
+        conformant.lww.get(&incumbent.target, &field).and_then(SVal::as_text),
+        Some(s(&v.expected, "winning_value_after_post_op")?),
+    )?;
+
+    // The projection-adopter: took §6.1.1's bytes, so it has the VALUE but not its HLC. The same
+    // op now wins, because there is nothing for it to be less than.
+    let mut projection = SyncState::new();
+    projection.ingest(&post, RECEIVER_NOW_MS).map_err(|e| format!("ingest: {e}"))?;
+    let projected = ObservableState::of(&projection);
+    eq(
+        "projection-adopter state",
+        hex(&projected.det_cbor()).as_str(),
+        s(&v.expected, "projection_adopt_state_cbor_hex")?,
+    )?;
+    eq(
+        "projection-adopter root",
+        hex(projected.root().as_bytes()).as_str(),
+        s(&v.expected, "projection_adopt_root_hex")?,
+    )?;
+    eq(
+        "projection_adopt_is_nonconformant",
+        v.expected.get("projection_adopt_is_nonconformant").and_then(Value::as_bool),
+        Some(true),
+    )?;
+    eq("roots_differ", v.expected.get("roots_differ").and_then(Value::as_bool), Some(true))?;
+    if projected.root().as_bytes() == after.root().as_bytes() {
+        return Err("the two adoption models agreed — the divergence was not reproduced".into());
+    }
+
+    // The observable state the vector states independently: same bytes, computed from the fold.
+    eq(
+        "observable state",
+        hex(&adopted.observable.det_cbor()).as_str(),
+        s(&v.input, "observable_state_cbor_hex")?,
+    )?;
+    Ok(Verdict::Pass)
+}
+
+/// A minimal but genuine §6.1.2 [`SnapshotBody`] signed by `sk`, plus the root its fold produces.
+///
+/// Used where a vector freezes a *response encoding* but predates C-09's body type: the encoding
+/// assertions run against the frozen bytes, the adoption assertions run against this.
+fn conformant_body(sk: &IdentityKey) -> Result<(Vec<u8>, dmtap_core::id::ContentId), String> {
+    let op = SyncOp {
+        kind: dmtap_sync::OP_LWW_SET,
+        ns: String::new(),
+        target: "doc1".into(),
+        field: Some("title".into()),
+        value: Some(SVal::Text("n".into())),
+        hlc: Hlc { wall: 1_700_000_100_000, counter: 4, author: sk.public() },
+        observed: None,
+        reference: None,
+    };
+    let signed = dmtap_sync::sign_op(sk, &op).map_err(|e| format!("sign_op: {e}"))?;
+    let body = SnapshotBody::new(vec![signed]);
+    let state = body.fold(Some(""), RECEIVER_NOW_MS).map_err(|e| format!("fold: {e}"))?;
+    Ok((body.det_cbor(), dmtap_sync::state_root(&state)))
 }
 
 /// The §5.2.1 `pull` envelope for a fast-join answer: `{2: FastJoin}`.
@@ -1297,7 +1541,7 @@ fn fastjoin_floor_predicate(v: &Vector) -> Result<Verdict, String> {
     // UNCHANGED — and never a fallback to the suffix.
     let before = behind.clone();
     let unfetchable = responder_snapshot.clone();
-    match unfetchable.adopt(&behind, &[], &[], |_| None) {
+    match unfetchable.adopt(&behind, &[], &[], RECEIVER_NOW_MS, |_| None) {
         Err(e) => {
             eq("state_body_unfetchable code", e.code_hex().as_str(), s(&v.expected, "state_body_unfetchable_error_code")?)?;
             eq("state_body_unfetchable name", e.name(), s(&v.expected, "state_body_unfetchable_error_name")?)?;

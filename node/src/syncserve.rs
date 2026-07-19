@@ -30,8 +30,8 @@ use dmtap_core::TimestampMs;
 use dmtap_sync::detcbor::{decode, encode};
 use dmtap_sync::recon::{summarize, OpEntry, RangeFingerprint};
 use dmtap_sync::{
-    caller_is_below_floor, verify_op_bytes, FastJoin, Hlc, ObservableState, SVal, Snapshot,
-    SyncError, SyncOp, SyncState, VersionVector, INLINE_STATE_CEILING,
+    caller_is_below_floor, verify_op_bytes, FastJoin, Hlc, SVal, Snapshot, SnapshotBody, SyncError,
+    SyncOp, SyncState, VersionVector, INLINE_STATE_CEILING,
 };
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -40,6 +40,33 @@ use tokio::net::TcpStream;
 pub const SYNC1_RESOURCE: &str = "sync-1";
 /// The ability verb paired with [`SYNC1_RESOURCE`] — the bearer is authorized to reconcile.
 pub const SYNC1_ABILITY: &str = "sync";
+
+/// The `sync-1` **sub-resource** by which a peer asserts it runs an engine on `ext-value` profile
+/// `2` — §18.3.6's full recursive type, text-keyed maps and heterogeneous arrays included
+/// (`SYNC.md` §14 C-08, [`dmtap_sync::EXT_VALUE_PROFILE`]).
+///
+/// # Why this exists, and what it is not
+///
+/// C-08 is a **widening**, and a widening diverges by *rejection*: an engine on profile `1` answers
+/// `0x0A03` to an op a profile-`2` engine accepts, so the two hold different op sets while only one
+/// of them saw an error. The specification records that hazard and says a product SHOULD wait until
+/// every engine is updated — but it defines **no** sub-token, header or version field for asking a
+/// peer which profile it is on, so there is nothing frozen to implement. §4.1 mentions `sync-1`
+/// sub-tokens only for the (unrelated) per-op-vs-frame signing choice.
+///
+/// This constant is therefore a **local deployment convention**, spelled in the one place this node
+/// negotiates anything — the `sync-1` capability — so an operator running a mixed fleet has a
+/// handle to gate on, rather than a silent assumption. It is deliberately **not** enforced by
+/// [`sync1_authorizes`]: refusing to reconcile with a profile-`1` peer would break every deployment
+/// that has no nested values at all, which is most of them. Treat the spelling as provisional until
+/// `SYNC.md` freezes one.
+pub const SYNC1_EXT_VALUE_2: &str = "sync-1/ext-value-2";
+
+/// Whether `token` asserts its bearer runs an `ext-value` profile-`2` engine
+/// ([`SYNC1_EXT_VALUE_2`]). Advisory: a `false` means "unknown or old", never "refuse".
+pub fn sync1_peer_accepts_widened_ext_value(token: &CapabilityToken) -> bool {
+    token.caps.iter().any(|c| c.resource == SYNC1_EXT_VALUE_2 && c.ability == SYNC1_ABILITY)
+}
 
 /// The base path of the §5.2/§5.3 surface.
 pub const SYNC_BASE: &str = "/sync/";
@@ -104,8 +131,8 @@ pub struct SyncReplica {
     /// The snapshot that **replaces** the truncated prefix. Truncation without one is refused, so
     /// this is `Some` whenever `truncated_below` is.
     snapshot: Option<Snapshot>,
-    /// `det_cbor(ObservableState)` for [`SyncReplica::snapshot`] — the body `GET /sync/state/<root>`
-    /// serves and key 3 of a [`FastJoin`] carries.
+    /// `det_cbor(SnapshotBody)` for [`SyncReplica::snapshot`] — the §6.1.2 op-set body
+    /// `GET /sync/state/<root>` serves and key 3 of a [`FastJoin`] carries.
     ///
     /// Retained because a `Snapshot` commits to the state by *address*: without the bytes behind
     /// `root`, a peer handed a fast-join could verify the checkpoint and still be unable to adopt
@@ -151,7 +178,7 @@ impl SyncReplica {
         self.snapshot.as_ref()
     }
 
-    /// The `det_cbor(ObservableState)` body behind [`SyncReplica::snapshot`]'s `root`, if held.
+    /// The `det_cbor(SnapshotBody)` body behind [`SyncReplica::snapshot`]'s `root`, if held.
     pub fn snapshot_state(&self) -> Option<&[u8]> {
         self.snapshot_state.as_deref()
     }
@@ -188,10 +215,26 @@ impl SyncReplica {
     ///
     /// Returns how many ops were dropped.
     ///
-    /// - the state body behind `snapshot.root` MUST be supplied and MUST hash to that root
-    ///   (`0x0A09`). A `Snapshot` commits to its state by address; truncating while holding only
-    ///   the address would leave this replica able to *prove* a checkpoint it cannot *serve*, and
-    ///   every peer that fast-joined from it stranded at §5.2.1 step 3.
+    /// - the §6.1.2 **body** behind `snapshot.root` is built **here**, from this replica's own
+    ///   journal, and MUST fold back to that root (`0x0A09`). A `Snapshot` commits to its state by
+    ///   address; truncating while holding only the address would leave this replica able to
+    ///   *prove* a checkpoint it cannot *serve*, and every peer that fast-joined from it stranded
+    ///   at §5.2.1 step 3.
+    ///
+    /// # The body is derived, not supplied (§14 C-09)
+    ///
+    /// This method used to take `state_body: Vec<u8>` — `det_cbor(ObservableState)` — and hash it
+    /// against `root`. That is exactly the shape C-09 declares non-conformant: the projection drops
+    /// the merge metadata the next merge needs, so a peer adopting it diverges silently. The body
+    /// is now a [`SnapshotBody`]: the compacted set of **signed ops** whose fold equals the state,
+    /// selected from the journal by §6.2's retention rule and checked by folding it and recomputing
+    /// `root` before a single op is dropped.
+    ///
+    /// Deriving rather than accepting it is also what discharges §6.2's obligation at the right
+    /// place. The retention set is quantified over *the ops this replica is about to drop* — it is
+    /// enumerable **here** and nowhere else, and it is explicitly not re-checkable by the peer that
+    /// later receives the fast-join (§5.2.2). A caller cannot pass the wrong body because it no
+    /// longer passes one.
     ///
     /// Returns how many ops were dropped.
     ///
@@ -201,23 +244,37 @@ impl SyncReplica {
         &mut self,
         cut: &Hlc,
         snapshot: Snapshot,
-        state_body: Vec<u8>,
+        receiver_now_ms: u64,
     ) -> Result<usize, SyncError> {
         snapshot.verify_sig()?;
-        // The body must be the one the snapshot commits to — checked here, once, at the only point
-        // where this replica has both in hand.
-        if dmtap_sync::state_root_of(&state_body) != snapshot.root {
-            return Err(SyncError::SnapshotRootMismatch);
-        }
-        ObservableState::from_det_cbor(&state_body)?;
+        // §6.2's body-retention obligation, discharged before anything is dropped: compact the
+        // journal to the retention set and PROVE it folds to the root the snapshot committed to.
+        // A replica that cannot satisfy the retention set refuses the truncation whole.
+        let body = SnapshotBody::compact(
+            &self.state,
+            self.journal.values().map(|j| (&j.op, j.cose.as_slice())),
+            receiver_now_ms,
+        )?;
+        body.verify_against_root(&snapshot.root, Some(&snapshot.ns), receiver_now_ms)?;
+        let state_body = body.det_cbor();
         if !self.ns.contains(&snapshot.ns) {
             return Err(SyncError::NsLeak);
         }
+        // **§6.2's retention rule, applied to the journal itself: truncation removes SUPERSEDED
+        // history, never LIVE history.** An op the body needs stays, however far below the cut it
+        // sits — the winning LWW cell, an uncancelled `set-add`, a live RGA atom's insert and the
+        // tombstoned atom that is its left-origin. Dropping them would leave this replica holding a
+        // body it can serve exactly once (from `snapshot_state`) and can never rebuild, and a
+        // second truncation would then be unable to prove anything at all.
+        let retained: std::collections::BTreeSet<Vec<u8>> = dmtap_sync::retention_set(
+            &self.state,
+            &self.journal.values().map(|j| &j.op).collect::<Vec<_>>(),
+        );
         // Every op about to be dropped must be accounted for by the snapshot.
         let doomed: Vec<Vec<u8>> = self
             .journal
             .iter()
-            .filter(|(_, j)| j.op.hlc < *cut)
+            .filter(|(id, j)| j.op.hlc < *cut && !retained.contains(*id))
             .map(|(id, _)| id.clone())
             .collect();
         for id in &doomed {
@@ -556,12 +613,18 @@ fn pull_response(gw: &SyncGateway, body: &[u8]) -> SyncResponse {
     }
 }
 
-/// `GET /sync/state/<root>` → `det_cbor(ObservableState)` (§5.2.1).
+/// `GET /sync/state/<root>` → `det_cbor(SnapshotBody)` (§5.2.1 / §6.1.2).
 ///
-/// The by-reference half of the fast-join encoding split. The response is **content-addressed and
-/// immutable**: `<root>` is the §18.1.5 address of the bytes returned, so a caller re-hashes what it
-/// receives and compares to `Snapshot.root` rather than trusting this endpoint, this connection, or
-/// this node. That is what lets any relay cache and pin the body, any holder serve it, and every
+/// The by-reference half of the fast-join encoding split. **What is served is a compacted set of
+/// signed ops, not a state document** (§14 C-09): the projection §6.1.1 defines drops exactly the
+/// merge metadata a joining replica's next merge needs, so serving it would make every fast-join a
+/// silent divergence.
+///
+/// The response is **immutable and self-verifying**, but note what "verifying" means here: a caller
+/// does not re-hash these bytes against `<root>` — it **folds them and recomputes**, because
+/// `Snapshot.root` commits to the state the ops produce, not to the transfer encoding. That is
+/// strictly stronger, and it is why any holder may serve this: the ops are individually signed, so a
+/// holder can omit but cannot forge. That is what lets any relay cache and pin the body, any holder serve it, and every
 /// peer fast-joining to the same `covers` dedupe to the same bytes.
 ///
 /// `404` for an address this replica does not hold — a peer then asks another holder. It is a
@@ -904,9 +967,12 @@ mod tests {
         Snapshot::create(sk, 1, "docs", r.state(), T)
     }
 
-    /// The `det_cbor(ObservableState)` body a snapshot of `r` commits to (§5.2.1).
+    /// The §6.1.2 `det_cbor(SnapshotBody)` a snapshot of `r` commits to — the compacted op set
+    /// whose fold equals `r`'s observable state (§6.2's retention rule, applied to its journal).
     fn body_of(r: &SyncReplica) -> Vec<u8> {
-        ObservableState::of(r.state()).det_cbor()
+        SnapshotBody::compact(r.state(), r.journal.values().map(|j| (&j.op, j.cose.as_slice())), T)
+            .expect("a replica must be able to compact its own journal")
+            .det_cbor()
     }
 
     /// §5.2.1's MUST in its **other** direction: a caller at or above the floor must NOT be
@@ -917,8 +983,7 @@ mod tests {
         let sk = IdentityKey::generate();
         let mut r = replica_with(&sk, 5);
         let snap = snapshot_of(&r, &sk);
-        let body = body_of(&r);
-        r.truncate_below(&hlc(&sk, 3), snap, body).unwrap();
+        r.truncate_below(&hlc(&sk, 3), snap, T).unwrap();
 
         // This caller has everything the snapshot folded in, so nothing it needs was truncated.
         let mut caught_up = VersionVector::new();
@@ -933,27 +998,41 @@ mod tests {
         }
     }
 
-    /// A truncation may not keep an address it cannot serve: the state body is required, and it
-    /// must be the one `Snapshot.root` commits to.
+    /// A truncation may not keep an address it cannot serve: the §6.1.2 body is derived from this
+    /// replica's own journal, and it must **fold back** to the root the snapshot committed to.
     #[test]
-    fn truncation_requires_the_state_body_the_snapshot_commits_to() {
+    fn truncation_requires_a_body_that_folds_to_the_root_the_snapshot_commits_to() {
         let sk = IdentityKey::generate();
         let mut r = replica_with(&sk, 5);
         let snap = snapshot_of(&r, &sk);
 
-        let mut wrong = body_of(&r);
-        wrong.push(0x00);
+        // A snapshot committing to a root this replica's ops do not produce is refused whole —
+        // the fold-then-recompute check (§6.1.2), run here where the ops are still enumerable.
+        let mut wrong = snap.clone();
+        wrong.root = ContentId(vec![0u8; 33]);
+        // Re-signed, so it is the FOLD that rejects it and not the signature check upstream of it.
+        wrong.sig = Vec::new();
+        wrong.sig = sk.sign_domain(&[], &wrong.signing_preimage());
         assert_eq!(
-            r.truncate_below(&hlc(&sk, 3), snap.clone(), wrong),
+            r.truncate_below(&hlc(&sk, 3), wrong, T),
             Err(SyncError::SnapshotRootMismatch),
-            "a body that does not hash to `root` would strand every peer that fast-joined from it"
+            "a body that does not PRODUCE `root` would strand every peer that fast-joined from it"
         );
         assert_eq!(r.len(), 5, "a refused truncation drops nothing");
 
-        // With the right body, the address is servable.
+        // With a snapshot the journal can actually reproduce, the address is servable — and what
+        // is served is the op set, not the projection.
         let body = body_of(&r);
-        r.truncate_below(&hlc(&sk, 3), snap.clone(), body.clone()).unwrap();
+        r.truncate_below(&hlc(&sk, 3), snap.clone(), T).unwrap();
         assert_eq!(r.state_body(&snap.root), Some(body.as_slice()));
+        let served = SnapshotBody::from_det_cbor(r.state_body(&snap.root).unwrap())
+            .expect("what is served is a SnapshotBody, not an ObservableState");
+        assert!(!served.is_empty(), "a non-empty state must ship non-empty ops");
+        assert_eq!(
+            served.verify_against_root(&snap.root, Some("docs"), T).unwrap().observable.det_cbor(),
+            dmtap_sync::ObservableState::of(r.state()).det_cbor(),
+            "and folding it reproduces the committed observable state exactly"
+        );
         assert_eq!(
             r.state_body(&ContentId(vec![0u8; 33])),
             None,
@@ -961,20 +1040,54 @@ mod tests {
         );
     }
 
-    /// §6.2: the prefix below the cut is dropped and the snapshot stands in for it.
+    /// §6.2: the **superseded** prefix below the cut is dropped; **live** history is not.
+    ///
+    /// This is the shape C-09 forces, and it is worth being precise about. Truncation removes
+    /// superseded history, never live history — so what drops is what a later op overwrote, not
+    /// simply "everything below the cut". Five LWW writes to one register leave four superseded and
+    /// one winner; the winner is what the §6.1.2 body is built from, so it stays.
     #[test]
-    fn truncation_drops_the_prefix_and_keeps_the_suffix() {
+    fn truncation_drops_the_superseded_prefix_and_keeps_live_history() {
         let sk = IdentityKey::generate();
-        let mut r = replica_with(&sk, 5);
+        let mut r = SyncReplica::new(vec!["docs".into()]);
+        for i in 0..5u32 {
+            let o = SyncOp {
+                kind: dmtap_sync::wire::OP_LWW_SET,
+                ns: "docs".into(),
+                target: "doc1".into(),
+                field: Some("title".into()),
+                value: Some(SVal::Text(format!("v{i}"))),
+                hlc: hlc(&sk, i),
+                observed: None,
+                reference: None,
+            };
+            r.ingest_cose(&sign_op(&sk, &o).unwrap().to_bytes(), T).unwrap();
+        }
         let snap = snapshot_of(&r, &sk);
         assert_eq!(r.len(), 5);
 
-        let body = body_of(&r);
-        let dropped = r.truncate_below(&hlc(&sk, 3), snap, body).unwrap();
-        assert_eq!(dropped, 3, "counters 0,1,2 are below the cut");
-        assert_eq!(r.len(), 2, "the suffix at 3,4 survives");
+        let dropped = r.truncate_below(&hlc(&sk, 3), snap, T).unwrap();
+        assert_eq!(dropped, 3, "counters 0,1,2 are superseded AND below the cut");
+        assert_eq!(r.len(), 2, "the suffix at 3,4 survives — 4 being the winning cell");
         assert_eq!(r.truncated_below(), Some(&hlc(&sk, 3)));
         assert!(r.snapshot().is_some(), "a truncated log always has its replacement");
+    }
+
+    /// The other half of the same rule: an op that is below the cut but still **live** is retained,
+    /// because the §6.1.2 body needs it. Dropping it would leave this replica holding a body it
+    /// could serve once and never rebuild.
+    #[test]
+    fn live_history_below_the_cut_is_retained_not_truncated() {
+        let sk = IdentityKey::generate();
+        let mut r = replica_with(&sk, 5); // five DISTINCT live OR-Set elements
+        let snap = snapshot_of(&r, &sk);
+        let dropped = r.truncate_below(&hlc(&sk, 3), snap.clone(), T).unwrap();
+        assert_eq!(dropped, 0, "nothing here is superseded, so nothing may be dropped");
+        assert_eq!(r.len(), 5);
+        // And the body is still derivable from the journal, so a SECOND truncation can still
+        // prove itself rather than trusting the bytes it happens to be holding.
+        r.truncate_below(&hlc(&sk, 4), snap, T).unwrap();
+        assert_eq!(r.truncated_below(), Some(&hlc(&sk, 4)));
     }
 
     /// The safety property the whole feature turns on: a peer behind the cut is told to fast-join
@@ -985,8 +1098,7 @@ mod tests {
         let sk = IdentityKey::generate();
         let mut r = replica_with(&sk, 5);
         let snap = snapshot_of(&r, &sk);
-        let body = body_of(&r);
-        r.truncate_below(&hlc(&sk, 3), snap.clone(), body).unwrap();
+        r.truncate_below(&hlc(&sk, 3), snap.clone(), T).unwrap();
 
         // A brand-new peer (empty vector) is behind everything.
         let outcome = r.ops_after(&VersionVector::new(), &[], PULL_BATCH_LIMIT);
@@ -999,9 +1111,13 @@ mod tests {
                 assert_eq!(s.snapshot.root, snap.root);
                 assert_eq!(s.floor, hlc(&sk, 3), "the responder names its §6.2 floor");
                 assert_eq!(
-                    s.state.as_deref().map(dmtap_sync::state_root_of),
+                    s.state
+                        .as_deref()
+                        .map(|b| SnapshotBody::from_det_cbor(b).unwrap())
+                        .map(|b| b.fold(Some("docs"), T).unwrap())
+                        .map(|st| dmtap_sync::state_root(&st)),
                     Some(snap.root.clone()),
-                    "a small body rides inline, and it is the one `root` commits to"
+                    "a small body rides inline as an OP SET, and folding it yields `root`"
                 );
             }
             PullOutcome::Ops(ops) => panic!(
@@ -1029,8 +1145,7 @@ mod tests {
         let mut r = replica_with(&sk, 5);
         let snap = snapshot_of(&r, &sk);
         let covers = snap.covers.clone();
-        let body = body_of(&r);
-        r.truncate_below(&hlc(&sk, 3), snap, body).unwrap();
+        r.truncate_below(&hlc(&sk, 3), snap, T).unwrap();
 
         // A caller whose vector dominates `covers` (it has everything the snapshot folded in).
         let mut caught_up = VersionVector::new();
@@ -1066,7 +1181,7 @@ mod tests {
         // The cut would drop the late op, which the stale snapshot never folded in.
         let cut = Hlc { wall: T + 1, counter: 0, author: sk.public() };
         assert_eq!(
-            r.truncate_below(&cut, stale, body_of(&r)),
+            r.truncate_below(&cut, stale, T),
             Err(SyncError::SnapshotRootMismatch),
             "an uncovered op below the cut must abort the whole truncation"
         );
@@ -1083,9 +1198,8 @@ mod tests {
         // A snapshot with a broken signature never becomes the replacement for real history.
         let mut forged = snapshot_of(&r, &sk);
         forged.sig[0] ^= 0xFF;
-        let body = body_of(&r);
         assert_eq!(
-            r.truncate_below(&hlc(&sk, 3), forged, body),
+            r.truncate_below(&hlc(&sk, 3), forged, T),
             Err(SyncError::OpSigInvalid)
         );
         assert!(r.snapshot().is_none());
@@ -1101,16 +1215,15 @@ mod tests {
             s
         };
         assert!(matches!(
-            r.truncate_below(&hlc(&sk, 3), resigned, body_of(&r)),
+            r.truncate_below(&hlc(&sk, 3), resigned, T),
             Err(SyncError::NsLeak | SyncError::OpSigInvalid)
         ));
 
         // A real truncation, then a LOWER cut: the floor must not regress.
         let snap = snapshot_of(&r, &sk);
-        let body = body_of(&r);
-        r.truncate_below(&hlc(&sk, 4), snap.clone(), body.clone()).unwrap();
+        r.truncate_below(&hlc(&sk, 4), snap.clone(), T).unwrap();
         assert_eq!(r.truncated_below(), Some(&hlc(&sk, 4)));
-        r.truncate_below(&hlc(&sk, 1), snap, body).unwrap();
+        r.truncate_below(&hlc(&sk, 1), snap, T).unwrap();
         assert_eq!(
             r.truncated_below(),
             Some(&hlc(&sk, 4)),

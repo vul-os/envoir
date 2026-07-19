@@ -817,6 +817,69 @@ pub fn fastjoin_encode(fastjoin_json: &str) -> Result<Vec<u8>, BErr> {
     Ok(fj.det_cbor())
 }
 
+// --- §6.1.2 the snapshot BODY (an op set, not a state document) ---------------------------------
+
+/// Decode a [`SnapshotBody`](dmtap_sync::SnapshotBody) into its members: a JSON array of hex
+/// `COSE_Sign1(SyncOp)` envelopes, in wire order.
+///
+/// A host adopts a body by feeding each member to [`SyncEngine::ingest_signed`] — the **ordinary op
+/// path**, which is the whole of §6.1.2: same signature check, same `ext-value` validation, same
+/// CRDT apply, same `op-id` dedup. There is deliberately **no** "load state" entry point on this
+/// binding, and §6.1.2 is explicit that an implementation exposing none is not thereby incomplete.
+#[cfg_attr(feature = "js", wasm_bindgen)]
+pub fn snapshot_body_decode(body_bytes: &[u8]) -> Result<String, BErr> {
+    let body = dmtap_sync::SnapshotBody::from_det_cbor(body_bytes).js()?;
+    let members: Vec<String> = body.members().iter().map(|m| hex(&m.to_bytes())).collect();
+    Ok(out(json!(members)))
+}
+
+/// Encode a body from a JSON array of hex `COSE_Sign1` envelopes — the responder side of
+/// `GET /sync/state/<root>`.
+///
+/// Members are embedded as CBOR **items**, never `bstr`-wrapped (§5.2's op-framing rule, which
+/// §5.2.1 says governs the ops inside a body too). A `bstr`-wrapped member is the C-06
+/// non-conformant framing and is refused on decode rather than unwrapped.
+#[cfg_attr(feature = "js", wasm_bindgen)]
+pub fn snapshot_body_encode(members_hex_json: &str) -> Result<Vec<u8>, BErr> {
+    let items = parse(members_hex_json)?;
+    let items = items
+        .as_array()
+        .ok_or_else(|| binding_err("expected a JSON array of hex COSE_Sign1 envelopes"))?;
+    let mut members = Vec::with_capacity(items.len());
+    for e in items {
+        let bytes = unhex(e.as_str().unwrap_or_default()).map_err(binding_err)?;
+        members.push(dmtap_sync::CoseSign1::from_bytes(&bytes).js()?);
+    }
+    Ok(dmtap_sync::SnapshotBody::new(members).det_cbor())
+}
+
+/// **Fold-then-recompute** (§6.1.2): ingest every member of `body_bytes` through the ordinary §4 op
+/// path into a **provisional** state, derive `ObservableState` per §6.1.1, and require its hash to
+/// equal `root`. Returns the canonical observable-state bytes on success.
+///
+/// Throws `0x0A09` if the ops do not reproduce `root` — and then **nothing** is returned, because
+/// the body is discarded whole; the fold happened in a provisional state the host never saw. Pass
+/// `ns` (the snapshot's namespace) to reject a member from any other namespace with `0x0A0A`, or an
+/// empty string to skip that scoping.
+///
+/// This is **not** `hash(body_bytes) == root`. That would prove only that someone shipped the bytes
+/// they promised; this proves the ops *produce* the committed state, which is what makes a body
+/// safe to resume from and what bounds a malicious signer to **omission** rather than fabrication.
+#[cfg_attr(feature = "js", wasm_bindgen)]
+pub fn snapshot_body_verify_root(
+    body_bytes: &[u8],
+    root: &[u8],
+    ns: &str,
+    receiver_now_ms: f64,
+) -> Result<Vec<u8>, BErr> {
+    let body = dmtap_sync::SnapshotBody::from_det_cbor(body_bytes).js()?;
+    let scope = if ns.is_empty() { None } else { Some(ns) };
+    let adopted = body
+        .verify_against_root(&ContentId(root.to_vec()), scope, now(receiver_now_ms)?)
+        .js()?;
+    Ok(adopted.observable.det_cbor())
+}
+
 /// **The §5.2.1 responder predicate**: is a caller holding `vector` below the floor this snapshot
 /// stands in for — i.e. would the surviving suffix be an incomplete answer for it?
 ///
@@ -828,25 +891,32 @@ pub fn caller_is_below_floor(snapshot_bytes: &[u8], vector_json: &str) -> Result
     Ok(dmtap_sync::caller_is_below_floor(&snapshot, &version_vector_from_json(&parse(vector_json)?).js()?))
 }
 
-/// The content address a fast-join's state body must be fetched from
-/// (`GET /sync/state/<root>`) — what the host needs before it can call [`fastjoin_adopt`].
+/// The content address a fast-join's body must be fetched from (`GET /sync/state/<root>`) — what
+/// the host needs before it can call [`fastjoin_adopt`].
 #[cfg_attr(feature = "js", wasm_bindgen)]
 pub fn fastjoin_state_address(fastjoin_bytes: &[u8]) -> Result<Vec<u8>, BErr> {
     Ok(FastJoin::from_det_cbor(fastjoin_bytes).js()?.snapshot.root.as_bytes().to_vec())
 }
 
 /// The §5.2.1 caller-side sequence, steps 1–3: verify the snapshot, check it closes the gap, and
-/// obtain and hash-verify the state body. Returns the **verified** observable-state bytes.
+/// obtain and verify the body. Returns the **verified** observable-state bytes.
+///
+/// **The body is a [`SnapshotBody`](dmtap_sync::SnapshotBody) — a compacted set of signed ops, not
+/// a state document (§6.1.2).** It is verified by **fold-then-recompute**: every member is ingested
+/// through the ordinary §4 op path into a provisional state, that state's §6.1.1 projection is
+/// hashed, and the hash must equal `Snapshot.root`. Hashing the received bytes would prove only
+/// that the sender shipped what it promised; this proves the ops *produce* the committed state.
 ///
 /// `fetched_body` is what the host retrieved from `GET /sync/state/<root>`, or `undefined` if it
 /// could not retrieve anything. **The fetch itself is the host's job** — this binding does no I/O
 /// (see the crate docs), and keeping the network out of it is also what keeps this call
-/// synchronous. An inline `state` in the FastJoin is tried first and held to exactly the same hash
-/// check, then discarded on mismatch: it is a cache hint, never a second source of truth.
+/// synchronous. An inline `state` in the FastJoin is tried first and held to exactly the same
+/// fold-then-recompute, then discarded on failure: it is a cache hint, never a second source of
+/// truth.
 ///
-/// Throws `0x0A02`/`0x0A01`/`0x0A0A` for an unverifiable or out-of-scope snapshot, `0x0A09` if it
-/// does not close the caller's gap or the body does not hash to `root`, and `0x0A0C` if no body
-/// could be obtained at all.
+/// Throws `0x0A02`/`0x0A01`/`0x0A0A` for an unverifiable or out-of-scope snapshot or member,
+/// `0x0A09` if it does not close the caller's gap or the body does not reproduce `root`, and
+/// `0x0A0C` if no body could be obtained at all.
 ///
 /// **On any failure the caller MUST keep its old vector and MUST NOT fall back to the responder's
 /// surviving suffix.** That fallback is the silent lost-write this whole path exists to prevent,
@@ -858,6 +928,7 @@ pub fn fastjoin_adopt(
     caller_vector_json: &str,
     subscribed_json: &str,
     admitted_hex_json: &str,
+    receiver_now_ms: f64,
     fetched_body: Option<Vec<u8>>,
 ) -> Result<Vec<u8>, BErr> {
     let fj = FastJoin::from_det_cbor(fastjoin_bytes).js()?;
@@ -874,8 +945,9 @@ pub fn fastjoin_adopt(
         .iter()
         .map(|e| unhex(e.as_str().unwrap_or_default()).map_err(binding_err))
         .collect::<Result<_, _>>()?;
-    let adopted = fj.adopt(&caller, &subscribed, &admitted, |_| fetched_body).js()?;
-    Ok(adopted.det_cbor())
+    let adopted =
+        fj.adopt(&caller, &subscribed, &admitted, now(receiver_now_ms)?, |_| fetched_body).js()?;
+    Ok(adopted.observable.det_cbor())
 }
 
 /// **The §5.2.1 step-5 progress MUST (§14 C-07).** A re-pull answered with another `fast-join`
@@ -912,6 +984,7 @@ pub fn fastjoin_adopt_after(
     caller_vector_json: &str,
     subscribed_json: &str,
     admitted_hex_json: &str,
+    receiver_now_ms: f64,
     fetched_body: Option<Vec<u8>>,
 ) -> Result<Vec<u8>, BErr> {
     fastjoin_check_progress(fastjoin_bytes, previous_root, previous_covers_json)?;
@@ -920,6 +993,7 @@ pub fn fastjoin_adopt_after(
         caller_vector_json,
         subscribed_json,
         admitted_hex_json,
+        receiver_now_ms,
         fetched_body,
     )
 }

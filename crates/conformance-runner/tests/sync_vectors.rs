@@ -7,8 +7,9 @@
 //! test also notices, so the allowlist cannot rot). That second direction has now fired for real:
 //! SYNC-PN-01 was corrected upstream (`SYNC.md` §14 C-02), this test failed because the
 //! allowlisted vector had started passing, and the entry was deleted. The allowlist is empty and
-//! all **22/22** vectors pass — 20 for the algebra and, since correction C-05, `SYNC-FJ-01`/
-//! `SYNC-FJ-02` for the §5.2.1 fast-join pull path.
+//! all **24/24** vectors pass — 20 for the algebra; since correction C-05, `SYNC-FJ-01`/
+//! `SYNC-FJ-02` for the §5.2.1 fast-join pull path; and since C-08/C-09, `SYNC-VAL-01` for the
+//! full recursive `ext-value` boundary and `SYNC-SNAP-03` for the §6.1.2 op-set snapshot body.
 
 use std::path::{Path, PathBuf};
 
@@ -19,7 +20,7 @@ fn sync_vectors_path() -> PathBuf {
 }
 
 /// Every Sync vector passes byte-exactly (the discrepancy allowlist is currently empty, so this is
-/// a 22/22 assertion).
+/// a 24/24 assertion).
 #[test]
 fn sync_vectors_pass_except_the_documented_discrepancy() {
     let path = sync_vectors_path();
@@ -28,7 +29,7 @@ fn sync_vectors_pass_except_the_documented_discrepancy() {
         return;
     }
     let vf = load_vectors(&path).expect("sync_vectors.json must load");
-    assert_eq!(vf.vectors.len(), 22, "SYNC.md §10 freezes exactly 22 vectors");
+    assert_eq!(vf.vectors.len(), 24, "SYNC.md §10 freezes exactly 24 vectors");
 
     let mut passed = Vec::new();
     let mut failed = Vec::new();
@@ -53,7 +54,7 @@ fn sync_vectors_pass_except_the_documented_discrepancy() {
              fixed upstream; delete the SYNC_KNOWN_DISCREPANCIES entry"
         );
     }
-    assert_eq!(passed.len(), 22 - known.len(), "expected {} passing sync vectors", 22 - known.len());
+    assert_eq!(passed.len(), 24 - known.len(), "expected {} passing sync vectors", 24 - known.len());
 }
 
 /// The discrepancy allowlist is not a silent escape hatch: every entry must carry an explanation
