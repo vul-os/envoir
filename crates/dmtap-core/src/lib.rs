@@ -42,6 +42,9 @@
 //!   never a §1.4 authority override.
 //! - [`sphinx`] — the fixed-length Sphinx byte layouts `SphinxCell`/`RoutingCommand`/`Surb`/
 //!   `SphinxFragmentHeader` (§18.5.4) — the one mixnet wire object that is NOT CBOR.
+//! - [`pubobj`] — the **DMTAP-PUB** extension (§22): `PubManifest` (plaintext-addressed public
+//!   blobs, global dedup), `PubAnnounce` (kind `0x40`, signed-in-the-clear announcements),
+//!   `FeedEntry`/`FeedHead` (per-identity author feeds with anti-rollback + equivocation detection).
 //!
 //! ## Crypto suite `0x01` (v0 REQUIRED)
 //! Ed25519 signatures, HPKE `DHKEM(X25519)/HKDF-SHA256/ChaCha20-Poly1305`, BLAKE3-256 hashing.
@@ -66,6 +69,7 @@ pub mod mote;
 pub mod policy;
 pub mod pq;
 pub mod profile;
+pub mod pubobj;
 pub mod push;
 pub mod safety;
 pub mod sphinx;

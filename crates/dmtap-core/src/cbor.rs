@@ -37,7 +37,7 @@ pub enum Cv {
 }
 
 /// Errors from decoding / validating canonical CBOR (fail closed, §18.1.1).
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum CborError {
     #[error("malformed CBOR")]
     Malformed,
