@@ -15,9 +15,10 @@ use serde_json::Value;
 use dmtap_core::identity::IdentityKey;
 use dmtap_sync::detcbor::{decode, encode, SVal};
 use dmtap_sync::{
-    caller_is_below_floor, check_admitted, check_counter_entry, check_ns_ref, cose,
-    snapshot::ObservableState, stability_cut, state::SyncState, state::VersionVector, validate_op,
-    DeathClass, DeathState, FastJoin, Hlc, OpEntry, Snapshot, SyncError, SyncOp,
+    caller_is_below_floor, check_admitted, check_counter_entry, check_covers_closes_gap,
+    check_ns_ref, cose, covers_carries_mark_for_floor_author, snapshot::ObservableState,
+    stability_cut, state::SyncState, state::VersionVector, state_root_of, validate_op, DeathClass,
+    DeathState, FastJoin, Hlc, OpEntry, SyncError, SyncOp,
 };
 
 use crate::{hex, unhex, Vector, Verdict};
@@ -1161,10 +1162,9 @@ fn fastjoin_floor_predicate(v: &Vector) -> Result<Verdict, String> {
     // The forbidden answer is WELL-FORMED — that is exactly why the MUST is needed. Recompute it
     // from the surviving suffix and confirm it matches what the vector says the responder would
     // wrongly have sent.
-    // NOTE the encoding: the vector embeds each op as a CBOR ITEM inside key 1's array, not as a
-    // bstr wrapping it — which is what §5.2's `{1 => [COSE_Sign1(SyncOp) | SyncFrame]}` reads as,
-    // since a `COSE_Sign1` is itself a 4-element array. Reproduced as frozen. (`node`'s existing
-    // `POST /sync/pull` bstr-wraps its ops; see SYNC_KNOWN_DISCREPANCIES.)
+    // The encoding is §5.2's op framing, now pinned by correction C-06: each op is embedded as a
+    // CBOR ITEM inside key 1's array, never bstr-wrapped. (`node`'s `POST /sync/pull` and
+    // `POST /sync/ops` were corrected to match; there is no outstanding discrepancy.)
     let suffix = hex_list(&v.input, "surviving_suffix_ops_cbor_hex")?;
     let items: Vec<SVal> = suffix
         .iter()
@@ -1183,19 +1183,117 @@ fn fastjoin_floor_predicate(v: &Vector) -> Result<Verdict, String> {
         s(&v.expected, "caller_caught_up_response_cbor_hex")?,
     )?;
 
-    // Caller-side fail-closed #1: a snapshot whose `covers` does not close the gap is 0x0A09.
-    let not_covering = Snapshot::from_det_cbor(&unhex(s(&v.input, "snapshot_not_covering_gap_cbor_hex")?)?)
-        .map_err(|e| format!("snapshot_not_covering_gap does not decode: {e}"))?;
-    let gap_fj = FastJoin { snapshot: not_covering, floor: floor.clone(), state: None };
-    match gap_fj.adopt(&behind, &[], &[], |_| Some(Vec::new())) {
-        Err(e) => {
-            eq("snapshot_not_covering_gap error", e.code_hex().as_str(), s(&v.expected, "snapshot_not_covering_gap_error_code")?)?;
-            eq("snapshot_not_covering_gap name", e.name(), s(&v.expected, "snapshot_not_covering_gap_error_name")?)?;
-        }
-        Ok(_) => return Err("a snapshot that does not close the gap was adopted".into()),
+    // --- C-06: the ops member framing ---------------------------------------------------------
+    // The bstr-wrapped encoding is published as NON-conformant so it can be recognized, not merely
+    // avoided. Reproduce it from the same suffix and confirm it is the vector's frozen wrong answer.
+    eq("ops_member_framing", s(&v.expected, "ops_member_framing")?, "item-embedded COSE_Sign1")?;
+    eq(
+        "ops_member_bstr_wrapped_conformant",
+        v.expected.get("ops_member_bstr_wrapped_conformant").and_then(Value::as_bool),
+        Some(false),
+    )?;
+    let wrapped = encode(&SVal::Map(vec![(
+        1,
+        SVal::Array(suffix.iter().map(|b| SVal::Bytes(b.clone())).collect()),
+    )]));
+    eq(
+        "the NON-conformant bstr-wrapped ops response",
+        hex(&wrapped).as_str(),
+        s(&v.expected, "ops_member_bstr_wrapped_NONCONFORMANT_cbor_hex")?,
+    )?;
+    // ...and it is distinguishable from the conformant one, which is the whole point of pinning it.
+    if wrapped == would_be {
+        return Err("the two framings encode identically — the C-06 rule would be unenforceable".into());
+    }
+    eq(
+        "ops_member_bstr_wrapped_error_code",
+        s(&v.expected, "ops_member_bstr_wrapped_error_code")?,
+        SyncError::OpInvalid.code_hex().as_str(),
+    )?;
+
+    // --- C-07: the floor/`covers` NON-relationship ----------------------------------------------
+    // The naive predicate fires TRUE on this well-formed fast-join. Assert that it does (so the
+    // counterexample stays live) and that this implementation does NOT act on it.
+    eq(
+        "floor_vs_covers_is_orderable",
+        v.expected.get("floor_vs_covers_is_orderable").and_then(Value::as_bool),
+        Some(false),
+    )?;
+    eq(
+        "floor_vs_covers_naive_predicate_rejected",
+        s(&v.expected, "floor_vs_covers_naive_predicate_rejected")?,
+        "covers.lacks(floor)",
+    )?;
+    eq(
+        "the naive predicate's value on this data",
+        responder_snapshot.snapshot.covers.lacks(&floor),
+        v.expected
+            .get("floor_vs_covers_naive_predicate_value_here")
+            .and_then(Value::as_bool)
+            .ok_or("missing floor_vs_covers_naive_predicate_value_here")?,
+    )?;
+    // The MAY-grade signal, asserted as MAY — true here, and explicitly not a MUST.
+    eq(
+        "covers_carries_mark_for_floor_author",
+        covers_carries_mark_for_floor_author(&responder_snapshot.snapshot, &floor),
+        v.expected
+            .get("covers_carries_mark_for_floor_author")
+            .and_then(Value::as_bool)
+            .ok_or("missing covers_carries_mark_for_floor_author")?,
+    )?;
+    eq(
+        "covers_mark_for_floor_author_is_MUST",
+        v.expected.get("covers_mark_for_floor_author_is_MUST").and_then(Value::as_bool),
+        Some(false),
+    )?;
+    // THE regression: a conformant fast-join whose floor sits above covers[A] must be ADOPTABLE.
+    // (Step 2 alone; the body is supplied so only step 2 is under test.)
+    let body = ObservableState::default().det_cbor();
+    let mut ok_snapshot = responder_snapshot.clone();
+    ok_snapshot.snapshot.root = state_root_of(&body);
+    if let Err(e) = check_covers_closes_gap(&ok_snapshot.snapshot, &floor, &behind) {
+        return Err(format!(
+            "step 2 rejected a CONFORMANT fast-join (floor above covers[A]) with {}: this is \
+             exactly the §14 C-07 defect",
+            e.code_hex()
+        ));
     }
 
-    // Caller-side fail-closed #2: an unfetchable state body is 0x0A0C, with the caller's vector
+    // The §5.2.1 step-5 progress MUST: the same root AND covers twice is a responder loop, 0x0A09.
+    eq(
+        "repeated_fastjoin_same_root_and_covers_error_code",
+        s(&v.expected, "repeated_fastjoin_same_root_and_covers_error_code")?,
+        SyncError::SnapshotRootMismatch.code_hex().as_str(),
+    )?;
+    let (prev_root, prev_covers) =
+        (responder_snapshot.snapshot.root.clone(), responder_snapshot.snapshot.covers.clone());
+    eq("first round makes progress", responder_snapshot.check_progress(None).is_ok(), true)?;
+    match responder_snapshot.check_progress(Some((&prev_root, &prev_covers))) {
+        Err(e) => eq(
+            "repeated fast-join code",
+            e.code_hex().as_str(),
+            s(&v.expected, "repeated_fastjoin_same_root_and_covers_error_code")?,
+        )?,
+        Ok(()) => return Err("a repeated fast-join at the same root/covers was allowed".into()),
+    }
+    // Adopting `covers` may regress the caller's vector for an author — intended, never an error.
+    eq(
+        "adopting_covers_may_regress_caller_vector",
+        v.expected.get("adopting_covers_may_regress_caller_vector").and_then(Value::as_bool),
+        Some(true),
+    )?;
+    eq(
+        "adopting_covers_regression_is_an_error",
+        v.expected.get("adopting_covers_regression_is_an_error").and_then(Value::as_bool),
+        Some(false),
+    )?;
+    eq(
+        "caller_trusts_all_truncated_ops_folded_into_covers",
+        v.expected.get("caller_trusts_all_truncated_ops_folded_into_covers").and_then(Value::as_bool),
+        Some(true),
+    )?;
+
+    // Caller-side fail-closed: an unfetchable state body is 0x0A0C, with the caller's vector
     // UNCHANGED — and never a fallback to the suffix.
     let before = behind.clone();
     let unfetchable = responder_snapshot.clone();

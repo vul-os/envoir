@@ -793,14 +793,42 @@ fn sync_fastjoin_floor_predicate(v: &Value) -> Case {
         strs(i, "surviving_suffix_ops_cbor_hex").iter().map(|h| decode(&unhex(h)).unwrap()).collect();
     let would_be = encode(&SVal::Map(vec![(1, SVal::Array(items))]));
 
-    let gap_fj = FastJoin {
-        snapshot: dmtap_sync::Snapshot::from_det_cbor(&unhex(s(i, "snapshot_not_covering_gap_cbor_hex")))
-            .expect("snapshot decodes"),
-        floor,
-        state: None,
-    };
+    // C-06: the NON-conformant bstr-wrapped framing, recomputed from the same suffix so both
+    // surfaces agree on what the wrong answer looks like — recognizing it is the point.
+    let bstr_wrapped = encode(&SVal::Map(vec![(
+        1,
+        SVal::Array(
+            strs(i, "surviving_suffix_ops_cbor_hex").iter().map(|h| SVal::Bytes(unhex(h))).collect(),
+        ),
+    )]));
+
+    // C-07: the progress MUST — the same root AND covers twice is a responder loop.
+    let (prev_root, prev_covers) = (fj.snapshot.root.clone(), fj.snapshot.covers.clone());
 
     Case::from([
+        ("bstr_wrapped_ops_response".into(), hex(&bstr_wrapped)),
+        // The rejected naive predicate fires TRUE on this well-formed fast-join...
+        (
+            "naive_covers_lacks_floor_rejected".into(),
+            fj.snapshot.covers.lacks(&floor).to_string(),
+        ),
+        // ...and step 2 accepts the fast-join anyway, which is the whole of C-07.
+        (
+            "step2_accepts_conformant_floor_above_covers".into(),
+            dmtap_sync::check_covers_closes_gap(&fj.snapshot, &floor, &behind).is_ok().to_string(),
+        ),
+        (
+            "covers_carries_floor_author_mark".into(),
+            dmtap_sync::covers_carries_mark_for_floor_author(&fj.snapshot, &floor).to_string(),
+        ),
+        (
+            "repeated_fastjoin_refusal".into(),
+            refusal(
+                fj.check_progress(Some((&prev_root, &prev_covers)))
+                    .expect_err("a repeated fast-join at the same root/covers was allowed"),
+            ),
+        ),
+        ("first_round_makes_progress".into(), fj.check_progress(None).is_ok().to_string()),
         (
             "behind_is_below_floor".into(),
             dmtap_sync::caller_is_below_floor(&fj.snapshot, &behind).to_string(),
@@ -814,14 +842,6 @@ fn sync_fastjoin_floor_predicate(v: &Value) -> Case {
             "fastjoin_roundtrip".into(),
             hex(&FastJoin { snapshot: fj.snapshot.clone(), floor: fj.floor.clone(), state: None }
                 .det_cbor()),
-        ),
-        (
-            "gap_not_closed".into(),
-            refusal(
-                gap_fj
-                    .adopt(&behind, &[], &[], |_| Some(Vec::new()))
-                    .expect_err("a snapshot that does not close the gap was adopted"),
-            ),
         ),
         (
             "state_unavailable".into(),

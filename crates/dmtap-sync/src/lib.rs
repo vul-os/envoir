@@ -72,8 +72,9 @@ pub use detcbor::{DetCborError, SVal};
 pub use error::{Action, SyncError};
 pub use recon::{fingerprint, reconcile, summarize, OpEntry, RangeFingerprint, ReconConfig,
     ReconOutcome};
-pub use snapshot::{caller_is_below_floor, check_covers_closes_gap, state_root, state_root_of,
-    verify_root, FastJoin, ObservableState, Snapshot, INLINE_STATE_CEILING};
+pub use snapshot::{caller_is_below_floor, check_covers_closes_gap,
+    covers_carries_mark_for_floor_author, state_root, state_root_of, verify_root, FastJoin,
+    ObservableState, Snapshot, INLINE_STATE_CEILING};
 pub use state::{scope_to_subscription, stability_cut, SyncState, VersionVector};
 pub use wire::{
     ds_hash, op_id_of, AddTag, Hlc, OpRef, SyncOp, DEATH_LIVE, DS_OP, DS_OP_ID, DS_RECON_FP,

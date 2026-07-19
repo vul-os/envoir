@@ -362,9 +362,53 @@ test('SYNC-FJ-02 — the MUST in both directions, and no fallback to the suffix'
   );
   assert.equal(v.expected.caller_behind_ops_response_forbidden, true);
   assert.equal(v.expected.caller_caught_up_fastjoin_forbidden, true);
-  // Caller-side fail-closed, both paths.
-  assert.match(got.gap_not_closed, new RegExp(v.expected.snapshot_not_covering_gap_error_code));
-  assert.ok(got.gap_not_closed.includes(v.expected.snapshot_not_covering_gap_error_name));
+  // --- C-06: op framing is item-embedded, and the bstr-wrapped encoding is recognizably wrong ---
+  assert.equal(v.expected.ops_member_framing, 'item-embedded COSE_Sign1');
+  assert.equal(v.expected.ops_member_bstr_wrapped_conformant, false);
+  assert.equal(
+    got.bstr_wrapped_ops_response,
+    v.expected.ops_member_bstr_wrapped_NONCONFORMANT_cbor_hex,
+    'the NON-conformant framing must be reproducible, so it can be REJECTED rather than guessed at',
+  );
+  assert.notEqual(
+    got.bstr_wrapped_ops_response,
+    got.ops_response_would_be,
+    'if the two framings encoded identically the C-06 rule would be unenforceable',
+  );
+  assert.equal(v.expected.ops_member_bstr_wrapped_error_code, '0x0A03');
+
+  // --- C-07: floor and covers are not comparable ------------------------------------------------
+  assert.equal(v.expected.floor_vs_covers_is_orderable, false);
+  assert.equal(v.expected.floor_vs_covers_naive_predicate_rejected, 'covers.lacks(floor)');
+  // The rejected predicate DOES fire on this data — keep the counterexample live...
+  assert.equal(
+    got.naive_covers_lacks_floor_rejected,
+    String(v.expected.floor_vs_covers_naive_predicate_value_here),
+  );
+  // ...and the implementation must accept the fast-join regardless. This is the regression guard:
+  // a `true` above with a `false` here is precisely the defect C-07 removed.
+  assert.equal(
+    got.step2_accepts_conformant_floor_above_covers,
+    'true',
+    'step 2 rejected a CONFORMANT fast-join whose floor sits above covers[A]',
+  );
+  assert.equal(
+    got.covers_carries_floor_author_mark,
+    String(v.expected.covers_carries_mark_for_floor_author),
+  );
+  assert.equal(v.expected.covers_mark_for_floor_author_is_MUST, false, 'advisory, never a MUST');
+  assert.equal(v.expected.caller_trusts_all_truncated_ops_folded_into_covers, true);
+  // The step-5 progress MUST: the same root AND covers twice is a responder loop.
+  assert.equal(got.first_round_makes_progress, 'true');
+  assert.match(
+    got.repeated_fastjoin_refusal,
+    new RegExp(v.expected.repeated_fastjoin_same_root_and_covers_error_code),
+  );
+  // Adopting `covers` may regress an author's mark; that is intended, never an error.
+  assert.equal(v.expected.adopting_covers_may_regress_caller_vector, true);
+  assert.equal(v.expected.adopting_covers_regression_is_an_error, false);
+
+  // Caller-side fail-closed.
   assert.match(got.state_unavailable, new RegExp(v.expected.state_body_unfetchable_error_code));
   assert.ok(got.state_unavailable.includes(v.expected.state_body_unfetchable_error_name));
   assert.ok(got.state_unavailable.includes(v.expected.state_body_unfetchable_action));

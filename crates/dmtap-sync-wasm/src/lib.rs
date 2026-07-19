@@ -856,6 +856,93 @@ pub fn fastjoin_adopt(
     Ok(adopted.det_cbor())
 }
 
+/// **The §5.2.1 step-5 progress MUST (§14 C-07).** A re-pull answered with another `fast-join`
+/// carrying the *same* `Snapshot.root` **and** `covers` means the responder is looping — adopting
+/// again cannot advance the caller. Throws `0x0A09`; returns nothing on progress.
+///
+/// Pass `previous_root`/`previous_covers_json` from the fast-join adopted on the preceding round of
+/// the same join, or `undefined` on the first round. A host driving a pull loop MUST call this (or
+/// [`fastjoin_adopt_after`]) rather than [`fastjoin_adopt`] alone: the loop it prevents is
+/// unbounded, and nothing else in the protocol terminates it.
+#[wasm_bindgen]
+pub fn fastjoin_check_progress(
+    fastjoin_bytes: &[u8],
+    previous_root: Option<Vec<u8>>,
+    previous_covers_json: Option<String>,
+) -> Result<(), JsError> {
+    let fj = FastJoin::from_det_cbor(fastjoin_bytes).js()?;
+    let prev = match (previous_root, previous_covers_json) {
+        (Some(r), Some(c)) => {
+            Some((ContentId(r), version_vector_from_json(&parse(&c)?).js()?))
+        }
+        _ => None,
+    };
+    fj.check_progress(prev.as_ref().map(|(r, c)| (r, c))).js()
+}
+
+/// [`fastjoin_adopt`] preceded by the [progress MUST](fastjoin_check_progress) — the call a real
+/// pull loop should use.
+#[wasm_bindgen]
+pub fn fastjoin_adopt_after(
+    fastjoin_bytes: &[u8],
+    previous_root: Option<Vec<u8>>,
+    previous_covers_json: Option<String>,
+    caller_vector_json: &str,
+    subscribed_json: &str,
+    admitted_hex_json: &str,
+    fetched_body: Option<Vec<u8>>,
+) -> Result<Vec<u8>, JsError> {
+    fastjoin_check_progress(fastjoin_bytes, previous_root, previous_covers_json)?;
+    fastjoin_adopt(
+        fastjoin_bytes,
+        caller_vector_json,
+        subscribed_json,
+        admitted_hex_json,
+        fetched_body,
+    )
+}
+
+/// **§5.2.1 step 2 in isolation** (§5.2.2): `covers` well-formed and non-empty (`0x0A03`), and the
+/// caller genuinely below the floor (`0x0A09`). Throws the structured refusal; returns nothing when
+/// the fast-join passes.
+///
+/// There is deliberately **no** floor-vs-`covers` comparison in here — see
+/// [`fastjoin_naive_covers_lacks_floor_rejected`] for the predicate that was removed and why.
+#[wasm_bindgen]
+pub fn fastjoin_check_covers(
+    fastjoin_bytes: &[u8],
+    caller_vector_json: &str,
+) -> Result<(), JsError> {
+    let fj = FastJoin::from_det_cbor(fastjoin_bytes).js()?;
+    let caller = version_vector_from_json(&parse(caller_vector_json)?).js()?;
+    dmtap_sync::check_covers_closes_gap(&fj.snapshot, &fj.floor, &caller).js()
+}
+
+/// **Advisory only (§5.2.2, MAY).** Does the fast-join's `covers` carry a mark for `floor.author`?
+///
+/// Exposed so a host can *log* the signal, and deliberately named so it cannot be mistaken for a
+/// verdict. It is **not** a conformance test: an author whose only op sits *at* the floor is
+/// retained rather than truncated, so `covers` need never name it. Treating `false` as a failure
+/// rejects conformant peers — the defect §14 C-07 removed.
+#[wasm_bindgen]
+pub fn fastjoin_covers_carries_floor_author_mark(fastjoin_bytes: &[u8]) -> Result<bool, JsError> {
+    let fj = FastJoin::from_det_cbor(fastjoin_bytes).js()?;
+    Ok(dmtap_sync::covers_carries_mark_for_floor_author(&fj.snapshot, &fj.floor))
+}
+
+/// The **rejected** naive predicate `covers.lacks(floor)`, exposed *only* so the cross-surface trace
+/// can prove both surfaces agree it fires TRUE on a well-formed fast-join — and that neither acts
+/// on it.
+///
+/// **Never gate adoption on this.** `floor` is a single `Hlc` and `covers` is a per-author
+/// `VersionVector`; there is no ordering between them (§5.2.2). This is a counterexample witness,
+/// not an API for deciding anything.
+#[wasm_bindgen]
+pub fn fastjoin_naive_covers_lacks_floor_rejected(fastjoin_bytes: &[u8]) -> Result<bool, JsError> {
+    let fj = FastJoin::from_det_cbor(fastjoin_bytes).js()?;
+    Ok(fj.snapshot.covers.lacks(&fj.floor))
+}
+
 fn version_vector_from_json(v: &Value) -> Result<VersionVector, String> {
     let mut vv = VersionVector::new();
     for e in v.as_array().ok_or("expected a JSON array of {author, hlc} marks")? {

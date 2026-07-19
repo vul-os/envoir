@@ -56,6 +56,30 @@ export function refusal(fn) {
   throw new Error('expected a refusal, but the call succeeded');
 }
 
+/**
+ * The dual of {@link refusal}: `true` when a binding call is ACCEPTED, `false` when it throws a
+ * substrate refusal. Used where the conformance property is that a well-formed input is *not*
+ * rejected — a binding error (bad argument, decode failure) still propagates, since that is a bug
+ * in the harness rather than a verdict about the data.
+ */
+export function ok(fn) {
+  try {
+    fn();
+    return true;
+  } catch (e) {
+    let parsed;
+    try {
+      parsed = JSON.parse(e.message);
+    } catch {
+      throw new Error(`binding threw a non-structured error: ${e.message}`);
+    }
+    if (parsed.error !== 'sync') {
+      throw new Error(`expected a substrate refusal, got a binding error: ${e.message}`);
+    }
+    return false;
+  }
+}
+
 /** An HLC as the vectors spell it (`author_hex`) turned into the binding's spelling. */
 const hlcJson = (h) => JSON.stringify({ wall: h.wall, counter: h.counter, author: h.author_hex });
 
@@ -560,22 +584,37 @@ const executors = {
       }),
     );
 
-    const floor = svalToHlc(JSON.parse(sync.decode_value(unhex(i.responder_floor_hlc_cbor_hex))));
-    const gapFj = sync.fastjoin_encode(
+    // C-06: the NON-conformant bstr-wrapped framing, recomputed so the wrong answer is recognized
+    // rather than merely avoided. Same suffix, members wrapped instead of embedded.
+    const bstrWrapped = sync.encode_value(
       JSON.stringify({
-        snapshot: JSON.parse(sync.snapshot_decode(unhex(i.snapshot_not_covering_gap_cbor_hex))),
-        floor,
-        state: null,
+        map: [[1, { arr: i.surviving_suffix_ops_cbor_hex.map((h) => ({ bstr: h })) }]],
       }),
     );
+
+    // C-07: the same root AND covers twice is a responder loop.
+    const fjDecoded = JSON.parse(sync.fastjoin_decode(fj));
+    const prevRoot = sync.fastjoin_state_address(fj);
+    const prevCovers = JSON.stringify(coversMarks(i.responder_snapshot_covers_cbor_hex));
 
     return {
       behind_is_below_floor: String(sync.caller_is_below_floor(snapBytes, behind)),
       caught_up_is_below_floor: String(sync.caller_is_below_floor(snapBytes, caughtUp)),
       ops_response_would_be: hex(wouldBe),
+      bstr_wrapped_ops_response: hex(bstrWrapped),
       fastjoin_roundtrip: hex(snap),
-      // A snapshot that does not close the gap it was sent to close.
-      gap_not_closed: refusal(() => sync.fastjoin_adopt(gapFj, behind, '[]', '[]', new Uint8Array(0))),
+      // The rejected naive predicate fires TRUE on this well-formed fast-join...
+      naive_covers_lacks_floor_rejected: String(
+        sync.fastjoin_naive_covers_lacks_floor_rejected(fj),
+      ),
+      // ...and step 2 accepts the fast-join anyway. That is the whole of C-07.
+      step2_accepts_conformant_floor_above_covers: String(ok(() => sync.fastjoin_check_covers(fj, behind))),
+      covers_carries_floor_author_mark: String(sync.fastjoin_covers_carries_floor_author_mark(fj)),
+      // The §5.2.1 step-5 progress MUST: re-offering the same checkpoint is 0x0A09, not a re-adopt.
+      first_round_makes_progress: String(ok(() => sync.fastjoin_check_progress(fj, undefined, undefined))),
+      repeated_fastjoin_refusal: refusal(() =>
+        sync.fastjoin_check_progress(fj, prevRoot, prevCovers),
+      ),
       // A body no holder can serve: 0x0A0C, fail-closed, never a fallback to the suffix.
       state_unavailable: refusal(() => sync.fastjoin_adopt(fj, behind, '[]', '[]', undefined)),
       // And a caught-up caller must not be fast-joined at all.

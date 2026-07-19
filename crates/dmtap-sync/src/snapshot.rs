@@ -438,9 +438,10 @@ impl FastJoin {
     /// 1. **Verify the snapshot** — signature under `DMTAP-SYNC-v0/snapshot` (`0x0A02`), signer
     ///    admission against `admitted` when the deployment supplies a list (`0x0A01`), and
     ///    `Snapshot.ns` among the caller's subscriptions (`0x0A0A`).
-    /// 2. **Check it closes the gap** — `covers` MUST dominate every HLC `caller` lacks, and the
-    ///    responder's `floor` MUST NOT exceed `covers`. A fast-join that would leave the same hole
-    ///    it was sent to fill is `0x0A09`.
+    /// 2. **Check what is checkable about `covers`** (§5.2.2) — a well-formed, non-empty
+    ///    `VersionVector` (`0x0A03`), and the caller genuinely below the floor (`0x0A09`). There is
+    ///    deliberately **no** floor-vs-`covers` comparison: see [`check_covers_closes_gap`] for why
+    ///    that rule was removed rather than reworded (§14 C-07).
     /// 3. **Obtain and verify the state body** — the inline copy if it hashes to `root`, otherwise
     ///    whatever `fetch` returns for `root`, hashed the same way. `0x0A09` if a body is served
     ///    but does not hash to `root`; `0x0A0C` if no holder can serve one at all.
@@ -460,6 +461,48 @@ impl FastJoin {
         admitted: &[Vec<u8>],
         fetch: impl FnOnce(&ContentId) -> Option<Vec<u8>>,
     ) -> Result<ObservableState, SyncError> {
+        self.adopt_after(None, caller, subscribed, admitted, fetch)
+    }
+
+    /// **The §5.2.1 step-5 progress MUST.** A re-pull answered with another `fast-join` carrying the
+    /// *same* `Snapshot.root` **and** `covers` means the responder is looping: the caller already
+    /// adopted that exact checkpoint, so adopting it again cannot advance it. Fail `0x0A09` rather
+    /// than re-adopt.
+    ///
+    /// This is the one loop a below-floor caller can otherwise spin in forever, which is why it is a
+    /// MUST rather than a retry budget: the responder is not slow, it is stuck, and a caller that
+    /// re-adopts learns nothing new on any iteration.
+    ///
+    /// `previous` is the `(root, covers)` of the fast-join this caller adopted on the preceding
+    /// round of the *same* join, or `None` on the first round.
+    pub fn check_progress(
+        &self,
+        previous: Option<(&ContentId, &VersionVector)>,
+    ) -> Result<(), SyncError> {
+        match previous {
+            Some((root, covers))
+                if *root == self.snapshot.root && *covers == self.snapshot.covers =>
+            {
+                Err(SyncError::SnapshotRootMismatch)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// [`FastJoin::adopt`] preceded by the §5.2.1 step-5 [progress MUST](Self::check_progress).
+    ///
+    /// Prefer this in a real pull loop; [`adopt`](Self::adopt) is the first-round case
+    /// (`previous == None`) and is kept as-is so no existing caller changes behaviour.
+    pub fn adopt_after(
+        &self,
+        previous: Option<(&ContentId, &VersionVector)>,
+        caller: &VersionVector,
+        subscribed: &[String],
+        admitted: &[Vec<u8>],
+        fetch: impl FnOnce(&ContentId) -> Option<Vec<u8>>,
+    ) -> Result<ObservableState, SyncError> {
+        // --- step 5's loop guard, checked BEFORE any work ------------------------------------
+        self.check_progress(previous)?;
         // --- step 1: the snapshot itself -----------------------------------------------------
         self.snapshot.verify_sig()?;
         if !admitted.is_empty() {
@@ -507,39 +550,62 @@ pub fn caller_is_below_floor(snapshot: &Snapshot, caller: &VersionVector) -> boo
     snapshot.covers.marks().any(|(_, hlc)| caller.lacks(hlc))
 }
 
-/// Whether a fast-join's snapshot actually closes the gap it was sent to close (§5.2.1 step 2).
+/// **Advisory (§5.2.2, MAY — never a MUST).** Does `covers` carry a mark for `floor.author`?
 ///
-/// `0x0A09` when `covers` fails to dominate something the caller lacks, or when the responder's
-/// `floor` exceeds `covers` — in either case adopting would leave the caller with the same hole,
-/// while telling it the round succeeded.
+/// A responder that truncated below `(W,5,A)` will, in the ordinary case, have folded some op of
+/// `A`'s into the snapshot that replaced the prefix, so a `false` here is worth **logging**. It is
+/// deliberately **not** a conformance test and MUST NOT be turned into one: it is not entailed. If
+/// `A`'s only op is *at* the floor, that op is **retained** rather than truncated, and `covers` need
+/// never name `A` at all. Inferring a conformance failure from this predicate rejects conformant
+/// peers — the same class of error as the deleted floor-vs-`covers` rule (§14 C-07).
+pub fn covers_carries_mark_for_floor_author(snapshot: &Snapshot, floor: &Hlc) -> bool {
+    snapshot.covers.marks().any(|(author, _)| author.as_slice() == floor.author.as_slice())
+}
+
+/// The caller-side checks of §5.2.1 step 2, as restated by **§5.2.2**.
+///
+/// # There is no floor-vs-`covers` check here, and there must not be one
+///
+/// `floor` is a **single `Hlc`** — one point in the §3 total order, whose `author` field is the
+/// tiebreaker component of *that timestamp*, not a claim about that author's stream. `covers` is a
+/// **per-author `VersionVector`**. There is **no ordering between them**, so no such comparison is a
+/// rule an implementation could fail to find — it is a category error (§5.2.2).
+///
+/// This crate previously enforced two checks that §14 C-07 removed, both of which rejected
+/// **conformant** responders:
+///
+/// * `covers.lacks(floor)` — the natural-looking predicate. It returns `true` on `SYNC-FJ-01`'s own
+///   frozen data (`floor = (W,5,A)`, `covers[A] = (W,4)`, because `A` produced no op in that
+///   window). The vector caught the specification's own sentence.
+/// * `covers` MUST carry a mark for `floor.author` — now MAY-grade only, see
+///   [`covers_carries_mark_for_floor_author`].
+///
+/// # What remains verifiable
+///
+/// * `covers` is a **well-formed, non-empty** `VersionVector` — an empty one accounts for nothing,
+///   so it can close no gap. Malformed ⇒ `0x0A03` (`ERR_SYNC_OP_INVALID`, §5.2.1 step 2).
+/// * The **other direction** of §5.2.1's MUST: a caller that is *not* below the floor MUST NOT be
+///   fast-joined (`0x0A09`). Its surviving-suffix answer is complete, and adopting a checkpoint
+///   instead would trade verified local history for a trusted one. A responder that sends
+///   `fast-join` anyway is refused rather than obeyed.
+///
+/// # What is merely trusted
+///
+/// That **every truncated op was folded into `covers`**. That is quantified over ops the caller
+/// **cannot see** — they are precisely the ops that no longer exist at the responder — so no
+/// comparison of `floor`, `covers` and the caller's own vector can establish it. The obligation
+/// lives at the responder (§6.2, where the ops are still enumerable); the caller's residual
+/// protection is the step-3 root check and the §6.1 trust policy's backfill-and-recompute.
 pub fn check_covers_closes_gap(
     snapshot: &Snapshot,
-    floor: &Hlc,
+    _floor: &Hlc,
     caller: &VersionVector,
 ) -> Result<(), SyncError> {
-    // The floor must be accounted for by the checkpoint: `covers` MUST carry a mark for the
-    // floor's author, otherwise the responder discarded a prefix belonging to an author the
-    // snapshot never folded in, and the gap is real.
-    //
-    // Note precisely what is NOT checked, because it cannot be: §5.2.1's "the floor MUST NOT
-    // exceed `covers`" is not an HLC comparison against the covers mark. A floor sits, by
-    // construction, one step ABOVE the last covered op — `SYNC-FJ-01`'s own data has
-    // floor = (W,5,A) with covers A@(W,4) — so `covers.lacks(floor)` is TRUE for a perfectly
-    // well-formed fast-join. Whether every truncated op below the floor was folded into `covers` is
-    // a statement about ops the caller cannot see and the marks do not encode; the responder
-    // enforces it at truncation time (where the ops are still in hand), and the caller's real
-    // protection is the root check in step 3 plus the below-floor predicate here.
-    if !snapshot.covers.marks().any(|(author, _)| author.as_slice() == floor.author.as_slice()) {
-        return Err(SyncError::SnapshotRootMismatch);
-    }
-    // An empty `covers` accounts for nothing, so it can close no gap.
+    // Well-formedness (§5.2.1 step 2): a non-empty VersionVector. `0x0A03`, not `0x0A09` — this is
+    // a malformed object, not a root/coverage disagreement.
     if snapshot.covers.marks().next().is_none() {
-        return Err(SyncError::SnapshotRootMismatch);
+        return Err(SyncError::OpInvalid);
     }
-    // The other direction of §5.2.1's MUST, enforced from the caller's side: a caller that is NOT
-    // below the floor must not be fast-joined. Its surviving-suffix answer is complete, and
-    // adopting a checkpoint instead would trade verified local history for a trusted one. A
-    // responder that sends `fast-join` anyway is refused rather than obeyed.
     if !caller_is_below_floor(snapshot, caller) {
         return Err(SyncError::SnapshotRootMismatch);
     }
@@ -612,6 +678,90 @@ mod tests {
         assert!(snap.verify_sig().is_ok());
         snap.ns = "other".into();
         assert_eq!(snap.verify_sig(), Err(SyncError::OpSigInvalid));
+    }
+
+    // --- §14 C-07: the floor/`covers` NON-relationship -------------------------------------------
+
+    /// Build a fast-join shaped exactly like `SYNC-FJ-01`'s frozen data: `floor = (W,5,A)` sitting
+    /// ABOVE `covers[A] = (W,4)`, because author `A` produced no op in that window.
+    fn fj01_shaped() -> (FastJoin, VersionVector) {
+        let sk = IdentityKey::from_seed(&[0xcc; 32]);
+        let mut state = SyncState::new();
+        state.ingest(&lww("doc1", "title", "m", 4, 0xcc), 1_700_000_200_000).unwrap();
+        let mut snap = Snapshot::create(&sk, 0x01, "", &state, 1_700_000_100_000);
+        // covers = {A@(W,4), B@(W,7)} — A below the floor, B above it.
+        snap.covers = VersionVector::default();
+        snap.covers.observe(&h(4, 0xcc));
+        snap.covers.observe(&h(7, 0xdd));
+        let snap = Snapshot { sig: snap.sig.clone(), ..snap };
+        let mut caller = VersionVector::default();
+        caller.observe(&h(2, 0xcc)); // behind B@(W,7) ⇒ genuinely below the floor
+        (FastJoin { snapshot: snap, floor: h(5, 0xcc), state: None }, caller)
+    }
+
+    /// The regression this crate's first pass got wrong: `covers.lacks(floor)` is TRUE here, and a
+    /// caller enforcing any floor-vs-`covers` ordering rejects a CONFORMANT responder. §5.2.2
+    /// removed the rule, so this shape must now pass step 2.
+    #[test]
+    fn floor_above_covers_for_an_author_is_conformant_not_an_error() {
+        let (fj, caller) = fj01_shaped();
+        // The naive predicate the specification explicitly rejects would fire here...
+        assert!(fj.snapshot.covers.lacks(&fj.floor), "the vector's own counterexample shape");
+        // ...but step 2 must NOT reject it.
+        assert_eq!(check_covers_closes_gap(&fj.snapshot, &fj.floor, &caller), Ok(()));
+    }
+
+    /// `covers` carrying a mark for `floor.author` is MAY-grade — true here, but never enforced.
+    #[test]
+    fn covers_mark_for_floor_author_is_advisory_only() {
+        let (mut fj, caller) = fj01_shaped();
+        assert!(covers_carries_mark_for_floor_author(&fj.snapshot, &fj.floor));
+        // Drop A entirely: an author whose only op is AT the floor is retained, not truncated, so
+        // `covers` need never name it. This MUST still pass step 2.
+        let mut covers = VersionVector::default();
+        covers.observe(&h(7, 0xdd));
+        fj.snapshot.covers = covers;
+        assert!(!covers_carries_mark_for_floor_author(&fj.snapshot, &fj.floor));
+        assert_eq!(check_covers_closes_gap(&fj.snapshot, &fj.floor, &caller), Ok(()));
+    }
+
+    /// An empty `covers` accounts for nothing: malformed ⇒ `0x0A03`, not `0x0A09`.
+    #[test]
+    fn empty_covers_is_malformed_0a03() {
+        let (mut fj, caller) = fj01_shaped();
+        fj.snapshot.covers = VersionVector::default();
+        assert_eq!(
+            check_covers_closes_gap(&fj.snapshot, &fj.floor, &caller),
+            Err(SyncError::OpInvalid)
+        );
+    }
+
+    /// §5.2.1 step 5's progress MUST: the same `root` AND `covers` twice is a responder loop.
+    #[test]
+    fn repeated_fastjoin_at_same_root_and_covers_is_0a09() {
+        let (fj, _) = fj01_shaped();
+        let (root, covers) = (fj.snapshot.root.clone(), fj.snapshot.covers.clone());
+        // First round: nothing adopted yet, so there is nothing to loop on.
+        assert_eq!(fj.check_progress(None), Ok(()));
+        // Second round, same checkpoint: refuse rather than re-adopt.
+        assert_eq!(
+            fj.check_progress(Some((&root, &covers))),
+            Err(SyncError::SnapshotRootMismatch)
+        );
+        // A DIFFERENT covers at the same root is progress, not a loop.
+        let mut moved = covers.clone();
+        moved.observe(&h(9, 0xdd));
+        assert_eq!(fj.check_progress(Some((&root, &moved))), Ok(()));
+    }
+
+    /// Adoption regressing the caller's vector for an author is intended, never an error (§5.2.2).
+    #[test]
+    fn adopting_covers_may_regress_an_author_and_that_is_not_an_error() {
+        let (fj, mut caller) = fj01_shaped();
+        // The caller holds a LATER mark for A than `covers` does.
+        caller.observe(&h(6, 0xcc));
+        assert!(caller.lacks(&h(7, 0xdd)), "still below the floor via B");
+        assert_eq!(check_covers_closes_gap(&fj.snapshot, &fj.floor, &caller), Ok(()));
     }
 
     #[test]

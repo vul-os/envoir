@@ -237,12 +237,25 @@ async fn sync_serve_enabled_serves_all_four_endpoints_over_real_http() {
         out.push(("vector", roundtrip(addr, "GET", &p("vector"), Some(&peer_auth), b"").await));
 
         // --- POST /sync/ops: a valid push, a forged op, an off-namespace op ------------------------
+        // §5.2 op framing (C-06): members are item-embedded COSE_Sign1 arrays, never bstr-wrapped.
         let push_body = |ops: Vec<&[u8]>| {
+            encode(&SVal::Map(vec![(
+                1,
+                SVal::Array(ops.into_iter().map(|o| decode(o).expect("op decodes")).collect()),
+            )]))
+        };
+        // ...and the non-conformant framing, kept alongside so the rejection is proven, not assumed.
+        let bstr_wrapped_body = |ops: Vec<&[u8]>| {
             encode(&SVal::Map(vec![(
                 1,
                 SVal::Array(ops.into_iter().map(|o| SVal::Bytes(o.to_vec())).collect()),
             )]))
         };
+        out.push((
+            "ops_bstr_wrapped",
+            roundtrip(addr, "POST", &p("ops"), Some(&peer_auth), &bstr_wrapped_body(vec![&pushed_c]))
+                .await,
+        ));
         out.push((
             "ops_push",
             roundtrip(addr, "POST", &p("ops"), Some(&peer_auth), &push_body(vec![&pushed_c])).await,
@@ -344,6 +357,16 @@ async fn sync_serve_enabled_serves_all_four_endpoints_over_real_http() {
         "apply is idempotent — a re-pushed op is a no-op, not an error (§5.2)"
     );
 
+    // §5.2 op framing (C-06): a bstr-wrapped member is MALFORMED, and is refused with the substrate
+    // code rather than quietly tolerated — the two framings must never half-interoperate.
+    let (status, _, body) = &results["ops_bstr_wrapped"];
+    assert_eq!(*status, 422, "a bstr-wrapped ops member is refused");
+    let msg = String::from_utf8_lossy(body);
+    assert!(
+        msg.contains("ERR_SYNC_OP_INVALID") && msg.contains("0x0a03"),
+        "expected the §12 malformed-op code for bstr-wrapped framing, got {msg}"
+    );
+
     // THE §5.4 property: a valid transport credential does NOT make an op authentic.
     let (status, _, body) = &results["ops_forged"];
     assert_eq!(*status, 422, "a forged op is refused even from an authorized peer");
@@ -367,9 +390,15 @@ async fn sync_serve_enabled_serves_all_four_endpoints_over_real_http() {
     let SVal::Array(ops) = map_field(body, 1) else { panic!("ops is an array") };
     assert_eq!(ops.len(), 2, "an empty vector lacks both the seeded and the pushed op");
     // Oldest HLC first (§5.2), so a truncated batch is always a prefix of the difference.
+    // §5.2 op framing (C-06): each member is the COSE_Sign1 four-element ARRAY as a CBOR item —
+    // never a bstr wrapping it. Re-encoding the item recovers the canonical signed bytes.
     let returned: Vec<Vec<u8>> = ops
         .iter()
-        .map(|o| o.as_bytes().expect("op is a byte string").to_vec())
+        .map(|o| {
+            assert!(o.as_bytes().is_none(), "an ops member must NOT be bstr-wrapped (§5.2, C-06)");
+            assert!(matches!(o, SVal::Array(_)), "an ops member is the COSE_Sign1 array itself");
+            dmtap_sync::detcbor::encode(o)
+        })
         .collect();
     assert!(returned.contains(&seeded), "the seeded op is returned verbatim, still signed");
     assert!(returned.contains(&pushed), "the pushed op round-tripped through the responder");

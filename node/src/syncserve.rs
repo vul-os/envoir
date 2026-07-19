@@ -533,10 +533,22 @@ fn pull_response(gw: &SyncGateway, body: &[u8]) -> SyncResponse {
         Err(r) => return r,
     };
     match gw.replica.ops_after(&vector, &ns, PULL_BATCH_LIMIT) {
-        PullOutcome::Ops(ops) => SyncResponse::cbor(encode(&SVal::Map(vec![(
-            1,
-            SVal::Array(ops.into_iter().map(SVal::Bytes).collect()),
-        )]))),
+        // §5.2 op framing (correction C-06): each member of `ops` is the four-element `COSE_Sign1`
+        // array embedded as a CBOR **item**, NOT `bstr`-wrapped. The journal retains the op's
+        // verbatim bytes, so re-decoding them here yields exactly that array; nothing is hashed or
+        // verified over the outer encoding (the signature preimage is built from the protected and
+        // payload bstrs, and the op-id is over det_cbor(SyncOp) = the payload contents), so no
+        // integrity property depends on preserving the wrapper — and item-embedding keeps the whole
+        // response one deterministic-CBOR tree a validator can check without re-entering blobs.
+        PullOutcome::Ops(ops) => {
+            let items: Vec<SVal> = match ops.iter().map(|b| decode(b)).collect() {
+                Ok(items) => items,
+                // Unreachable: these bytes were verified as canonical COSE_Sign1 on ingest. Fail
+                // closed rather than ship a half-formed batch.
+                Err(_) => return SyncResponse::text(500, "journalled op does not decode"),
+            };
+            SyncResponse::cbor(encode(&SVal::Map(vec![(1, SVal::Array(items))])))
+        }
         PullOutcome::FastJoin(fj) => SyncResponse::cbor(encode(&SVal::Map(vec![(
             2,
             decode(&fj.det_cbor()).expect("own FastJoin encoding"),
@@ -595,13 +607,26 @@ fn ops_response(gw: &mut SyncGateway, body: &[u8], now_ms: u64) -> SyncResponse 
     // Verify + validate every op before mutating anything, so a rejected batch leaves no trace.
     let mut verified: Vec<Vec<u8>> = Vec::with_capacity(items.len());
     for item in &items {
-        let Some(bytes) = item.as_bytes() else {
-            return SyncResponse::text(400, "op must be a byte string");
+        // §5.2 op framing (correction C-06): a member is the `COSE_Sign1` array as a CBOR ITEM.
+        // A `bstr`-wrapped member is MALFORMED — `ERR_SYNC_OP_INVALID` (0x0A03), a substrate error
+        // rather than a bare 400, because it is a conformance failure in the peer's encoder and it
+        // must be legible as one. Rejecting it explicitly is what stops the two framings from
+        // "working" against each other until an op happens to decode as the wrong shape.
+        if item.as_bytes().is_some() {
+            return SyncResponse::sync_error(&SyncError::OpInvalid);
+        }
+        let SVal::Array(_) = item else {
+            return SyncResponse::sync_error(&SyncError::OpInvalid);
         };
-        if let Err(e) = verify_op_bytes(bytes) {
+        // Re-encode the item to recover the canonical COSE_Sign1 bytes the verifier works over.
+        // `encode` is the deterministic §18.1.1 codec, so for a canonical input this reproduces the
+        // sender's bytes exactly; a non-canonical encoding fails the signature check rather than
+        // being silently normalized.
+        let bytes = encode(item);
+        if let Err(e) = verify_op_bytes(&bytes) {
             return SyncResponse::sync_error(&e);
         }
-        verified.push(bytes.to_vec());
+        verified.push(bytes);
     }
 
     let mut applied = 0u64;
