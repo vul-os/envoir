@@ -21,6 +21,13 @@ fn vectors_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../dmtap-core/vectors.json")
 }
 
+/// The sibling spec repo's DMTAP-PUB (§22) / CAD (§23) known-answer vectors — a SEPARATE file from
+/// `vectors.json`, recomputed here via `dmtap_core::pubobj`. Merged into the run when present so the
+/// §22/§23 suite cases resolve their `pub_*` vectors.
+fn pub_vectors_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../dmtap/conformance/vectors/pub_vectors.json")
+}
+
 /// The sibling spec repo's conformance-suite catalog. Optional: this harness's mandatory proof
 /// (vectors.json) does not depend on it, but when present we cross-reference it for extra
 /// coverage reporting.
@@ -30,7 +37,7 @@ fn suite_path() -> PathBuf {
 
 fn main() {
     let vectors_path = vectors_path();
-    let vf = match load_vectors(&vectors_path) {
+    let mut vf = match load_vectors(&vectors_path) {
         Ok(vf) => vf,
         Err(e) => {
             eprintln!("FATAL: could not load {}: {e}", vectors_path.display());
@@ -38,8 +45,25 @@ fn main() {
         }
     };
 
+    // Merge the sibling spec repo's DMTAP-PUB / CAD known-answer vectors when present, so §22/§23
+    // cases are checked and cross-referenced exactly like the core ones.
+    let pvp = pub_vectors_path();
+    let mut pub_count = 0usize;
+    if pvp.exists() {
+        match load_vectors(&pvp) {
+            Ok(pvf) => {
+                pub_count = pvf.vectors.len();
+                vf.vectors.extend(pvf.vectors);
+            }
+            Err(e) => eprintln!("WARN: could not load {}: {e}", pvp.display()),
+        }
+    }
+
     println!("=== DMTAP conformance-runner ===");
     println!("vectors file : {}", vectors_path.display());
+    if pub_count > 0 {
+        println!("pub vectors  : {} (from {})", pub_count, pvp.display());
+    }
     println!("format       : {}", vf.format);
     println!("suite        : {}", vf.suite);
     println!("generated_by : {}", vf.generated_by);

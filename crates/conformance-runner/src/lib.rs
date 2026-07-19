@@ -47,6 +47,10 @@ use dmtap_core::kt::{
 };
 use dmtap_core::mixnet::{MixDirectory, MixNodeDescriptor};
 use dmtap_core::mote::{Envelope, Manifest, Payload};
+use dmtap_core::pubobj::{
+    check_anti_rollback, check_supersede, pub_manifest_root, sealed_style_root, verify_feed_chain,
+    FeedEntry, PubAnnounce, PubError, PubManifest, RollbackDecision,
+};
 use dmtap_core::sphinx::{RoutingCommand, SphinxCell, SphinxFragmentHeader, Surb};
 use dmtap_core::suite::Suite;
 
@@ -338,7 +342,200 @@ fn check_vector_inner(v: &Vector) -> Result<Verdict, String> {
         }
         "sphinx_encode" => check_sphinx_encode_vector(v),
         "cbor_encode" => check_cbor_encode_vector(v),
+        // ── DMTAP-PUB (§22) operations ──────────────────────────────────────────────────────
+        "pub_manifest_root" => check_pub_manifest_root(v),
+        "pub_manifest_type_mismatch" => check_pub_manifest_type_mismatch(v),
+        "det_cbor_decode_pub_manifest" => check_pub_reject(v, |b| PubManifest::from_det_cbor(b).map(|_| ())),
+        "det_cbor_decode_feed_entry" => check_pub_reject(v, |b| FeedEntry::from_det_cbor(b).map(|_| ())),
+        "pub_supersede_check" => check_pub_supersede(v),
+        "pub_feed_entry_root" => check_pub_feed_entry_root(v),
+        "pub_feed_anti_rollback" => check_pub_anti_rollback(v),
         other => Err(format!("conformance-runner does not know operation `{other}` (extend check_vector_inner)")),
+    }
+}
+
+// ── DMTAP-PUB (§22) vector handlers ─────────────────────────────────────────────────────────
+
+/// Parse an ordered list of full `hash` (prefix ‖ digest) content addresses from a hex-string array.
+fn cids_from(v: &Value, field: &str) -> Result<Vec<ContentId>, String> {
+    v.get(field)
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("missing/non-array `{field}`"))?
+        .iter()
+        .map(|h| Ok(ContentId(unhex(h.as_str().ok_or("hash entry is not a string")?)?)))
+        .collect()
+}
+
+/// If the vector's `expected` carries an `error_code` (e.g. `"0x0902"`), assert it equals the
+/// PUB error the reference actually raised (§22.10). A vector without `error_code` skips the check.
+fn assert_pub_code(expected: &Value, got: &PubError) -> Result<(), String> {
+    if let Some(code_str) = expected.get("error_code").and_then(Value::as_str) {
+        let want = u16::from_str_radix(code_str.trim_start_matches("0x"), 16)
+            .map_err(|e| format!("bad error_code `{code_str}`: {e}"))?;
+        if got.code() != want {
+            return Err(format!(
+                "PUB error code mismatch: reference raised {} (0x{:04x}), vector expects {code_str}",
+                got.name(),
+                got.code()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// §22.2.2 — `PubManifest.id` = DS-tagged Merkle root over ordered plaintext chunk hashes. Accepts
+/// either `plaintext_chunks_hex` (recompute `h_i` first, cross-checking `expected.chunk_hashes_hex`)
+/// or a direct `chunk_hashes_hex` input.
+fn check_pub_manifest_root(v: &Vector) -> Result<Verdict, String> {
+    let chunks: Vec<ContentId> = if let Some(pts) = v.input.get("plaintext_chunks_hex").and_then(Value::as_array) {
+        let computed: Vec<ContentId> = pts
+            .iter()
+            .map(|p| Ok::<_, String>(dmtap_core::pubobj::chunk_hash(&unhex(p.as_str().ok_or("plaintext entry not str")?)?)))
+            .collect::<Result<_, _>>()?;
+        if let Some(want) = v.expected.get("chunk_hashes_hex").and_then(Value::as_array) {
+            for (c, w) in computed.iter().zip(want) {
+                let ws = w.as_str().unwrap_or("");
+                if hex(c.as_bytes()) != ws {
+                    return Err(format!("chunk hash mismatch: got {}, want {ws}", hex(c.as_bytes())));
+                }
+            }
+        }
+        computed
+    } else {
+        cids_from(&v.input, "chunk_hashes_hex")?
+    };
+    let root = pub_manifest_root(&chunks);
+    let want = as_hex_str(&v.expected, "id_hex")?;
+    if hex(root.as_bytes()) == want {
+        Ok(Verdict::Pass)
+    } else {
+        Err(format!("pub_manifest_root mismatch: got {}, want {want}", hex(root.as_bytes())))
+    }
+}
+
+/// §22.2.3 — the same ordered chunk-hash list rooted under the public DS-tagged tree vs the §18.9.5
+/// bare sealed tree MUST yield different values (type-incompatibility, `0x0903`).
+fn check_pub_manifest_type_mismatch(v: &Vector) -> Result<Verdict, String> {
+    let chunks = cids_from(&v.input, "chunk_hashes_hex")?;
+    let pub_root = pub_manifest_root(&chunks);
+    let sealed = sealed_style_root(&chunks);
+    let want_pub = as_hex_str(&v.expected, "public_root_hex")?;
+    let want_sealed = as_hex_str(&v.expected, "sealed_style_root_hex")?;
+    if hex(pub_root.as_bytes()) != want_pub {
+        return Err(format!("public_root mismatch: got {}, want {want_pub}", hex(pub_root.as_bytes())));
+    }
+    if hex(sealed.as_bytes()) != want_sealed {
+        return Err(format!("sealed_style_root mismatch: got {}, want {want_sealed}", hex(sealed.as_bytes())));
+    }
+    if pub_root == sealed {
+        return Err("public and sealed roots collided — DS-tag type-incompatibility broken".into());
+    }
+    if !v.expected.get("roots_differ").and_then(Value::as_bool).unwrap_or(true) {
+        return Err("vector claims roots_differ=false, but §22.2.3 requires they differ".into());
+    }
+    Ok(Verdict::Pass)
+}
+
+/// A `reject`-outcome decode vector: the reference decoder MUST fail (fail-closed), and — when the
+/// vector names an `error_code` — with exactly that §22.10 code.
+fn check_pub_reject(v: &Vector, decode: impl Fn(&[u8]) -> Result<(), PubError>) -> Result<Verdict, String> {
+    let bytes = unhex(as_hex_str(&v.input, "cbor_hex")?)?;
+    let outcome = v.expected.get("outcome").and_then(Value::as_str).unwrap_or("");
+    match (outcome, decode(&bytes)) {
+        ("reject", Ok(())) => Err("expected reject but the reference decoder ACCEPTED the bytes".into()),
+        ("reject", Err(e)) => {
+            assert_pub_code(&v.expected, &e)?;
+            Ok(Verdict::Pass)
+        }
+        ("accept", Ok(())) => Ok(Verdict::Pass),
+        ("accept", Err(e)) => Err(format!("expected accept but decoder rejected: {e}")),
+        (other, _) => Err(format!("unknown expect.outcome `{other}`")),
+    }
+}
+
+/// §22.3.4 / §22.3.3 step 5 — a publisher may only supersede its own announcements. Decodes the
+/// successor announce, cross-checks its `pub`/`supersedes` against the vector's declared fields, and
+/// applies [`check_supersede`].
+fn check_pub_supersede(v: &Vector) -> Result<Verdict, String> {
+    let pred_pub = unhex(as_hex_str(&v.input, "predecessor_pub_hex")?)?;
+    let succ_pub_declared = unhex(as_hex_str(&v.input, "successor_pub_hex")?)?;
+    let succ_bytes = unhex(as_hex_str(&v.input, "successor_cbor_hex")?)?;
+    let succ = PubAnnounce::from_det_cbor(&succ_bytes).map_err(|e| format!("successor decode: {e}"))?;
+    // The decoded announce's own fields MUST agree with what the vector declares.
+    if succ.publisher != succ_pub_declared {
+        return Err("decoded successor.pub disagrees with successor_pub_hex".into());
+    }
+    if let Some(sup_hex) = v.input.get("successor_supersedes_hex").and_then(Value::as_str) {
+        match &succ.supersedes {
+            Some(s) if hex(s.as_bytes()) == sup_hex => {}
+            _ => return Err("decoded successor.supersedes disagrees with successor_supersedes_hex".into()),
+        }
+    }
+    let outcome = v.expected.get("outcome").and_then(Value::as_str).unwrap_or("");
+    match (outcome.starts_with("accept"), check_supersede(&pred_pub, &succ.publisher)) {
+        (true, Ok(())) => Ok(Verdict::Pass),
+        (false, Err(e)) => {
+            assert_pub_code(&v.expected, &e)?;
+            Ok(Verdict::Pass)
+        }
+        (true, Err(e)) => Err(format!("expected accept but supersede check rejected: {e}")),
+        (false, Ok(())) => Err("expected reject but supersede check accepted a cross-author link".into()),
+    }
+}
+
+/// §22.4.1 — decode an ordered feed slice, recompute each `entry_id`, cross-check against
+/// `expected.entry_ids_hex`, and validate the `prev`-chain (`expected` note: `prev_chain_valid`).
+fn check_pub_feed_entry_root(v: &Vector) -> Result<Verdict, String> {
+    let entries: Vec<FeedEntry> = v
+        .input
+        .get("entries_cbor_hex")
+        .and_then(Value::as_array)
+        .ok_or("missing entries_cbor_hex")?
+        .iter()
+        .map(|h| {
+            let bytes = unhex(h.as_str().ok_or("entry entry not str")?)?;
+            FeedEntry::from_det_cbor(&bytes).map_err(|e| format!("feed entry decode: {e}"))
+        })
+        .collect::<Result<_, _>>()?;
+    let want_ids = v
+        .expected
+        .get("entry_ids_hex")
+        .and_then(Value::as_array)
+        .ok_or("missing expected.entry_ids_hex")?;
+    if entries.len() != want_ids.len() {
+        return Err(format!("entry count mismatch: got {}, want {}", entries.len(), want_ids.len()));
+    }
+    for (e, w) in entries.iter().zip(want_ids) {
+        let got = hex(e.entry_id().as_bytes());
+        let ws = w.as_str().unwrap_or("");
+        if got != ws {
+            return Err(format!("entry_id mismatch: got {got}, want {ws}"));
+        }
+    }
+    verify_feed_chain(&entries).map_err(|e| format!("prev-chain invalid: {e}"))?;
+    Ok(Verdict::Pass)
+}
+
+/// §22.4.2 — the anti-rollback / equivocation decision on a freshly-fetched `FeedHead`.
+fn check_pub_anti_rollback(v: &Vector) -> Result<Verdict, String> {
+    let last_seq = v.input.get("last_accepted_seq").and_then(Value::as_u64).ok_or("missing last_accepted_seq")?;
+    let pres_seq = v.input.get("presented_seq").and_then(Value::as_u64).ok_or("missing presented_seq")?;
+    let pres_tip = ContentId(unhex(as_hex_str(&v.input, "presented_tip_hex")?)?);
+    let last_tip = v
+        .input
+        .get("last_accepted_tip_hex")
+        .and_then(Value::as_str)
+        .map(|s| unhex(s).map(ContentId))
+        .transpose()?;
+    let outcome = v.expected.get("outcome").and_then(Value::as_str).unwrap_or("");
+    match (outcome.starts_with("accept"), check_anti_rollback(last_seq, last_tip.as_ref(), pres_seq, &pres_tip)) {
+        (true, Ok(RollbackDecision::AcceptNew)) | (true, Ok(RollbackDecision::AcceptIdempotent)) => Ok(Verdict::Pass),
+        (false, Err(e)) => {
+            assert_pub_code(&v.expected, &e)?;
+            Ok(Verdict::Pass)
+        }
+        (true, Err(e)) => Err(format!("expected accept but anti-rollback rejected: {e}")),
+        (false, Ok(d)) => Err(format!("expected reject but anti-rollback accepted ({d:?})")),
     }
 }
 

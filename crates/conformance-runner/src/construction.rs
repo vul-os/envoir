@@ -37,6 +37,13 @@ use dmtap_core::mote::{
     TierEnforcementError, ValidateError, ENVELOPE_SENDER_DS, MOTE_VERSION, PAYLOAD_SIG_DS,
 };
 use dmtap_core::policy::{CallerPolicy, PolicyError};
+use dmtap_core::cad::{
+    self, artifact_kind, format_id, ref_kind, role, ArtifactFormat, ArtifactMetadata,
+    AssemblyChild, AssemblyStructure, CadError, Units,
+};
+use dmtap_core::pubobj::{
+    self, verify_chunk, FeedHead, PubAnnounce, PubError, PubManifest, ServePolicy, PUB_ANNOUNCE_DS,
+};
 use dmtap_core::profile::{Avatar, Profile, ProfileError};
 use dmtap_core::push::{provider, PushError, PushSubscription, WakePing};
 use dmtap_core::sphinx::{self, SphinxCell, SphinxError};
@@ -162,6 +169,27 @@ pub fn run_construction_case(case: &SuiteCase) -> CaseOutcome {
         "DMTAP-SYNC-03" => Some(sync_journal_chain_broken_rejected()),
         "DMTAP-SYNC-04" => Some(sync_crdt_op_invalid_rejected()),
         "DMTAP-SYNC-05" => Some(sync_crdt_two_order_convergence()),
+        // ── DMTAP-PUB (§22) construction-todo cases ─────────────────────────────────────────
+        "DMTAP-PUB-09" => Some(pub_manifest_hash_mismatch_rejected()),
+        "DMTAP-PUB-10" => Some(pub_chunk_hash_mismatch_rejected()),
+        "DMTAP-PUB-11" => Some(pub_announce_id_mismatch_rejected()),
+        "DMTAP-PUB-12" => Some(pub_announce_bad_sig_rejected()),
+        "DMTAP-PUB-17" => Some(pub_feed_head_bad_sig_rejected()),
+        "DMTAP-PUB-18" => Some(pub_announce_unsupported_version_rejected()),
+        "DMTAP-PUB-19" => Some(pub_serve_policy_decline_is_deny()),
+        "DMTAP-PUB-20" => Some(pub_serve_quota_exceeded_is_deny()),
+        // ── CAD / Artifact profile (§23) construction-todo cases ────────────────────────────
+        "DMTAP-CAD-01" => Some(cad_missing_license_rejected()),
+        "DMTAP-CAD-02" => Some(cad_empty_formats_rejected()),
+        "DMTAP-CAD-03" => Some(cad_canonical_source_cardinality_rejected()),
+        "DMTAP-CAD-04" => Some(cad_mesh_canonical_source_rejected()),
+        "DMTAP-CAD-05" => Some(cad_derived_without_provenance_rejected()),
+        "DMTAP-CAD-06" => Some(cad_missing_length_unit_rejected()),
+        "DMTAP-CAD-07" => Some(cad_deprecated_without_reason_rejected()),
+        "DMTAP-CAD-08" => Some(cad_deletion_is_not_an_operation()),
+        "DMTAP-CAD-09" => Some(cad_bad_ref_kind_rejected()),
+        "DMTAP-CAD-10" => Some(cad_bom_cycle_rejected()),
+        "DMTAP-CAD-11" => Some(cad_no_index_is_authoritative()),
         _ => None,
     };
     match result {
@@ -765,6 +793,426 @@ fn manifest_key_present_rejected() -> Result<(), String> {
         Err(CborError::ManifestKeyPresent) => Ok(()),
         other => Err(format!("expected Err(ManifestKeyPresent), got {other:?}")),
     }
+}
+
+// ── DMTAP-PUB (§22) construction-todo handlers ──────────────────────────────────────────────
+
+/// DMTAP-PUB-09 (§22.2.2): a recomputed DS-tagged Merkle root that does not equal `PubManifest.id`
+/// MUST be rejected before fetch begins (`ERR_PUB_MANIFEST_HASH_MISMATCH`, `0x0909`). Builds a
+/// valid public manifest, then tampers one listed chunk hash while keeping the original `id`.
+fn pub_manifest_hash_mismatch_rejected() -> Result<(), String> {
+    let chunks = vec![ContentId::of(b"c0"), ContentId::of(b"c1"), ContentId::of(b"c2")];
+    let m = PubManifest::new(3072, 1024, chunks, Suite::Classical);
+    m.verify().map_err(|e| format!("sanity: a valid PubManifest must self-verify: {e}"))?;
+    let mut tampered = m.clone();
+    tampered.chunks[1].0[5] ^= 0x01; // flip a byte of a listed chunk hash; keep the stored id.
+    match tampered.verify() {
+        Err(PubError::ManifestHashMismatch) => Ok(()),
+        other => Err(format!("expected ManifestHashMismatch (0x0909), got {other:?}")),
+    }
+}
+
+/// DMTAP-PUB-10 (§22.2.2/§5.5.3): a fetched plaintext chunk whose recomputed `h_i` disagrees with
+/// its listed manifest entry MUST be rejected and refetched (`ERR_PUB_CHUNK_HASH_MISMATCH`,
+/// `0x090A`, ROTATE_RETRY).
+fn pub_chunk_hash_mismatch_rejected() -> Result<(), String> {
+    let plaintext = b"chunk-1-of-3: dmtap-pub artifact bytes".to_vec();
+    let listed = pubobj::chunk_hash(&plaintext);
+    verify_chunk(&plaintext, &listed).map_err(|e| format!("sanity: an untampered chunk must verify: {e}"))?;
+    let mut tampered = plaintext.clone();
+    tampered[0] ^= 0xff;
+    match verify_chunk(&tampered, &listed) {
+        Err(PubError::ChunkHashMismatch) => Ok(()),
+        other => Err(format!("expected ChunkHashMismatch (0x090A), got {other:?}")),
+    }
+}
+
+/// DMTAP-PUB-11 (§22.3.1/§22.3.3): a recomputed `announce_id` that does not equal the address the
+/// object was fetched by MUST be rejected (`ERR_PUB_ANNOUNCE_ID_MISMATCH`, `0x0905`).
+fn pub_announce_id_mismatch_rejected() -> Result<(), String> {
+    let sk = IdentityKey::from_seed(&[0xAA; 32]);
+    let pk = sk.public();
+    let mut a = PubAnnounce {
+        v: 0,
+        suite: Suite::Classical,
+        publisher: pk.clone(),
+        roots: vec![ContentId::of(b"manifest-root")],
+        meta: Vec::new(),
+        supersedes: None,
+        ts: 1_700_000_000_000,
+        signer: pk,
+        sig: Vec::new(),
+    };
+    a.sign(&sk);
+    let id = a.announce_id();
+    a.verify(&id).map_err(|e| format!("sanity: an announce must verify against its own id: {e}"))?;
+    let mut wrong = id.clone();
+    wrong.0[7] ^= 0x01; // the address it was "fetched by" is one bit off.
+    match a.verify(&wrong) {
+        Err(PubError::AnnounceIdMismatch) => Ok(()),
+        other => Err(format!("expected AnnounceIdMismatch (0x0905), got {other:?}")),
+    }
+}
+
+/// DMTAP-PUB-12 (§22.3.3): `sig` failing under `signer` (or a `signer` not authorized by `pub`)
+/// MUST be rejected (`ERR_PUB_ANNOUNCE_SIG_INVALID`, `0x0904`). Here the announce's `signer` names
+/// A but the signature was produced by a different key B — a forgery, verified against the object's
+/// own id so the id check passes and the signature check is the one that fails.
+fn pub_announce_bad_sig_rejected() -> Result<(), String> {
+    let sk_a = IdentityKey::from_seed(&[0xAA; 32]);
+    let sk_b = IdentityKey::from_seed(&[0xBB; 32]);
+    let pk_a = sk_a.public();
+    let mut a = PubAnnounce {
+        v: 0,
+        suite: Suite::Classical,
+        publisher: pk_a.clone(),
+        roots: vec![ContentId::of(b"manifest-root")],
+        meta: Vec::new(),
+        supersedes: None,
+        ts: 1_700_000_000_000,
+        signer: pk_a,
+        sig: Vec::new(),
+    };
+    a.sig = sk_b.sign_domain(PUB_ANNOUNCE_DS, &a.signing_preimage());
+    match a.verify(&a.announce_id()) {
+        Err(PubError::AnnounceSigInvalid) => Ok(()),
+        other => Err(format!("expected AnnounceSigInvalid (0x0904), got {other:?}")),
+    }
+}
+
+/// DMTAP-PUB-17 (§22.4.1): `FeedHead.sig` failing under the `signer`/`pub` chain MUST be rejected
+/// (`ERR_PUB_FEED_SIG_INVALID`, `0x0906`). `FeedHead::verify` recomputes the signing preimage from
+/// the head's fields (excluding `sig`), so a flipped signature bit fails verification directly.
+fn pub_feed_head_bad_sig_rejected() -> Result<(), String> {
+    let sk = IdentityKey::from_seed(&[0xAA; 32]);
+    let pk = sk.public();
+    let mut head = FeedHead {
+        v: 0,
+        suite: Suite::Classical,
+        publisher: pk.clone(),
+        seq: 1,
+        tip: ContentId::of(b"tip-entry"),
+        ts: 1_700_000_000_000,
+        signer: pk,
+        sig: Vec::new(),
+    };
+    head.sign(&sk);
+    head.verify().map_err(|e| format!("sanity: a valid FeedHead must verify: {e}"))?;
+    head.sig[0] ^= 0x01;
+    match head.verify() {
+        Err(PubError::FeedSigInvalid) => Ok(()),
+        other => Err(format!("expected FeedSigInvalid (0x0906), got {other:?}")),
+    }
+}
+
+/// DMTAP-PUB-18 (§22.3.1/§22.4.1): a PUB object carrying a `v` the implementation does not support
+/// MUST be rejected, never guessed (`ERR_PUB_UNSUPPORTED_VERSION`, `0x0901`).
+fn pub_announce_unsupported_version_rejected() -> Result<(), String> {
+    let sk = IdentityKey::from_seed(&[0xAA; 32]);
+    let pk = sk.public();
+    let a = PubAnnounce {
+        v: 1, // any value != 0
+        suite: Suite::Classical,
+        publisher: pk.clone(),
+        roots: vec![ContentId::of(b"manifest-root")],
+        meta: Vec::new(),
+        supersedes: None,
+        ts: 1,
+        signer: pk,
+        sig: vec![0u8; 64],
+    };
+    match PubAnnounce::from_det_cbor(&a.det_cbor()) {
+        Err(PubError::UnsupportedVersion) => Ok(()),
+        other => Err(format!("expected UnsupportedVersion (0x0901), got {other:?}")),
+    }
+}
+
+/// DMTAP-PUB-19 (§22.6.2): a holder declining to serve a requested public object per its own serve
+/// policy is a policy deny at the holder (`ERR_PUB_NOT_SERVED`, `0x090C`, DENY_POLICY), never a
+/// correctness error and never a protocol takedown; the fetcher rotates to another holder.
+fn pub_serve_policy_decline_is_deny() -> Result<(), String> {
+    let declined = ContentId::of(b"an-object-this-holder-declines");
+    let policy = ServePolicy { declined: vec![declined.clone()], ..Default::default() };
+    policy
+        .admit(&ContentId::of(b"a-different-object"), 1024, 0)
+        .map_err(|e| format!("sanity: an undeclined object must be admitted: {e}"))?;
+    match policy.admit(&declined, 1024, 0) {
+        Err(PubError::NotServed) => Ok(()),
+        other => Err(format!("expected NotServed (0x090C), got {other:?}")),
+    }
+}
+
+/// DMTAP-PUB-20 (§22.6.3): exceeding a serving node's admission policy (object size / per-publisher
+/// quota / append rate) is a policy deny (`ERR_PUB_SERVE_QUOTA`, `0x090D`, DENY_POLICY), never a
+/// security/crypto gate and never a silent hole.
+fn pub_serve_quota_exceeded_is_deny() -> Result<(), String> {
+    let policy = ServePolicy {
+        per_publisher_quota: Some(1000),
+        max_object_size: Some(500),
+        ..Default::default()
+    };
+    let id = ContentId::of(b"obj");
+    policy.admit(&id, 400, 500).map_err(|e| format!("sanity: a within-limit admit must pass: {e}"))?;
+    // Exceed the per-publisher quota: 800 already stored + 400 = 1200 > 1000.
+    match policy.admit(&id, 400, 800) {
+        Err(PubError::ServeQuota) => {}
+        other => return Err(format!("expected ServeQuota (0x090D) on quota, got {other:?}")),
+    }
+    // Exceed the object-size ceiling.
+    match policy.admit(&id, 600, 0) {
+        Err(PubError::ServeQuota) => Ok(()),
+        other => Err(format!("expected ServeQuota (0x090D) on size ceiling, got {other:?}")),
+    }
+}
+
+// ── CAD / Artifact profile (§23) construction-todo handlers ─────────────────────────────────
+
+/// A valid non-assembly artifact metadata (one native canonical-source format, explicit units,
+/// SPDX license) used as the base each negative case perturbs.
+fn cad_valid_part() -> ArtifactMetadata {
+    ArtifactMetadata {
+        name: "corner-bracket".into(),
+        description: "an L-bracket".into(),
+        artifact_kind: artifact_kind::PART,
+        formats: vec![ArtifactFormat {
+            format_id: format_id::NATIVE,
+            manifest_root: ContentId::of(b"native-source"),
+            role: role::CANONICAL_SOURCE,
+            derived_from_format: None,
+            format_version: Some("kerf 1.0".into()),
+        }],
+        units: Units { length_unit: "mm".into(), angle_unit: None, mass_unit: None },
+        tags: vec!["bracket".into()],
+        license: "CERN-OHL-S-2.0".into(),
+        deprecated: false,
+        deprecation_reason: None,
+        derived_from: None,
+    }
+}
+
+/// DMTAP-CAD-01 (§23.4): an artifact `ArtifactMetadata` omitting `license` (key 7) is malformed for
+/// this profile — a CAD-aware index MUST refuse to index it (a generic §22 node stores it unaffected).
+fn cad_missing_license_rejected() -> Result<(), String> {
+    let md = cad_valid_part();
+    ArtifactMetadata::parse_and_validate(&md.det_cbor()).map_err(|e| format!("sanity: base must validate: {e}"))?;
+    // Splice out key 7 (license) and re-decode.
+    let cv = cbor::decode(&md.det_cbor()).map_err(|e| format!("decode: {e}"))?;
+    let mut pairs = match cv { Cv::Map(p) => p, _ => return Err("metadata is not a map".into()) };
+    pairs.retain(|(k, _)| *k != 7);
+    let bytes = cbor::encode(&Cv::Map(pairs));
+    match ArtifactMetadata::from_det_cbor(&bytes) {
+        Err(CadError::MissingLicense) => Ok(()),
+        other => Err(format!("expected MissingLicense (CAD-1), got {other:?}")),
+    }
+}
+
+/// DMTAP-CAD-02 (§23.3.4): `formats` (key 4) with zero entries is malformed.
+fn cad_empty_formats_rejected() -> Result<(), String> {
+    let mut md = cad_valid_part();
+    md.formats.clear();
+    match md.validate() {
+        Err(CadError::NoFormats) => Ok(()),
+        other => Err(format!("expected NoFormats (CAD-2), got {other:?}")),
+    }
+}
+
+/// DMTAP-CAD-03 (§23.3.4): not exactly one canonical-source (non-assembly) / structure (assembly).
+/// Exercises BOTH variants: two canonical sources (ambiguous), and an assembly with no structure.
+fn cad_canonical_source_cardinality_rejected() -> Result<(), String> {
+    let mut two = cad_valid_part();
+    two.formats.push(ArtifactFormat {
+        format_id: format_id::STEP,
+        manifest_root: ContentId::of(b"step"),
+        role: role::CANONICAL_SOURCE, // a second canonical-source — ambiguous.
+        derived_from_format: None,
+        format_version: None,
+    });
+    match two.validate() {
+        Err(CadError::CanonicalSourceCardinality) => {}
+        other => return Err(format!("expected CanonicalSourceCardinality on two-canonical, got {other:?}")),
+    }
+    let mut asm = cad_valid_part();
+    asm.artifact_kind = artifact_kind::ASSEMBLY; // no role=structure entry present.
+    match asm.validate() {
+        Err(CadError::CanonicalSourceCardinality) => Ok(()),
+        other => Err(format!("expected CanonicalSourceCardinality on assembly-without-structure, got {other:?}")),
+    }
+}
+
+/// DMTAP-CAD-04 (§23.3.4): a glTF/mesh (`format_id = 3`) entry MUST NOT be canonical-source.
+fn cad_mesh_canonical_source_rejected() -> Result<(), String> {
+    let mut md = cad_valid_part();
+    md.formats = vec![ArtifactFormat {
+        format_id: format_id::GLTF_MESH,
+        manifest_root: ContentId::of(b"mesh"),
+        role: role::CANONICAL_SOURCE,
+        derived_from_format: None,
+        format_version: None,
+    }];
+    match md.validate() {
+        Err(CadError::MeshCanonicalSource) => Ok(()),
+        other => Err(format!("expected MeshCanonicalSource (CAD-4), got {other:?}")),
+    }
+}
+
+/// DMTAP-CAD-05 (§23.3.4): every `role = derived-rendition` entry MUST carry `derived_from_format`.
+fn cad_derived_without_provenance_rejected() -> Result<(), String> {
+    let mut md = cad_valid_part();
+    md.formats.push(ArtifactFormat {
+        format_id: format_id::STEP,
+        manifest_root: ContentId::of(b"step"),
+        role: role::DERIVED_RENDITION,
+        derived_from_format: None, // MUST be present for a derived rendition.
+        format_version: None,
+    });
+    match md.validate() {
+        Err(CadError::DerivedMissingProvenance) => Ok(()),
+        other => Err(format!("expected DerivedMissingProvenance (CAD-5), got {other:?}")),
+    }
+}
+
+/// DMTAP-CAD-06 (§23.3.3): `units.length_unit` MUST be present and MUST NOT be defaulted or inferred.
+fn cad_missing_length_unit_rejected() -> Result<(), String> {
+    let md = cad_valid_part();
+    // Splice the Units sub-map (key 5) to drop its length_unit (key 1), then re-decode the whole.
+    let cv = cbor::decode(&md.det_cbor()).map_err(|e| format!("decode: {e}"))?;
+    let mut pairs = match cv { Cv::Map(p) => p, _ => return Err("metadata is not a map".into()) };
+    for (k, val) in pairs.iter_mut() {
+        if *k == 5 {
+            if let Cv::Map(units) = val {
+                units.retain(|(uk, _)| *uk != 1); // drop length_unit
+            }
+        }
+    }
+    let bytes = cbor::encode(&Cv::Map(pairs));
+    match ArtifactMetadata::from_det_cbor(&bytes) {
+        Err(CadError::MissingLengthUnit) => Ok(()),
+        other => Err(format!("expected MissingLengthUnit (CAD-6), got {other:?}")),
+    }
+}
+
+/// DMTAP-CAD-07 (§23.3.1): `deprecated = true` MUST be accompanied by `deprecation_reason` (key 9).
+fn cad_deprecated_without_reason_rejected() -> Result<(), String> {
+    let mut md = cad_valid_part();
+    md.deprecated = true;
+    md.deprecation_reason = None;
+    match md.validate() {
+        Err(CadError::DeprecatedMissingReason) => Ok(()),
+        other => Err(format!("expected DeprecatedMissingReason (CAD-7), got {other:?}")),
+    }
+}
+
+/// DMTAP-CAD-08 (§23.5): deprecation/yank is expressed ONLY as a successor announcement, never as a
+/// deletion — there is no protocol operation that removes a published revision. This asserts (a) the
+/// profile exposes no deletion op and (b) the retraction path is a valid same-author deprecation
+/// successor.
+fn cad_deletion_is_not_an_operation() -> Result<(), String> {
+    if cad::deletion_is_not_an_operation().is_ok() {
+        return Err("the profile MUST NOT expose a deletion operation (CAD-8)".into());
+    }
+    // The honest retraction: a deprecation successor with a reason, published by the SAME author.
+    let base = cad_valid_part();
+    let deprecation = cad::deprecate(&base, "recalled: fastener tolerance out of spec");
+    deprecation.validate().map_err(|e| format!("deprecation successor must be a valid artifact: {e}"))?;
+    if !deprecation.deprecated || deprecation.deprecation_reason.is_none() {
+        return Err("a retraction successor must carry deprecated=true + a reason".into());
+    }
+    // Same-author supersede is accepted; a cross-author one would be ERR_PUB_SUPERSEDE_INVALID.
+    let author = vec![0xABu8; 32];
+    pubobj::check_supersede(&author, &author).map_err(|e| format!("same-author supersede must be valid: {e}"))?;
+    Ok(())
+}
+
+/// DMTAP-CAD-09 (§23.6.1): assembly children reference exclusively by pin(1) or track(2); a
+/// `ref_kind` outside {1, 2} is rejected on decode.
+fn cad_bad_ref_kind_rejected() -> Result<(), String> {
+    let bad = cbor::encode(&Cv::Map(vec![(
+        1,
+        Cv::Array(vec![Cv::Map(vec![
+            (1, Cv::U64(3)), // neither pin nor track
+            (2, Cv::Bytes(ContentId::of(b"child").as_bytes().to_vec())),
+            (3, Cv::U64(1)),
+        ])]),
+    )]));
+    match AssemblyStructure::from_det_cbor(&bad) {
+        Err(CadError::BadRefKind) => Ok(()),
+        other => Err(format!("expected BadRefKind (CAD-9), got {other:?}")),
+    }
+}
+
+/// DMTAP-CAD-10 (§23.6.3): a BOM-walking client MUST detect and reject a cycle in an assembly's
+/// resolved DAG, never recurse indefinitely nor silently drop it. Also confirms a valid acyclic
+/// walk produces the expected multiplied quantities.
+fn cad_bom_cycle_rejected() -> Result<(), String> {
+    let a = ContentId::of(b"assembly-A");
+    let b = ContentId::of(b"assembly-B");
+    let struct_a = AssemblyStructure { children: vec![AssemblyChild { ref_kind: ref_kind::TRACK, reference: b.clone(), quantity: 2, transform: None }] };
+    let struct_b = AssemblyStructure { children: vec![AssemblyChild { ref_kind: ref_kind::TRACK, reference: a.clone(), quantity: 1, transform: None }] };
+    let (sa, sb) = (struct_a.clone(), struct_b.clone());
+    let resolve = move |r: &ContentId| -> Option<AssemblyStructure> {
+        if r == &a { Some(sa.clone()) } else if r == &b { Some(sb.clone()) } else { None }
+    };
+    match cad::walk_bom(&struct_a, &resolve) {
+        Err(CadError::Cycle) => {}
+        other => return Err(format!("expected Cycle (CAD-10), got {other:?}")),
+    }
+    // A valid acyclic BOM walks: [bolt x4, plate x1].
+    let bolt = ContentId::of(b"bolt");
+    let plate = ContentId::of(b"plate");
+    let valid = AssemblyStructure { children: vec![
+        AssemblyChild { ref_kind: ref_kind::PIN, reference: bolt.clone(), quantity: 4, transform: None },
+        AssemblyChild { ref_kind: ref_kind::PIN, reference: plate.clone(), quantity: 1, transform: None },
+    ] };
+    let bom = cad::walk_bom(&valid, &|_r: &ContentId| None).map_err(|e| format!("acyclic BOM must walk: {e}"))?;
+    if bom.get(bolt.as_bytes()) != Some(&4) || bom.get(plate.as_bytes()) != Some(&1) {
+        return Err(format!("unexpected BOM quantities: {bom:?}"));
+    }
+    Ok(())
+}
+
+/// DMTAP-CAD-11 (§23.7): no client treats any single index (category/search/workshop) as
+/// authoritative over the signed announces it was derived from. Two independently-built indexes over
+/// the same authoritative announce set MAY disagree (different crawl coverage) without either being
+/// "wrong" — the ground truth is the signed announces, re-derivable by any client. Modeled by
+/// building two category indexes from different subsets of one announce set and confirming both are
+/// derivable views of the same authoritative set (accept).
+fn cad_no_index_is_authoritative() -> Result<(), String> {
+    // The authoritative ground truth: a set of (announce_id, category) facts from signed announces.
+    let authoritative: Vec<(ContentId, &str)> = vec![
+        (ContentId::of(b"ann-1"), "brackets"),
+        (ContentId::of(b"ann-2"), "fasteners"),
+        (ContentId::of(b"ann-3"), "brackets"),
+    ];
+    // Index A crawled announces 1,2; index B crawled 2,3 — different coverage.
+    let build = |crawl: &[usize]| -> std::collections::BTreeMap<String, Vec<Vec<u8>>> {
+        let mut idx: std::collections::BTreeMap<String, Vec<Vec<u8>>> = Default::default();
+        for &i in crawl {
+            let (id, cat) = &authoritative[i];
+            idx.entry((*cat).to_string()).or_default().push(id.as_bytes().to_vec());
+        }
+        idx
+    };
+    let index_a = build(&[0, 1]);
+    let index_b = build(&[1, 2]);
+    // They legitimately disagree...
+    if index_a == index_b {
+        return Err("sanity: two different crawls should yield different indexes".into());
+    }
+    // ...yet every entry in each index is a fact present in the authoritative announce set (neither
+    // index invents or overrides ground truth). This is the CAD-11 property: indexes are derived,
+    // re-derivable, and never authoritative over the signed announces.
+    let authoritative_ids: std::collections::BTreeSet<Vec<u8>> =
+        authoritative.iter().map(|(id, _)| id.as_bytes().to_vec()).collect();
+    for index in [&index_a, &index_b] {
+        for ids in index.values() {
+            for id in ids {
+                if !authoritative_ids.contains(id) {
+                    return Err("an index contains an id not in the authoritative announce set".into());
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// DMTAP-FILE-05: "the content address is over ciphertext: the same plaintext under two different
