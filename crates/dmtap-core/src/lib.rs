@@ -45,6 +45,9 @@
 //! - [`pubobj`] — the **DMTAP-PUB** extension (§22): `PubManifest` (plaintext-addressed public
 //!   blobs, global dedup), `PubAnnounce` (kind `0x40`, signed-in-the-clear announcements),
 //!   `FeedEntry`/`FeedHead` (per-identity author feeds with anti-rollback + equivocation detection).
+//! - [`cad`] — the **CAD / Artifact profile** over DMTAP-PUB (§23): `ArtifactMetadata`,
+//!   `ArtifactFormat`, `Units`, `AssemblyStructure` + the BOM DAG walk with cycle rejection. A pure
+//!   application profile — zero new wire mechanisms, zero new crypto.
 //!
 //! ## Crypto suite `0x01` (v0 REQUIRED)
 //! Ed25519 signatures, HPKE `DHKEM(X25519)/HKDF-SHA256/ChaCha20-Poly1305`, BLAKE3-256 hashing.
@@ -56,6 +59,7 @@
 //! **fails closed** on a `0x02`-only identity (a distinct, larger surface, unchanged here).
 
 pub mod attestation;
+pub mod cad;
 pub mod capability;
 pub mod cbor;
 pub mod deniable;

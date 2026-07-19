@@ -477,6 +477,57 @@ pub fn check_supersede(predecessor_pub: &[u8], successor_pub: &[u8]) -> Result<(
     }
 }
 
+/// §22.5.3 / §5.5.3: a fetched plaintext chunk MUST self-verify against its listed `h_i`. A
+/// mismatch is [`PubError::ChunkHashMismatch`] (`0x090A`, ROTATE_RETRY) — rotate to another holder;
+/// a holder cannot serve wrong-but-accepted bytes (BLAKE3 collision resistance).
+pub fn verify_chunk(plaintext: &[u8], listed_h: &ContentId) -> Result<(), PubError> {
+    if &chunk_hash(plaintext) == listed_h {
+        Ok(())
+    } else {
+        Err(PubError::ChunkHashMismatch)
+    }
+}
+
+// ── Holder serve policy (§22.6.2/.6.3) ───────────────────────────────────────────────────────
+
+/// A holder's per-object serve policy (§22.6). Serving public objects is opt-in and a holder is
+/// **not blind** (§22.6.1), so admission is a discretionary operator decision. Refusal is a policy
+/// deny, never a correctness/crypto fault and never a protocol takedown; a fetcher responds by
+/// rotating to another holder.
+#[derive(Debug, Clone, Default)]
+pub struct ServePolicy {
+    /// Content addresses this holder declines to serve, for any reason (content, publisher,
+    /// jurisdiction) — a §22.6.2 discretionary refusal → [`PubError::NotServed`] (`0x090C`).
+    pub declined: Vec<ContentId>,
+    /// Maximum admitted object size in bytes, or `None` for no ceiling (§22.6.3).
+    pub max_object_size: Option<u64>,
+    /// Maximum total bytes stored per publisher, or `None` for no quota (§22.6.3).
+    pub per_publisher_quota: Option<u64>,
+}
+
+impl ServePolicy {
+    /// Decide whether to serve/store object `id` of `size` bytes given `already_stored` bytes for
+    /// that publisher. A declined id is [`PubError::NotServed`] (`0x090C`); an exceeded size ceiling
+    /// or per-publisher quota is [`PubError::ServeQuota`] (`0x090D`). Both are `DENY_POLICY` — a
+    /// policy deny, never a security/crypto gate, never a silent hole.
+    pub fn admit(&self, id: &ContentId, size: u64, already_stored: u64) -> Result<(), PubError> {
+        if self.declined.iter().any(|d| d == id) {
+            return Err(PubError::NotServed);
+        }
+        if let Some(max) = self.max_object_size {
+            if size > max {
+                return Err(PubError::ServeQuota);
+            }
+        }
+        if let Some(quota) = self.per_publisher_quota {
+            if already_stored.saturating_add(size) > quota {
+                return Err(PubError::ServeQuota);
+            }
+        }
+        Ok(())
+    }
+}
+
 // ── Author feeds (§22.4) ─────────────────────────────────────────────────────────────────────
 
 /// One position in an author feed (§22.4.1). Carries no signature of its own; its authenticity
