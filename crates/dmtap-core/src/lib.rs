@@ -68,6 +68,7 @@ pub mod id;
 pub mod identity;
 pub mod kt;
 pub mod keyname;
+pub mod location;
 pub mod mixnet;
 pub mod mote;
 pub mod policy;

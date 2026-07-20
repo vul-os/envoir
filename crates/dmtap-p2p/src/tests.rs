@@ -3,8 +3,11 @@
 //! These stand up **actual libp2p swarms on `127.0.0.1`** and drive real [`Node`]s over them —
 //! not the in-process fabric. The headline test proves a real, HPKE-sealed MOTE crosses a real
 //! libp2p swarm (TCP + Noise + Yamux), is decrypted by the receiver, and the delivery `ack`
-//! travels back over the same connection until the sender's queue reaches `ACKED`. A second test
-//! exercises a Kademlia PUT/GET of a `LocationRecord`-shaped value (§4.2 `key → location`).
+//! travels back over the same connection until the sender's queue reaches `ACKED`. A second group
+//! exercises real §4.2 discovery end to end: a node PUTs its own signed `LocationRecord`, a second
+//! node that was never told its address resolves it from the DHT and then actually delivers a
+//! frame over the discovered route — plus the fail-closed cases (rollback replay, a record for
+//! another identity, expiry, restart-restored high-water marks).
 //!
 //! Scope is honest: this is **loopback** — both peers are directly reachable, so the relay + DCUtR
 //! NAT-traversal path (wired and live in the swarm) is not exercised end-to-end here.
@@ -14,6 +17,7 @@ use dmtap::identity::IdentityKey;
 use dmtap::mote::SealKeypair;
 use dmtap::node::Node;
 use dmtap::outbound::OutState;
+use dmtap_core::location::{LocationError, LocationRecord, DEFAULT_TTL_SECS};
 
 /// A generous loopback timeout: real dialing + Noise handshake + Yamux + request-response take
 /// tens of ms, occasionally more under load; poll loops below spin up to this bound.
@@ -174,14 +178,222 @@ fn kademlia_put_get_location_record() {
     // Give identify/connection a moment so the buckets are populated before the query.
     std::thread::sleep(Duration::from_millis(300));
 
-    // A location record keyed by (a stand-in for) hash(ik).
-    let key = b"loc:00112233445566778899aabbccddeeff";
-    let record = b"LocationRecord{peer_id,addrs,seq,ttl,sig}";
-    assert!(a.kad_put(key, record), "PUT should store on >=1 peer");
+    // A real signed §18.5.1 record, stored under the real §4.2 DHT key `multihash(ik)`.
+    let ik = IdentityKey::from_seed(&[1u8; 32]);
+    let record = LocationRecord::issue(
+        &ik,
+        a.peer_id().to_bytes(),
+        vec![tcp_listener(&a).to_string()],
+        1,
+        DEFAULT_TTL_SECS,
+        now_ms(),
+        None,
+    );
+    let key = LocationRecord::dht_key(&ik.public());
+    assert!(a.kad_put(&key, &record.det_cbor()), "PUT should store on >=1 peer");
 
-    // B resolves the same key from the DHT.
-    let got = b.kad_get(key);
-    assert_eq!(got.as_deref(), Some(&record[..]), "B resolves the record A published");
+    // B resolves the same key from the DHT and gets back byte-identical, verifiable bytes.
+    let got = b.kad_get(&key).expect("B resolves the record A published");
+    let back = LocationRecord::from_det_cbor(&got).expect("decodes as §18.5.1");
+    assert_eq!(back, record);
+    back.verify().expect("survives the DHT round trip with its signature intact");
+}
+
+// --- §4.2 discovery: publish + resolve, no hand-wired routes ----------------------------------
+
+/// Wall-clock ms, for records that must look fresh against a real `check_fresh` bound.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
+/// The end-to-end point of this module: B learns how to reach A **entirely from the DHT**, with
+/// no `add_peer` for A's DMTAP address, and then a sealed frame actually flows.
+#[test]
+fn resolve_from_dht_makes_a_never_met_peer_reachable() {
+    let ik_a = IdentityKey::from_seed(&[11u8; 32]);
+    let a_dmtap = ik_a.public();
+
+    let a = Libp2pTransport::new(a_dmtap.clone(), &["/ip4/127.0.0.1/tcp/0".parse().unwrap()])
+        .unwrap();
+    let b = Libp2pTransport::new(b"disco-b".to_vec(), &["/ip4/127.0.0.1/tcp/0".parse().unwrap()])
+        .unwrap();
+
+    // Bootstrap the DHT itself only (§4.2: "a fresh contact SHOULD have a non-DHT path"). Note
+    // this teaches B how to reach the *DHT node* `disco-a-boot`, deliberately NOT A's real DMTAP
+    // address — so any route to `a_dmtap` must have come from the resolved record.
+    let a_addr = tcp_listener(&a);
+    let b_addr = tcp_listener(&b);
+    a.add_peer(b"disco-b".to_vec(), b.peer_id(), b_addr);
+    b.add_peer(b"disco-a-boot".to_vec(), a.peer_id(), a_addr);
+    std::thread::sleep(Duration::from_millis(300));
+
+    // Before resolution, B cannot reach A at all.
+    assert_eq!(
+        b.send(&a_dmtap, Frame::Ack(b"early".to_vec())),
+        Err(TransportError::Unreachable),
+        "an unresolved peer must be unreachable, not silently dropped"
+    );
+
+    // A publishes its own signed record; B resolves it.
+    assert!(
+        a.publish_location_when_listening(&ik_a, 1, now_ms(), SPIN),
+        "A's location PUT should store on >=1 peer"
+    );
+    let resolved = b.resolve_location(&a_dmtap, now_ms()).expect("B resolves A from the DHT");
+    assert_eq!(resolved.peer_id, a.peer_id());
+    assert!(!resolved.dialable.is_empty(), "A advertised a bound listen addr");
+    assert_eq!(b.location_high_water_mark(&a_dmtap), Some(1));
+
+    // ...and now the route exists, so a frame really flows over it.
+    let got = send_until_delivered(&b, &a_dmtap, Frame::Ack(b"after-resolve".to_vec()), &a);
+    assert!(!got.is_empty(), "a DHT-discovered route must actually carry a frame");
+}
+
+/// The eclipse move the tracker exists to stop: replay an older, perfectly-signed record to pin a
+/// victim to a stale peer id. It must be rejected *and* leave the good route in place.
+#[test]
+fn a_replayed_older_record_is_rejected_and_does_not_displace_the_current_route() {
+    let ik = IdentityKey::from_seed(&[12u8; 32]);
+    let ik_pub = ik.public();
+    let b = Libp2pTransport::new(b"rollback-b".to_vec(), &["/ip4/127.0.0.1/tcp/0".parse().unwrap()])
+        .unwrap();
+
+    let good_peer = Libp2pTransport::new(b"good".to_vec(), &[]).unwrap().peer_id();
+    let stale_peer = Libp2pTransport::new(b"stale".to_vec(), &[]).unwrap().peer_id();
+
+    let mk = |seq: u64, peer: PeerId| {
+        LocationRecord::issue(
+            &ik,
+            peer.to_bytes(),
+            vec!["/ip4/127.0.0.1/tcp/4001".to_string()],
+            seq,
+            DEFAULT_TTL_SECS,
+            now_ms(),
+            None,
+        )
+    };
+
+    // Adopt the current record (seq 7), then replay an older one (seq 3) pointing elsewhere.
+    let current = mk(7, good_peer);
+    b.adopt_location_bytes(&ik_pub, &current.det_cbor(), now_ms()).expect("current adopted");
+
+    let stale = mk(3, stale_peer);
+    stale.verify().expect("the attacker's record is genuinely, validly signed");
+    let err = b.adopt_location_bytes(&ik_pub, &stale.det_cbor(), now_ms()).unwrap_err();
+    assert_eq!(err, ResolveError::Rejected(LocationError::Stale));
+    assert_eq!(err.code(), 0x0302);
+    assert!(!err.retryable(), "a rollback replay is terminal for that record");
+
+    // Equal seq is rejected too, and the high-water mark never moves.
+    assert!(b.adopt_location_bytes(&ik_pub, &mk(7, stale_peer).det_cbor(), now_ms()).is_err());
+    assert_eq!(b.location_high_water_mark(&ik_pub), Some(7));
+}
+
+/// A record that verifies but is *for a different identity* must not be installed as the route
+/// for the key we asked about — the signature proves who minted it, never who it is for.
+#[test]
+fn a_record_for_another_identity_is_refused() {
+    let victim = IdentityKey::from_seed(&[13u8; 32]);
+    let attacker = IdentityKey::from_seed(&[14u8; 32]);
+    let b = Libp2pTransport::new(b"bind-b".to_vec(), &["/ip4/127.0.0.1/tcp/0".parse().unwrap()])
+        .unwrap();
+    let peer = Libp2pTransport::new(b"x".to_vec(), &[]).unwrap().peer_id();
+
+    // Perfectly valid — just signed by, and naming, the attacker's key.
+    let rec = LocationRecord::issue(
+        &attacker,
+        peer.to_bytes(),
+        vec!["/ip4/127.0.0.1/tcp/4001".to_string()],
+        1,
+        DEFAULT_TTL_SECS,
+        now_ms(),
+        None,
+    );
+    rec.verify().expect("the substituted record is validly signed");
+
+    let err = b.adopt_location_bytes(&victim.public(), &rec.det_cbor(), now_ms()).unwrap_err();
+    assert_eq!(err, ResolveError::Rejected(LocationError::Unreachable));
+    assert_eq!(b.location_high_water_mark(&victim.public()), None, "nothing recorded");
+}
+
+/// An expired record must not be adopted, even though its signature is fine.
+#[test]
+fn an_expired_record_is_refused() {
+    let ik = IdentityKey::from_seed(&[15u8; 32]);
+    let b = Libp2pTransport::new(b"exp-b".to_vec(), &["/ip4/127.0.0.1/tcp/0".parse().unwrap()])
+        .unwrap();
+    let peer = Libp2pTransport::new(b"y".to_vec(), &[]).unwrap().peer_id();
+
+    // Published one full TTL + a margin ago.
+    let ts = now_ms() - (DEFAULT_TTL_SECS * 1_000) - 60_000;
+    let rec = LocationRecord::issue(&ik, peer.to_bytes(), vec![], 1, DEFAULT_TTL_SECS, ts, None);
+    let err = b.adopt_location_bytes(&ik.public(), &rec.det_cbor(), now_ms()).unwrap_err();
+    assert_eq!(err, ResolveError::Rejected(LocationError::Expired));
+    assert_eq!(err.code(), 0x0303);
+    assert!(err.retryable(), "a fresher record may be republished");
+}
+
+/// A valid record advertising no dialable hint (rendezvous-only, §4.3 rung 2) still records the
+/// identity → peer-id mapping rather than discarding the whole resolution.
+#[test]
+fn a_record_with_no_addrs_still_binds_the_peer_id() {
+    let ik = IdentityKey::from_seed(&[16u8; 32]);
+    let b = Libp2pTransport::new(b"noaddr-b".to_vec(), &["/ip4/127.0.0.1/tcp/0".parse().unwrap()])
+        .unwrap();
+    let peer = Libp2pTransport::new(b"z".to_vec(), &[]).unwrap().peer_id();
+
+    let rec = LocationRecord::issue(&ik, peer.to_bytes(), vec![], 1, DEFAULT_TTL_SECS, now_ms(), None);
+    let resolved = b.adopt_location_bytes(&ik.public(), &rec.det_cbor(), now_ms()).unwrap();
+    assert!(resolved.dialable.is_empty());
+    assert_eq!(resolved.peer_id, peer);
+    assert_eq!(b.location_high_water_mark(&ik.public()), Some(1));
+}
+
+/// Rollback marks survive a restart when journaled and restored — the whole point of persisting
+/// them, since a tracker that starts empty accepts the attacker's stale record once per restart.
+#[test]
+fn restored_high_water_marks_still_reject_a_stale_record() {
+    let ik = IdentityKey::from_seed(&[17u8; 32]);
+    let ik_pub = ik.public();
+    let peer = Libp2pTransport::new(b"w".to_vec(), &[]).unwrap().peer_id();
+
+    let first = Libp2pTransport::new(b"r1".to_vec(), &["/ip4/127.0.0.1/tcp/0".parse().unwrap()])
+        .unwrap();
+    let mk = |seq: u64| {
+        LocationRecord::issue(&ik, peer.to_bytes(), vec![], seq, DEFAULT_TTL_SECS, now_ms(), None)
+    };
+    first.adopt_location_bytes(&ik_pub, &mk(20).det_cbor(), now_ms()).unwrap();
+    let marks = first.location_high_water_marks();
+    drop(first);
+
+    // "Restart": a brand-new transport, seeded from the journal.
+    let second = Libp2pTransport::new(b"r2".to_vec(), &["/ip4/127.0.0.1/tcp/0".parse().unwrap()])
+        .unwrap();
+    assert_eq!(second.location_high_water_mark(&ik_pub), None, "starts empty, as expected");
+    second.restore_location_high_water_marks(marks);
+    assert_eq!(second.location_high_water_mark(&ik_pub), Some(20));
+    assert_eq!(
+        second.adopt_location_bytes(&ik_pub, &mk(9).det_cbor(), now_ms()).unwrap_err(),
+        ResolveError::Rejected(LocationError::Stale),
+        "the stale record must NOT get its once-per-restart free pass"
+    );
+
+    // Restoring must never lower an existing mark.
+    second.restore_location_high_water_marks(vec![(ik_pub.clone(), 2)]);
+    assert_eq!(second.location_high_water_mark(&ik_pub), Some(20));
+}
+
+/// Resolving a key nobody has published is unreachable-and-retryable, not a panic or a hang.
+#[test]
+fn resolving_an_unpublished_key_is_unreachable() {
+    let b = Libp2pTransport::new(b"miss-b".to_vec(), &["/ip4/127.0.0.1/tcp/0".parse().unwrap()])
+        .unwrap();
+    let err = b.resolve_location(&[9u8; 32], now_ms()).unwrap_err();
+    assert_eq!(err, ResolveError::Rejected(LocationError::Unreachable));
+    assert!(err.retryable(), "fall down the ladder and try again (§4.3)");
 }
 
 // --- Test helpers for driving raw transports directly (no `Node`) ----------------------------

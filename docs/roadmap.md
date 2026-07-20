@@ -14,6 +14,21 @@ the spec's own roadmap markers, it doesn't belong here.
   from the same path resumes with rollback protection intact, not reset to a weaker
   post-restart baseline — see the `journal` module's own doc comments for exactly what is (and
   isn't) persisted.
+- **Signed `key → location` discovery** (`dmtap_core::location`, `dmtap_p2p::discovery`, spec §4.2 /
+  §18.5.1) — the real `LocationRecord`: canonical integer-keyed CBOR, `DMTAP-v0/location-record`
+  signing, `multihash(ik)` DHT keying, the OPTIONAL substrate tag (an unimplemented substrate
+  resolves to `0x0303` **unreachable**, never a parse error, so a new substrate stays an additive
+  migration), and the monotonic-`seq` anti-rollback tracker with persistable high-water marks. On
+  top of it, `publish_location` / `resolve_location` make a peer the node has **never met**
+  dialable straight from the DHT — proven by a test where a second node is told nothing but a DHT
+  bootstrap address, resolves the record, and then actually delivers a frame over the discovered
+  route. The fail-closed cases are tested too: a replayed older-but-validly-signed record
+  (`0x0302`) does not displace the current route, a record for a *different* identity is refused,
+  an expired record is refused, and restored high-water marks deny a stale record its
+  once-per-restart free pass. What this does **not** defend is *withholding* — eclipse is a routing
+  attack, and S/Kademlia disjoint-path lookups plus per-bucket IP-diversity caps are not exposed by
+  libp2p's `kad` today; a caller needing that guarantee should use a rendezvous introduction
+  (§4.3 rung 2), which goes through the identical verification gate via `adopt_location_bytes`.
 - **A real libp2p mesh transport** (`crates/dmtap-p2p`) — live TCP/QUIC swarms secured by
   Noise/Yamux, a working Kademlia DHT (PUT/GET of location records), and a genuine Circuit-Relay-v2
   reservation that delivers a frame to a peer advertising no direct address at all, all proven on

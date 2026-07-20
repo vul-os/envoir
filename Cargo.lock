@@ -835,11 +835,13 @@ dependencies = [
 name = "dmtap-p2p"
 version = "0.0.1"
 dependencies = [
+ "dmtap-core",
  "envoir-node",
  "futures",
  "libp2p",
  "serde",
  "serde_bytes",
+ "thiserror 1.0.69",
  "tokio",
 ]
 

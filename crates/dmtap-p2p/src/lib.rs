@@ -8,9 +8,11 @@
 //! ## What is wired (spec §4.1 stack)
 //! - **Transports:** TCP + QUIC, secured by **Noise**, multiplexed by **Yamux** (QUIC carries its
 //!   own TLS 1.3 + streams).
-//! - **[`kad`](libp2p::kad) — Kademlia DHT:** peer/record routing, modelling the §4.2
+//! - **[`kad`](libp2p::kad) — Kademlia DHT:** peer/record routing, carrying the §4.2
 //!   `key → location` record store. [`Libp2pTransport::kad_put`] / [`Libp2pTransport::kad_get`]
-//!   store and resolve a signed location record by `hash(ik)`-style key.
+//!   are the raw byte-level PUT/GET; [`discovery`] builds real publish/resolve on top of them
+//!   with genuine signed [`LocationRecord`](dmtap_core::location::LocationRecord)s, so a peer this
+//!   node has never met becomes dialable without any hand-configured route.
 //! - **[`request_response`](libp2p::request_response):** the carrier for DMTAP [`Frame`] bytes — a
 //!   request delivers a `(from, Frame)` unit; the response is a transport-level receipt (the
 //!   DMTAP `ack` is itself a separate [`Frame::Ack`], §19.3.2, and travels back the same way).
@@ -28,14 +30,18 @@
 //!
 //! ## PeerId ↔ DMTAP identity mapping (§4.2)
 //! A peer's *transport address* in the node model is its DMTAP identity bytes; libp2p addresses by
-//! [`PeerId`]. This transport keeps a `dmtap_addr → PeerId` book: [`Libp2pTransport::add_peer`]
-//! seeds it from a resolved location record, and inbound requests **auto-learn** the mapping from
+//! [`PeerId`]. This transport keeps a `dmtap_addr → PeerId` book:
+//! [`Libp2pTransport::resolve_location`] fills it from a genuinely-verified §4.2 DHT record
+//! ([`Libp2pTransport::add_peer`] still seeds it manually for bootstrap), and inbound requests
+//! **auto-learn** the mapping from
 //! the frame's `from` field + the request's source peer, so an `ack` can route back over the
 //! established connection without a fresh lookup (mirroring §19.3.2's "back over the same channel").
 //!
 //! ## Honest scope (loopback only)
 //! The comprehensive test drives two real libp2p swarms on `127.0.0.1` exchanging a real sealed
-//! MOTE + ack across the wire, plus a Kademlia PUT/GET. Circuit-Relay-v2 is proven for real on
+//! MOTE + ack across the wire, and a second group proves §4.2 discovery end to end: a node
+//! publishes its own signed record, a node that was never told its address resolves it from the
+//! DHT, and a frame then flows over the discovered route. Circuit-Relay-v2 is proven for real on
 //! loopback too — a reservation, then a frame delivered over a relayed connection to a peer that
 //! never advertises a direct address at all (see [`tests::relay_v2_reservation_and_relayed_connection_delivers_a_frame`]).
 //! DCUtR is wired and *attempts* a hole-punch automatically once a relayed connection is up
@@ -61,6 +67,11 @@ use tokio::sync::mpsc;
 
 // Re-export the trait surface this crate implements, so callers can `use dmtap_p2p::{...}`.
 pub use dmtap::transport::{Frame, InboundFrame, Transport, TransportError};
+
+/// Signed §4.2 location publish/resolve over the Kademlia DHT — how a peer this node has never
+/// met becomes dialable.
+pub mod discovery;
+pub use discovery::{ResolveError, ResolvedLocation, DEFAULT_SKEW_MS, SUPPORTED_SUBSTRATES};
 
 /// The application protocol carried over libp2p request-response — one sealed DMTAP frame per
 /// exchange. Versioned in its name so a future frame layout is an additive protocol (spec §10.2).
@@ -230,8 +241,14 @@ pub struct Libp2pTransport {
     cmd_tx: mpsc::UnboundedSender<Command>,
     /// Inbound frames the swarm task has received, awaiting [`Transport::drain`].
     inbox: Arc<Mutex<VecDeque<InboundFrame>>>,
-    /// `dmtap_addr → PeerId` book (seeded by [`add_peer`](Self::add_peer), grown by inbound frames).
+    /// `dmtap_addr → PeerId` book (seeded by [`add_peer`](Self::add_peer), grown by inbound frames
+    /// and by [`resolve_location`](Self::resolve_location)).
     peers: Arc<Mutex<HashMap<Vec<u8>, PeerId>>>,
+    /// Anti-rollback high-water marks for §4.2 location records, one per resolved identity.
+    /// Held on the transport (not per-lookup) so a replayed older record is rejected for the whole
+    /// process lifetime; see [`crate::discovery`] for why it must also be persisted across
+    /// restarts.
+    location_tracker: Arc<Mutex<dmtap_core::location::LocationTracker>>,
     /// Bound listen multiaddrs, filled as `NewListenAddr` events arrive.
     listeners: Arc<Mutex<Vec<Multiaddr>>>,
     /// Owns the tokio runtime; dropping it stops the swarm task. `Arc` so the transport is cheap to
@@ -283,6 +300,7 @@ impl Libp2pTransport {
             inbox,
             peers,
             listeners,
+            location_tracker: Arc::new(Mutex::new(Default::default())),
             _runtime: Arc::new(runtime),
         })
     }
@@ -313,7 +331,12 @@ impl Libp2pTransport {
     }
 
     /// Register how to reach a peer: map its DMTAP `addr` to its libp2p `peer_id` and seed the
-    /// swarm (Kademlia) with a dialable `multiaddr` (a stand-in for signed §4.2 record discovery).
+    /// swarm (Kademlia) with a dialable `multiaddr`.
+    ///
+    /// This is the manual/bootstrap path. For real discovery — resolving a peer this node has
+    /// never met from its signed §4.2 record — use
+    /// [`resolve_location`](Self::resolve_location), which calls this only after the record
+    /// passes the full fail-closed gate.
     pub fn add_peer(&self, addr: impl Into<Vec<u8>>, peer_id: PeerId, multiaddr: Multiaddr) {
         self.handle().add_peer(addr, peer_id, multiaddr);
     }
@@ -388,6 +411,17 @@ impl Libp2pHandle {
     pub fn add_peer(&self, addr: impl Into<Vec<u8>>, peer_id: PeerId, multiaddr: Multiaddr) {
         self.peers.lock().unwrap().insert(addr.into(), peer_id);
         let _ = self.cmd_tx.send(Command::AddPeer { peer: peer_id, addr: multiaddr });
+    }
+
+    /// Map a DMTAP address to a `PeerId` **without** a dialable multiaddr.
+    ///
+    /// This is the §4.3-rung-2 case: a location record that verified cleanly but advertises no
+    /// direct hint, because the peer is reachable only through a relay circuit or a rendezvous
+    /// introduction. Recording the identity → peer-id half now means a circuit address learned
+    /// later (via Identify, or a relay reservation) completes the route instead of the resolution
+    /// being thrown away.
+    pub fn add_peer_id_only(&self, addr: impl Into<Vec<u8>>, peer_id: PeerId) {
+        self.peers.lock().unwrap().insert(addr.into(), peer_id);
     }
 }
 

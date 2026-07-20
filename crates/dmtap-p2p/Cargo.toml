@@ -22,6 +22,12 @@ repository = "https://example.invalid/envoir"
 # The node crate owns the `Transport` trait + `Frame` (spec §4); this crate implements it.
 envoir-node = { path = "../../node" }
 
+# The signed `LocationRecord` (§4.2, §18.5.1) and its anti-rollback tracker. Discovery is a
+# protocol object with a canonical wire form, not a libp2p detail: the record is minted and
+# verified in `dmtap-core` so the same bytes round-trip through any substrate (§21.24), and this
+# crate only carries them to and from the DHT.
+dmtap-core = { path = "../dmtap-core" }
+
 # The spec's chosen substrate (§4.1). Current 0.5x. Feature set = the §4 stack.
 libp2p = { version = "0.56", features = [
     "tokio",
@@ -49,3 +55,6 @@ futures = "0.3"
 # request size budget (`MAX_REQUEST_SIZE`) well before the logical payload gets anywhere near it.
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
+
+# Typed, coded resolution failures (§21.5) — same error idiom as `dmtap-core`.
+thiserror = "1"
