@@ -278,10 +278,10 @@
       "note": "an unregistered suite byte MUST fail to decode (never guess; fail closed)"
     },
     {
-      "name": "suite_reject_0x04",
+      "name": "suite_reject_0x05",
       "operation": "suite_decode",
       "input": {
-        "cbor_hex": "04"
+        "cbor_hex": "05"
       },
       "expected": {
         "accepted": false
@@ -289,10 +289,10 @@
       "note": "an unregistered suite byte MUST fail to decode (never guess; fail closed)"
     },
     {
-      "name": "suite_reject_0x05",
+      "name": "suite_reject_0x7f",
       "operation": "suite_decode",
       "input": {
-        "cbor_hex": "05"
+        "cbor_hex": "187f"
       },
       "expected": {
         "accepted": false
@@ -319,7 +319,7 @@
       "expected": {
         "accepted": true
       },
-      "note": "0x01 (classical), 0x02 (reserved PQ), and 0x03 (reserved AEAD-diverse) are known suite ids and decode"
+      "note": "0x01 (legacy), 0x02 (the v0 REQUIRED originating suite), 0x03 (reserved AEAD-diverse) and 0x04 (reserved signature-diverse, the SLH-DSA anchor profile) are all REGISTERED code points and decode. Registered and implemented are different questions: decoding says the registry knows the byte; the support predicates say whether anything may be done under it. 0x04 was previously asserted here as unregistered-and-rejected, which stopped being true when §1.1 registered it and contradicted this very vector's own rationale."
     },
     {
       "name": "suite_accept_0x02",
@@ -330,7 +330,7 @@
       "expected": {
         "accepted": true
       },
-      "note": "0x01 (classical), 0x02 (reserved PQ), and 0x03 (reserved AEAD-diverse) are known suite ids and decode"
+      "note": "0x01 (legacy), 0x02 (the v0 REQUIRED originating suite), 0x03 (reserved AEAD-diverse) and 0x04 (reserved signature-diverse, the SLH-DSA anchor profile) are all REGISTERED code points and decode. Registered and implemented are different questions: decoding says the registry knows the byte; the support predicates say whether anything may be done under it. 0x04 was previously asserted here as unregistered-and-rejected, which stopped being true when §1.1 registered it and contradicted this very vector's own rationale."
     },
     {
       "name": "suite_accept_0x03",
@@ -341,7 +341,18 @@
       "expected": {
         "accepted": true
       },
-      "note": "0x01 (classical), 0x02 (reserved PQ), and 0x03 (reserved AEAD-diverse) are known suite ids and decode"
+      "note": "0x01 (legacy), 0x02 (the v0 REQUIRED originating suite), 0x03 (reserved AEAD-diverse) and 0x04 (reserved signature-diverse, the SLH-DSA anchor profile) are all REGISTERED code points and decode. Registered and implemented are different questions: decoding says the registry knows the byte; the support predicates say whether anything may be done under it. 0x04 was previously asserted here as unregistered-and-rejected, which stopped being true when §1.1 registered it and contradicted this very vector's own rationale."
+    },
+    {
+      "name": "suite_accept_0x04",
+      "operation": "suite_decode",
+      "input": {
+        "cbor_hex": "04"
+      },
+      "expected": {
+        "accepted": true
+      },
+      "note": "0x01 (legacy), 0x02 (the v0 REQUIRED originating suite), 0x03 (reserved AEAD-diverse) and 0x04 (reserved signature-diverse, the SLH-DSA anchor profile) are all REGISTERED code points and decode. Registered and implemented are different questions: decoding says the registry knows the byte; the support predicates say whether anything may be done under it. 0x04 was previously asserted here as unregistered-and-rejected, which stopped being true when §1.1 registered it and contradicted this very vector's own rationale."
     },
     {
       "name": "mote_content_address_ok",

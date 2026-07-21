@@ -13,9 +13,15 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 ///
 /// | `suite` | Sign | KEM | AEAD | Hash | Status |
 /// |--------:|------|-----|------|------|--------|
-/// | `0x01`  | Ed25519 | X25519 (HPKE) | ChaCha20-Poly1305 | BLAKE3-256 | v0 REQUIRED |
-/// | `0x02`  | Ed25519+ML-DSA-65 | X-Wing (X25519+ML-KEM-768) | ChaCha20-Poly1305 | BLAKE3-256 | RESERVED (PQ) |
+/// | `0x01`  | Ed25519 | X25519 (HPKE) | ChaCha20-Poly1305 | BLAKE3-256 | LEGACY — verify only, MUST NOT originate |
+/// | `0x02`  | Ed25519+ML-DSA-65 | X-Wing (X25519+ML-KEM-768) | ChaCha20-Poly1305 | BLAKE3-256 | **v0 REQUIRED originating suite** |
 /// | `0x03`  | Ed25519+ML-DSA-65 | X-Wing (X25519+ML-KEM-768) | **AES-256-GCM** | BLAKE3-256 | RESERVED (AEAD-diverse emergency target) |
+/// | `0x04`  | Ed25519+SLH-DSA-128s | X-Wing (X25519+ML-KEM-768) | ChaCha20-Poly1305 | BLAKE3-256 | RESERVED (signature-diverse; the anchor profile, §1.2.0) |
+///
+/// **Normative status vs implementation status are different axes** (§18.2). The Status column
+/// above is the spec's normative one. What *this crate* implements is narrower and is reported by
+/// [`is_supported`](Suite::is_supported) / [`mote_supported`](Suite::mote_supported); the gap is a
+/// gap in the implementation, never a licence to originate a suite below the floor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum Suite {
@@ -42,18 +48,43 @@ pub enum Suite {
     /// implemented, so any attempt to seal/sign/validate under it **fails closed** (`0x0101` /
     /// `0x0201`). Do not add the AES-256-GCM machinery here without also updating those predicates.
     ReservedAeadGcm = 0x03,
+    /// **RESERVED, not yet implemented** (spec §1.1, §1.2.0, §21.15): the **signature-diverse**
+    /// emergency target and the intended **anchor** profile — suite `0x02`'s X-Wing KEM and AEAD,
+    /// but with **SLH-DSA-128s** (hash-based, FIPS 205) in place of ML-DSA-65.
+    ///
+    /// It exists because `0x02` and `0x03` both rest on **ML-DSA and ML-KEM — one structured-lattice
+    /// family** — so a break of that family would be network-wide on the same day. SLH-DSA rests on
+    /// no algebraic structure at all, so it survives such a break by construction. Its 7 856-byte
+    /// signature (FIPS 205 Table 2) is why it is scoped to the anchor layer, where `IK` signs a
+    /// handful of times over an identity's whole lifetime, rather than proposed as a message suite.
+    ///
+    /// Same posture as `0x03`: a **registered-but-unimplemented reserved code point**.
+    /// [`from_u8`](Suite::from_u8) recognizes it, so it round-trips the wire decoder, but neither
+    /// support predicate returns `true` and any attempt to sign/validate under it **fails closed**.
+    ReservedAnchorSlhDsa = 0x04,
 }
 
 impl Suite {
-    /// Decode a suite byte, **failing closed** on any unknown value (spec §1.1). Registered reserved
-    /// code points (`0x02` PQ, `0x03` AEAD-diverse) decode as known ids; an *unregistered* byte
-    /// still returns `None` (reject, never guess).
+    /// Decode a suite byte, **failing closed** on any unknown value (spec §1.1).
+    ///
+    /// Every **registered** code point decodes as a known id — including the reserved,
+    /// unimplemented ones (`0x03` AEAD-diverse, `0x04` signature-diverse/anchor) — because
+    /// *registered* and *implemented* are different questions: decoding tells you the byte names a
+    /// suite the registry knows, and the support predicates tell you whether this crate can do
+    /// anything with it. An *unregistered* byte still returns `None` (reject, never guess).
+    ///
+    /// This distinction is load-bearing and was a live defect: the committed vector
+    /// `suite_reject_0x04` asserted that `0x04` "MUST fail to decode" as *unregistered*, which
+    /// stopped being true when §1.1 registered it — while the sibling vector `suite_accept_0x03`
+    /// justified acceptance precisely on the grounds that registered-but-reserved ids decode. Both
+    /// could not be right. `suite_reject_0x05` remains as the genuine unregistered case.
     pub fn from_u8(b: u8) -> Option<Self> {
         match b {
             0x01 => Some(Suite::Classical),
             0x02 => Some(Suite::PqHybrid),
             0x03 => Some(Suite::ReservedAeadGcm), // RESERVED, unimplemented — see the variant docs
-            _ => None,                            // unknown suite — reject, never guess
+            0x04 => Some(Suite::ReservedAnchorSlhDsa), // RESERVED, unimplemented — anchor profile
+            _ => None,                            // unregistered suite — reject, never guess
         }
     }
 
@@ -246,10 +277,27 @@ mod tests {
         // 0x03 is a REGISTERED reserved code point (§1.1, §21.15): it decodes as a known id (so the
         // wire decoder round-trips it) but is not implemented — see `reserved_0x03_is_known_but_unusable`.
         assert_eq!(Suite::from_u8(0x03), Some(Suite::ReservedAeadGcm));
+        // 0x04 likewise: REGISTERED (§1.1, §1.2.0 — the signature-diverse anchor profile), so it
+        // decodes, but unimplemented. It was previously asserted here as *unregistered* and had to
+        // move when §1.1 registered it; keeping it in the reject list would have made this test
+        // enforce the opposite of the specification.
+        assert_eq!(Suite::from_u8(0x04), Some(Suite::ReservedAnchorSlhDsa));
         // Every *unregistered* byte MUST still be rejected (never guess).
-        for b in [0x00u8, 0x04, 0x7f, 0xff] {
+        for b in [0x00u8, 0x05, 0x7f, 0xff] {
             assert_eq!(Suite::from_u8(b), None, "byte 0x{b:02x} must fail closed");
         }
+    }
+
+    #[test]
+    fn reserved_0x04_is_known_but_unusable() {
+        // The anchor profile decodes as a known id, exactly like `0x03` ...
+        let s = Suite::from_u8(0x04).expect("0x04 is a registered code point");
+        assert_eq!(s, Suite::ReservedAnchorSlhDsa);
+        assert_eq!(s.as_u8(), 0x04);
+        // ... but nothing may be done under it: SLH-DSA-128s is not implemented here, so both
+        // support predicates are false and every use fails closed rather than silently degrading.
+        assert!(!s.is_supported(), "0x04 must not claim Identity-layer support");
+        assert!(!s.mote_supported(), "0x04 must not claim MOTE-layer support");
     }
 
     #[test]

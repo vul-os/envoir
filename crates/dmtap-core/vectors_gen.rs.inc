@@ -456,8 +456,8 @@ fn build_all() -> VectorFile {
     // === 6. Suite fail-closed — an UNREGISTERED suite byte MUST be rejected (spec §1.1, §18.1.4) =
     for (name, byte) in [
         ("suite_reject_0x00", 0x00u8),
-        ("suite_reject_0x04", 0x04u8),
         ("suite_reject_0x05", 0x05u8),
+        ("suite_reject_0x7f", 0x7fu8),
         ("suite_reject_0xff", 0xffu8),
     ] {
         let cbor_bytes = cbor(&byte);
@@ -475,6 +475,7 @@ fn build_all() -> VectorFile {
         ("suite_accept_0x01", 0x01u8),
         ("suite_accept_0x02", 0x02u8),
         ("suite_accept_0x03", 0x03u8),
+        ("suite_accept_0x04", 0x04u8),
     ] {
         let cbor_bytes = cbor(&byte);
         vectors.push(v(
@@ -482,7 +483,7 @@ fn build_all() -> VectorFile {
             "suite_decode",
             json!({ "cbor_hex": hex(&cbor_bytes) }),
             json!({ "accepted": true }),
-            "0x01 (classical), 0x02 (reserved PQ), and 0x03 (reserved AEAD-diverse) are known suite ids and decode",
+            "0x01 (legacy), 0x02 (the v0 REQUIRED originating suite), 0x03 (reserved AEAD-diverse) and 0x04 (reserved signature-diverse, the SLH-DSA anchor profile) are all REGISTERED code points and decode. Registered and implemented are different questions: decoding says the registry knows the byte; the support predicates say whether anything may be done under it. 0x04 was previously asserted here as unregistered-and-rejected, which stopped being true when §1.1 registered it and contradicted this very vector's own rationale.",
         ));
     }
 

@@ -92,14 +92,18 @@ fn key(seed: u8) -> IdentityKey {
 // ================================================================================================
 
 /// LOCKS §10.7.1 "Unknown `v`/`suite` → reject" (§10.1, §1.1, §21.15): every UNREGISTERED byte MUST
-/// fail closed, never be guessed at. The registered ids `0x01`/`0x02`/`0x03` decode (`0x02`/`0x03`
-/// are RESERVED — known code points that fail closed on *use*, not on *decode*, §1.1).
+/// fail closed, never be guessed at. The registered ids `0x01`/`0x02`/`0x03`/`0x04` decode
+/// (`0x03`/`0x04` are RESERVED — known code points that fail closed on *use*, not on *decode*,
+/// §1.1). `0x04` moved out of the reject list when §1.1 registered it as the signature-diverse
+/// SLH-DSA anchor profile (§1.2.0); an invariant test that outlives the invariant is worse than no
+/// test, because it locks in the opposite of the specification.
 #[test]
 fn unknown_suite_byte_fails_closed() {
     assert_eq!(Suite::from_u8(0x01), Some(Suite::Classical));
     assert_eq!(Suite::from_u8(0x02), Some(Suite::PqHybrid));
     assert_eq!(Suite::from_u8(0x03), Some(Suite::ReservedAeadGcm));
-    for b in [0x00u8, 0x04, 0x0f, 0x7f, 0xfe, 0xff] {
+    assert_eq!(Suite::from_u8(0x04), Some(Suite::ReservedAnchorSlhDsa));
+    for b in [0x00u8, 0x05, 0x0f, 0x7f, 0xfe, 0xff] {
         assert_eq!(Suite::from_u8(b), None, "suite byte 0x{b:02x} must fail closed, never guessed");
     }
 }
@@ -131,8 +135,8 @@ fn identity_declaring_only_unsupported_suite_is_rejected_not_downgraded() {
 /// LOCKS §10.7.1 "Unknown `v`/`suite` → reject" at the MOTE envelope layer (§2.7 step 1). An
 /// UNREGISTERED suite byte can never decode into an `Envelope` at all, failing closed at the wire
 /// before `validate()` is ever reached (`Suite::from_u8` fails closed on any byte outside the
-/// registered ids {0x01, 0x02, 0x03}). `0x04` is used here as a representative unregistered byte;
-/// the reserved-but-unimplemented `0x03` decodes but is instead rejected at `validate()` step 1
+/// registered ids {0x01, 0x02, 0x03, 0x04}). `0x05` is used here as a representative unregistered
+/// byte; the reserved-but-unimplemented `0x03`/`0x04` decode but are rejected at `validate()` step 1
 /// (`!mote_supported()`). This is the correct home for the "reject before any other check" invariant.
 #[test]
 fn mote_decode_rejects_an_unsupported_suite_byte_before_any_other_check() {
@@ -145,16 +149,16 @@ fn mote_decode_rejects_an_unsupported_suite_byte_before_any_other_check() {
     let env = build_mote(&Hpke, &sender, &eph, &recipient.public(), seal.public(), draft)
         .expect("build_mote must succeed");
 
-    // Patch ONLY the suite field (integer key 2, §18.3.1) to an UNREGISTERED byte 0x04 — everything
+    // Patch ONLY the suite field (integer key 2, §18.3.1) to an UNREGISTERED byte 0x05 — everything
     // else (content address, structure) stays valid, so any decode failure is attributable to the
-    // suite. (0x03 is now a registered reserved id that WOULD decode; use an unregistered byte.)
+    // suite. (0x03 and 0x04 are registered reserved ids that WOULD decode; use an unregistered byte.)
     let mut m = match cbor::decode(&env.det_cbor()).unwrap() {
         Cv::Map(m) => m,
         _ => unreachable!(),
     };
     for kv in m.iter_mut() {
         if kv.0 == 2 {
-            kv.1 = Cv::U64(0x04);
+            kv.1 = Cv::U64(0x05);
         }
     }
     let bogus = cbor::encode(&Cv::Map(m));
@@ -163,7 +167,7 @@ fn mote_decode_rejects_an_unsupported_suite_byte_before_any_other_check() {
     // content-address / signature / decryption work is ever attempted.
     assert!(
         Envelope::from_det_cbor(&bogus).is_err(),
-        "an unregistered suite byte (0x04) must fail closed at the decoder"
+        "an unregistered suite byte (0x05) must fail closed at the decoder"
     );
 }
 

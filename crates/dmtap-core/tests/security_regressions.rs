@@ -240,16 +240,22 @@ fn untampered_known_sender_mote_is_accepted() {
 
 /// FINDING: an UNREGISTERED algorithm-suite byte is never guessed at — `Suite::from_u8` fails
 /// closed for every byte outside the registered ids (§1.1, §18.1.4, §21.15). The three registered
-/// ids `0x01`/`0x02`/`0x03` decode (0x02/0x03 are RESERVED — known code points that fail closed on
-/// *use*, not on *decode*); every unregistered byte returns `None`.
+/// ids `0x01`/`0x02`/`0x03`/`0x04` decode (0x03/0x04 are RESERVED — known code points that fail
+/// closed on *use*, not on *decode*); every unregistered byte returns `None`. `0x04` moved from the
+/// reject list to the accept list when §1.1 registered it as the signature-diverse anchor profile
+/// (§1.2.0): leaving it here would have made this regression test enforce the opposite of the spec.
 #[test]
 fn suite_from_u8_fails_closed_on_unknown_bytes() {
     assert_eq!(Suite::from_u8(0x01), Some(Suite::Classical));
     assert_eq!(Suite::from_u8(0x02), Some(Suite::PqHybrid));
     assert_eq!(Suite::from_u8(0x03), Some(Suite::ReservedAeadGcm));
-    // 0x03 is registered-but-unimplemented: it must not be usable at either layer.
+    assert_eq!(Suite::from_u8(0x04), Some(Suite::ReservedAnchorSlhDsa));
+    // Both reserved ids are registered-but-unimplemented: neither may be usable at either layer.
     assert!(!Suite::ReservedAeadGcm.is_supported() && !Suite::ReservedAeadGcm.mote_supported());
-    for b in [0x00u8, 0x04, 0x7f, 0xfe, 0xff] {
+    assert!(
+        !Suite::ReservedAnchorSlhDsa.is_supported() && !Suite::ReservedAnchorSlhDsa.mote_supported()
+    );
+    for b in [0x00u8, 0x05, 0x7f, 0xfe, 0xff] {
         assert_eq!(Suite::from_u8(b), None, "suite byte 0x{b:02x} must fail closed, never be guessed");
     }
 }

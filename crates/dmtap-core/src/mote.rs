@@ -1520,10 +1520,17 @@ fn verify_sig_for_suite(
         Suite::PqHybrid => {
             verify_hybrid_domain(pk, domain, msg, sig).map_err(|_| MoteError::BadSignature)
         }
-        // `0x03` is a RESERVED, unimplemented code point (§1.1, §21.15): no AEAD/verifier exists, so
-        // fail closed. `validate` rejects it earlier at §2.7 step 1 (`!mote_supported()`), so this is
-        // an unreachable defensive arm — never accept an object under an unimplemented suite.
-        Suite::ReservedAeadGcm => Err(MoteError::UnsupportedSuite(suite.as_u8())),
+        // `0x03` (AEAD-diverse) and `0x04` (signature-diverse / anchor) are RESERVED, unimplemented
+        // code points (§1.1, §1.2.0, §21.15): no verifier exists for either, so fail closed.
+        // `validate` rejects them earlier at §2.7 step 1 (`!mote_supported()`), so these are
+        // unreachable defensive arms — never accept an object under an unimplemented suite.
+        //
+        // Deliberately NOT a `_ =>` catch-all: exhaustive matching is what forces every new suite
+        // to be considered at this site rather than silently inheriting a default. Adding `0x04`
+        // broke this match, which is exactly the intended behaviour.
+        Suite::ReservedAeadGcm | Suite::ReservedAnchorSlhDsa => {
+            Err(MoteError::UnsupportedSuite(suite.as_u8()))
+        }
     }
 }
 
