@@ -38,10 +38,6 @@ export function fmtNum(n) {
   if (n >= 1e3) return _dec(n / 1e3, n >= 1e4 ? 0 : 1) + 'k';
   return n.toLocaleString();
 }
-export function fmtUsd(n) {
-  return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
 // ---- Icon set (stroke SVGs) --------------------------------------------------------------
 const P = {
   home: '<path d="M4 11l8-7 8 7"/><path d="M6 10v9h12v-9"/><path d="M10 19v-5h4v5"/>',

@@ -32,8 +32,8 @@ wipes local state and starts over.
 | **Directory** | §3.10.3, §18.4.7 | Curate the signed, versioned `DomainDirectory` (GAL); set **public / members-only** visibility; see each entry's custody and **forward DNS+KT verification** status; re-verify. |
 | **Groups** | §5.8.7 | Create/manage `team@`, `all@`, `support@` distribution lists & channels; roster, posting model, membership visibility, join policy; the group key stays threshold-held. |
 | **Admin roles** | §13.5.1 | Delegate/revoke `domain-owner` / `domain-admin` / `user-admin` / `group-admin` **capabilities** (UCAN-style, attenuable, expirable, revocable). Granting `domain-owner` requires the domain **threshold**. |
-| **Gateway policy** | §7.2a, §4 | Set **hosting** (operator-hosted vs self-hosted, $0), the **legacy bridge** (enabled/disabled) and its trusted gateway operators, and the **relay** mode (direct-first vs relay-required) and its trusted relay operators. Read directly by Billing. |
-| **Billing** | `dmtap-seam` | The domain's plan tier (`key_only` / `gateway_domain` / `vanity_domain`, mirroring the operator's seam) and this period's usage. Line items are **gateway-metered** (storage, legacy sends/receives, relay bytes) and zero out live as **Gateway policy** says this domain isn't drawing on operator infrastructure for them; native mail, mixnet, KT and directory resolution are **always $0**. |
+| **Gateway policy** | §7.2a, §4 | Set **hosting** (operator-hosted vs self-hosted), the **legacy bridge** (enabled/disabled) and its trusted gateway operators, and the **relay** mode (direct-first vs relay-required) and its trusted relay operators. Read directly by Usage & quotas. |
+| **Usage & quotas** | `dmtap-seam` | The domain's onboarding tier (`key_only` / `gateway_domain` / `vanity_domain`, mirroring the operator's seam) and this period's usage. Line items are **gateway-metered** (storage, legacy sends/receives, relay bytes) and zero out live as **Gateway policy** says this domain isn't drawing on operator infrastructure for them; native mail, mixnet, KT and directory resolution are **always free**. Envoir computes no invoice — an operator that charges for hosting attaches their own billing system at the `dmtap-seam` boundary. |
 | **Audit log** | §3.5, §13.5.1 | The append-only, hash-chained, owner-visible trail of every administrative act — nothing an admin does is silent. |
 
 ## How the sovereignty distinction is made legible
@@ -89,10 +89,10 @@ css/console.css          the design system (shared language with ../client) — 
 
 js/app.js                boot: load an admin session or run setup, then mount the shell
 js/setup.js              "connect your domain" — generate the authority key + seed the org
-js/shell.js              rail (Overview · Members · Directory · Groups · Roles · Gateway policy · Billing · Audit), topbar, dispatch
+js/shell.js              rail (Overview · Members · Directory · Groups · Roles · Gateway policy · Usage & quotas · Audit), topbar, dispatch
 js/bus.js                late-bound rerender/setView dispatch (no import cycle)
 
-js/store.js              THE SIMULATED SEAM: domain (incl. gateway/relay policy, billing tier + meters, KT pin) + members + groups + caps + audit; persistence; directory versioning/signing; effectiveMeters() / ktTreeSize() / verifyKtCheckpoint()
+js/store.js              THE SIMULATED SEAM: domain (incl. gateway/relay policy, onboarding tier + meters, KT pin) + members + groups + caps + audit; persistence; directory versioning/signing; effectiveMeters() / ktTreeSize() / verifyKtCheckpoint()
 js/session.js            domain-authority keypair, org-managed escrow, directory signing, threshold quorum collection
 js/crypto.js             REAL Web Crypto: keygen, signing, escrow signing, safety-number derivation
 
@@ -104,7 +104,7 @@ js/views/directory.js    DomainDirectory (GAL) curation, visibility, forward-ver
 js/views/groups.js       org groups / distribution lists, rosters, policy
 js/views/roles.js        admin capabilities: delegate / attenuate / revoke (threshold for domain-owner)
 js/views/gateway.js      hosting (self-host vs operator-hosted), legacy bridge + trusted gateways, relay mode + trusted relays
-js/views/billing.js      plan tier + gateway-metered usage (zeroed by Gateway policy) + the always-$0 list
+js/views/billing.js      onboarding tier + gateway-metered usage (zeroed by Gateway policy) + the always-free list
 js/views/audit.js        KT-logged, owner-visible administrative trail
 ```
 
@@ -122,3 +122,10 @@ offboard, create group + add member, grant + revoke a role, a threshold quorum a
 visibility, rotate the directory key, demonstrate escrow signing) was driven headlessly in Chrome,
 asserting **zero page-level console errors** (`console.error` / `pageerror` / `requestfailed` all
 captured), across desktop and phone viewports, plus a persistence-across-reload check.
+
+---
+
+<p align="center">
+  <a href="https://vulos.org"><img src="../docs/assets/vulos-logo.png" alt="vulos" height="20"></a><br>
+  <sub><a href="https://vulos.org"><b>vulos</b></a> — open by design</sub>
+</p>

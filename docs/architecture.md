@@ -33,9 +33,9 @@ flowchart LR
         SMTP["SMTP / the existing internet"]
     end
 
-    subgraph Op["Operator seam — optional"]
-        Seam["dmtap-seam contract<br/>metering · policy · gateway-authz"]
-        Cloud["private operator, e.g. envoir-cloud<br/>(NOT in this repo)"]
+    subgraph Op["Operator seam — optional, no vendor"]
+        Seam["dmtap-seam contract<br/>metering · policy · gateway-authz · postage"]
+        Ref["dmtap-operator: reference quotas,<br/>usage queue, fail-closed gateway-authz"]
     end
 
     Client <--> Node
@@ -46,7 +46,7 @@ flowchart LR
     Node -.->|legacy bridge| Gateway
     Gateway <--> SMTP
     Node -.->|metering / policy hooks| Seam
-    Seam -.->|self-host default: no-op| Cloud
+    Seam -.->|self-host default: no-op| Ref
 ```
 
 In **self-host** mode every `dmtap-seam` hook is unlimited/no-op, so the OSS stack is fully
@@ -137,23 +137,28 @@ sequenceDiagram
 No gateway, no SMTP, no plaintext outside the two endpoints. The middle (mesh, mixnet, gateway)
 holds **no durable user data** — durability is always punted to an edge.
 
-## Where an operator's billing sits
+## Where a third-party operator's tooling sits
 
-Envoir/DMTAP is designed so a commercial control-plane (e.g. a private `envoir-cloud`) can add
-billing and multi-tenant management **without forking the protocol**. The seam is four
-capabilities — Metering, Provisioning, Policy, GatewayAuthz — defined by
-[`crates/dmtap-seam`](../crates/dmtap-seam) and its [`CONTRACT.md`](../crates/dmtap-seam/CONTRACT.md).
-Every hook has a self-host default that is unlimited/no-op, so the OSS runs unrestricted with no
-operator at all.
+Envoir is not a business and runs no control plane. But a third-party **operator** — anyone
+running a node or gateway for other people — has real needs: quotas, usage accounting, and
+legacy-egress authorization. Envoir/DMTAP is designed so an operator can add exactly that
+**without forking the protocol**. The seam is a handful of capabilities — Metering, Provisioning,
+Policy, GatewayAuthz, and an optional provider-agnostic prepaid-postage hook — defined by
+[`crates/dmtap-seam`](../crates/dmtap-seam) and its [`CONTRACT.md`](../crates/dmtap-seam/CONTRACT.md),
+with a working, non-commercial reference implementation in
+[`crates/dmtap-operator`](../crates/dmtap-operator). Every hook has a self-host default that is
+unlimited/no-op, so the OSS runs unrestricted with no operator at all.
 
 The inviolable rule: **privacy, cryptography, metadata privacy, and recovery are never behind the
 seam.** The seam only ever meters and limits *operations* (storage, legacy-gateway egress, relay
 bandwidth) and *organizational* concerns (accounts, quotas, domains) — never a user's ability to
 encrypt, verify, or read their own mailbox. See
 [features/self-hosting.md](features/self-hosting.md#billing-is-tied-to-the-gateway-only) for the
-billing-vs-native-mesh line in practice.
+metering-vs-native-mesh line in practice.
 
-Any such control-plane is a **separate, non-OSS repository** — it is never part of this workspace.
+If an operator wants to charge for the operations they provide, that billing system is entirely
+their own, external to this workspace — Envoir computes no price and renders no invoice anywhere,
+and there is no vendor this repo points to.
 
 ## App map
 

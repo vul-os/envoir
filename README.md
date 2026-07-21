@@ -194,13 +194,13 @@ flowchart LR
     end
 
     subgraph Legacy["Legacy email — optional"]
-        Gateway["envoir-gateway (gateway/)<br/>the one component that speaks SMTP"]
+        Gateway["envoir-gateway<br/>(gateway/; also reachable as `envoir-node --gateway`)<br/>the one component that speaks SMTP"]
         SMTP["SMTP / the existing internet"]
     end
 
-    subgraph Op["Operator seam — optional"]
-        Seam["dmtap-seam contract<br/>metering · policy · gateway-authz"]
-        Cloud["private operator, e.g. envoir-cloud<br/>(NOT in this repo)"]
+    subgraph Op["Operator seam — optional, no vendor"]
+        Seam["dmtap-seam contract<br/>metering · policy · gateway-authz · postage"]
+        Ref["dmtap-operator: reference quotas,<br/>usage queue, fail-closed gateway-authz, gateway DNS"]
     end
 
     Client <--> Node
@@ -208,19 +208,23 @@ flowchart LR
     Transport <--> Mix
     Mix <--> Peer["their node"]
     Client -.->|resolve name@domain| KT
-    Node -.->|legacy bridge| Gateway
+    Node -.->|separate OS process, exec'd, no shared address space| Gateway
     Gateway <--> SMTP
-    Node -.->|metering / policy hooks| Seam
-    Seam -.->|self-host default: no-op| Cloud
+    Node -.->|quota / usage-tracking hooks| Seam
+    Seam -.->|self-host default: no-op| Ref
 ```
 
-In **self-host** mode every `dmtap-seam` hook is unlimited/no-op, so the OSS stack is fully
-functional standalone — the operator seam and any hosted operator are optional.
+Nobody runs Envoir as a business, and there is no control plane. In **self-host** mode every
+`dmtap-seam` hook is unlimited/no-op, so the OSS stack is fully functional standalone. If a
+third-party **operator** runs a node or gateway for other people, they can add quotas, usage
+accounting, and legacy-egress authorization at the `dmtap-seam` boundary — `dmtap-operator` is a
+working, non-commercial reference implementation of exactly that (see its crate docs) — without
+forking the protocol. Nothing behind that seam can ever gate privacy, cryptography, or recovery.
 
 | Path | What it is |
 |---|---|
-| [`node/`](node) | **envoir-node** — the whole client side: identity, mailbox, mesh, messaging, files, and the IMAP/POP3/SMTP-submission/JMAP client servers |
-| [`gateway/`](gateway) | **envoir-gateway** — the optional legacy SMTP bridge; the only component that isn't content-blind; lives here by design, kept loosely coupled for a future split into its own repo (see [`gateway/SEPARATION.md`](gateway/SEPARATION.md)) |
+| [`node/`](node) | **envoir-node** — the whole client side: identity, mailbox, mesh, messaging, files, the IMAP/POP3/SMTP-submission/JMAP client servers, and **every role as a flag**, including `--gateway` (spec §0.2) |
+| [`gateway/`](gateway) | **envoir-gateway** — the optional legacy SMTP bridge; the only component that isn't content-blind. A separate crate producing a separate binary and, at runtime, a **separate OS process** with no access to node identity/key material — `envoir-node --gateway` execs it rather than linking it in (see [Security & honesty](#security--honesty) and [`gateway/SEPARATION.md`](gateway/SEPARATION.md)) |
 | [`crates/dmtap-core`](crates/dmtap-core) | Identity, MOTE, content addressing, canonical CBOR, delegated capability tokens, DMTAP-PUB public objects (§22) + the CAD/artifact profile (§23) — the shared primitives |
 | [`crates/dmtap-auth`](crates/dmtap-auth) | DMTAP-Auth — decentralized, key-based sign-in |
 | [`crates/dmtap-deniable`](crates/dmtap-deniable) | Deniable 1:1 messaging (X3DH + Double Ratchet) |
@@ -228,7 +232,9 @@ functional standalone — the operator seam and any hosted operator are optional
 | [`crates/dmtap-mail`](crates/dmtap-mail) | Client protocol servers: IMAP/POP3/SMTP-submission, JMAP, autodiscovery |
 | [`crates/dmtap-naming`](crates/dmtap-naming) | The pluggable naming/addressing resolver framework (key-name, petname, DNS + key-transparency, optional name-chains) — see [docs/naming.md](docs/naming.md) |
 | [`crates/dmtap-p2p`](crates/dmtap-p2p) | The real libp2p mesh transport (TCP/QUIC+Noise+Yamux, Kademlia, Circuit Relay v2 + DCUtR), proven on loopback — not yet the node binary's default |
-| [`crates/dmtap-seam`](crates/dmtap-seam) | The **operator seam**: the contract a hosted operator implements |
+| [`crates/dmtap-seam`](crates/dmtap-seam) | The **operator seam**: metering, provisioning, policy, gateway-authz, and an optional provider-agnostic prepaid-postage hook (`postage`) — no billing logic, no payment provider, no control plane, anywhere in this crate |
+| [`crates/dmtap-operator`](crates/dmtap-operator) | Reference operator machinery implementing `dmtap-seam`: a bounded/idempotent usage queue, flat quotas, the fail-closed gateway-authorization logic (spec §12.2), and gateway-domain DNS record automation — no commercial code |
+| [`crates/dmtap-postage-patala`](crates/dmtap-postage-patala) | **Optional, isolated** reference postage payment-provider adapter backed by [`patala`](https://github.com/vul-os/patala) (Stellar micropayment rail) — one of many possible `postage::PostageProvider` implementations; never a dependency of `dmtap-seam` or the default build |
 | [`crates/conformance-runner`](crates/conformance-runner) | Runs the implementation against the spec's conformance catalog |
 | [`crates/netsim`](crates/netsim), [`crates/downgrade-tests`](crates/downgrade-tests) | Network simulation + downgrade-attack regressions |
 | [`client/`](client) | Web client — mail, chat, calendar, contacts, files, groups, identity; installable PWA with offline shell + push |
@@ -239,14 +245,40 @@ functional standalone — the operator seam and any hosted operator are optional
 | [`integration/`](integration), [`fuzz/`](fuzz), [`formal/`](formal) | Cross-component + adversarial tests, wire-decoder fuzzing, ProVerif symbolic models |
 | [`brand/`](brand) | Logo marks, wordmark, and the Aurora Indigo design tokens |
 
-The private billing/management layer for a hosted operator (e.g. `envoir-cloud`) is a **separate,
-non-OSS repository** that implements `dmtap-seam` out of process — it is never part of this
-workspace, and it never gates a protocol, client, or privacy feature.
+## One binary, roles as flags
+
+Envoir ships one program, `envoir-node`, with **roles selected by flags**, not a fleet of
+special-purpose services. `envoir-node run` is a plain mesh participant. `envoir-node --gateway`
+(equivalently `envoir-node gateway <args>`) is that same program run in **gateway mode** — spec
+§0.2's "the gateway MAY be the node binary run in `--gateway` mode": the only thing gateway mode
+adds is that this node has a reputable public IP and a domain, so it also bridges to legacy email.
+That is its whole job, and it is optional — a node with no legacy correspondents never runs it.
+
+A gateway is not a privileged tier of node, and running one costs nothing to Envoir and requires no
+payment method anywhere. To run one, an operator needs:
+
+- a public, static IP with correct **reverse DNS (PTR)** for the domain that will send mail from it,
+- outbound **port 25** unblocked (most residential/cloud networks block it by default — check with
+  your host/ISP),
+- at least one **domain** you control, so `_dmtap`/MX/SPF/DKIM/DMARC records can be published (see
+  [`crates/dmtap-operator/src/dns.rs`](crates/dmtap-operator/src/dns.rs) for the automatable record
+  set), and
+- nothing else. No billing account, no control plane, no vendor.
+
+Gateway mode terminates untrusted internet connections and runs the SMTP/IMAP/POP3/MIME parsers —
+historically the most exploited code in mail — so it must never share a process, and therefore
+never a memory address space, with this node's identity key material. `envoir-node --gateway`
+enforces that by handing off to the **separately built** `envoir-gateway` executable as a genuinely
+separate OS process (an `exec`, on Unix — the process image is replaced outright) rather than
+calling gateway code from inside the identity-holding process. See
+[Security & honesty](#security--honesty) for exactly what privilege separation is (and isn't yet)
+guaranteed today.
 
 ## Quickstart
 
 ```sh
-# Build the whole workspace (node, gateway, and every crate)
+# Build the whole workspace (node, gateway, and every crate — patala's postage adapter is a
+# separate, non-default member; see crates/dmtap-postage-patala/Cargo.toml)
 cargo build --workspace
 
 # Two in-process nodes exchange a real, end-to-end-encrypted MOTE
@@ -256,8 +288,13 @@ cargo run -p envoir-node -- demo
 cargo run -p envoir-node -- init   # once, to create a keystore
 cargo run -p envoir-node -- run
 
-# The optional legacy-email bridge — real IMAP/POP3/SMTP-submission live here, not on the node
-# (see gateway/README.md for the 2-command personal quickstart)
+# The optional legacy-email bridge, run as a mode of the node binary (a separate OS process
+# under the hood — see "One binary, roles as flags" above); real IMAP/POP3/SMTP-submission
+# live only here, never on the node itself
+cargo run -p envoir-node -- gateway run
+
+# Equivalent, if you'd rather invoke the gateway binary directly (see gateway/README.md for the
+# 2-command personal quickstart)
 cargo run -p envoir-gateway -- run
 ```
 
@@ -304,10 +341,27 @@ honest limitations); the wire-format
 decoders are exercised by **`cargo-fuzz`** targets in [`fuzz/`](fuzz); a **157-case conformance
 suite** runs 148 cases to a pass today (0 failures, the other 9 each skipped with a documented
 reason) via [`crates/conformance-runner`](crates/conformance-runner); the node's anti-rollback/anti-abuse state
-survives a restart instead of resetting to a weaker baseline; and `cargo test --workspace` runs
-**771 passing tests**. [`integration/`](integration) adds dedicated adversarial tests on top. None
-of this substitutes for an **independent external security audit**, which has not yet happened and
-is the gate before any production deployment. Treat everything here as pre-alpha.
+survives a restart instead of resetting to a weaker baseline; and `cargo test` (the default,
+non-patala workspace members) passes with every test green. [`integration/`](integration) adds
+dedicated adversarial tests on top. None of this substitutes for an **independent external
+security audit**, which has not yet happened and is the gate before any production deployment.
+Treat everything here as pre-alpha.
+
+**Gateway privilege separation.** Gateway mode terminates untrusted legacy SMTP/IMAP/POP3
+connections from the open internet and runs the corresponding parsers — historically the most
+exploited code in mail — so it must never run in a process that holds, or could ever load, this
+node's `IK`, device keys, or MOTE store. Today that is enforced by construction: `envoir-gateway`
+(`gateway/`) has zero crate dependency on `envoir-node` (`node/`) or vice versa, so the node
+executable cannot contain gateway parser code in its address space even in principle, and
+`envoir-node --gateway` hands off to the already-built, separate `envoir-gateway` executable as a
+genuinely separate OS process — an `exec` on Unix, which replaces the process image outright, so
+there is no lingering parent and nothing of that process's memory survives into the gateway's.
+What is **not yet** done, and is tracked as `TODO(privsep)` at the dispatch site
+(`node/src/main.rs`): dropping privileges / applying an OS sandbox (seccomp or equivalent) before
+the gateway process touches its listening sockets, and a single self-contained multicall binary
+(one ELF re-exec'ing itself) instead of locating a sibling executable at runtime. Neither gap
+weakens the address-space-separation guarantee above; they are additional hardening layers on top
+of it.
 
 ## License
 

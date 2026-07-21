@@ -23,7 +23,7 @@ const VIEWS = [
   { id: 'groups', name: 'Groups', icon: 'groups', render: renderGroups, search: 'Search groups' },
   { id: 'roles', name: 'Admin roles', icon: 'roles', render: renderRoles, search: 'Search capabilities' },
   { id: 'gateway', name: 'Gateway policy', icon: 'gateway', render: renderGateway },
-  { id: 'billing', name: 'Billing', icon: 'billing', render: renderBilling },
+  { id: 'billing', name: 'Usage & quotas', icon: 'billing', render: renderBilling },
   { id: 'audit', name: 'Audit log', icon: 'audit', render: renderAudit, search: 'Search events' },
 ];
 
