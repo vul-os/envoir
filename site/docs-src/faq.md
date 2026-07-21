@@ -46,8 +46,8 @@ quantified version of this answer; don't trust a shorter one, including this one
 
 **Is this audited?**
 Not yet. Eight machine-checked ProVerif models cover the hardest cryptographic ceremonies, every wire
-decoder is fuzzed, and a 352-case conformance suite exists (175 executing, 0 failures; of the 177
-that do not execute, 35 have a specific documented reason and 142 await triage) — but none of that substitutes for the
+decoder is fuzzed, and a 352-case conformance suite exists (188 executing, 0 failures; of the 164
+that do not execute, 19 are implementer attestations and 145 are recipes not yet constructible) — but none of that substitutes for the
 independent external audit the project treats as a hard gate before any production deployment.
 See [security.md](security.md).
 

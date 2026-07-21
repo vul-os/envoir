@@ -345,10 +345,10 @@ structurally cannot express and which are therefore *not* claimed), gated in CI 
 [`formal/check.sh`](formal/check.sh) against recorded verdicts so a proof that silently breaks
 fails the build instead of printing; the wire-format
 decoders are exercised by **`cargo-fuzz`** targets in [`fuzz/`](fuzz); a **352-case conformance
-suite** runs 175 cases to a pass today (0 failures). The other 177 are construction recipes that
-nothing executes, and they are counted honestly rather than quietly: **35** carry a specific
-documented reason why the reference cannot construct them, and **142 are still awaiting triage**
-— a real gap, stated as one, not a rounding of "passing" upward. Run via
+suite** runs 188 cases to a pass today (0 failures). The other 164 are counted honestly rather than
+quietly: **19** are settled by implementer attestation (a process/UX MUST with no bytes to
+recompute), and **145 are construction recipes nothing executes yet** — most still awaiting triage.
+That remainder is a real gap, stated as one, not a rounding of "passing" upward. Run via
 [`crates/conformance-runner`](crates/conformance-runner), alongside 84 generated wire vectors and
 39 pub/sync substrate vectors; the node's anti-rollback/anti-abuse state
 survives a restart instead of resetting to a weaker baseline; and `cargo test` (the default,

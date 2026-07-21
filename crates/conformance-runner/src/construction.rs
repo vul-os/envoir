@@ -47,6 +47,10 @@ use dmtap_core::cad::{
 use dmtap_core::pubobj::{
     self, verify_chunk, FeedHead, PubAnnounce, PubError, PubManifest, ServePolicy, PUB_ANNOUNCE_DS,
 };
+use dmtap_core::pubsub::{
+    FeedHint, HintBudget, SubscribePolicy, Subscription, SubscriptionRevoke,
+    SUBSCRIPTION_NONCE_MIN,
+};
 use dmtap_core::profile::{Avatar, Profile, ProfileError};
 use dmtap_core::push::{provider, PushError, PushSubscription, WakePing};
 use dmtap_core::sphinx::{self, SphinxCell, SphinxError};
@@ -111,6 +115,18 @@ pub fn run_construction_case(case: &SuiteCase) -> CaseOutcome {
         "DMTAP-IDENT-90" => Some(recovery_threshold_same_kind_ordering()),
         "DMTAP-IDENT-91" => Some(eviction_is_durable_against_the_chain()),
         "DMTAP-WIRE-03" => Some(recovery_policy_required_fields_and_ordering()),
+        "DMTAP-PUBSUB-01" => Some(pubsub_subscription_signing_preimage()),
+        "DMTAP-PUBSUB-02" => Some(pubsub_subscription_signer_authorization()),
+        "DMTAP-PUBSUB-03" | "DMTAP-PUBSUB-14" => Some(pubsub_subscription_required_fields()),
+        "DMTAP-PUBSUB-04" => Some(pubsub_subscription_expiry()),
+        "DMTAP-PUBSUB-05" => Some(pubsub_revoke_same_author()),
+        "DMTAP-PUBSUB-06" => Some(pubsub_revoke_effect()),
+        "DMTAP-PUBSUB-09" => Some(pubsub_hint_is_advisory_only()),
+        "DMTAP-PUBSUB-11" => Some(pubsub_subscribe_quota()),
+        "DMTAP-PUBSUB-12" => Some(pubsub_hint_rate_limit()),
+        "DMTAP-PUBSUB-08" => Some(pubsub_inlined_announce_is_verified()),
+        "DMTAP-PUBSUB-10" => Some(pubsub_default_topic_is_the_pretopic_feed()),
+        "DMTAP-PUBSUB-13" => Some(pubsub_unknown_version_or_suite()),
         "DMTAP-WIRE-04" => Some(recovery_method_and_threshold_shapes_rejected()),
         "DMTAP-IDENT-03" => Some(ident_broken_prev_chain_rejected()),
         "DMTAP-IDENT-05" => Some(device_cert_tampered_sig_rejected()),
@@ -588,6 +604,452 @@ fn ident_tampered_sig_rejected() -> Result<(), String> {
     match id.verify(None) {
         Err(IdentityError::BadSignature) => Ok(()),
         other => Err(format!("expected Err(BadSignature), got {other:?}")),
+    }
+}
+
+// ── DMTAP-PUBSUB (§25) ───────────────────────────────────────────────────────────────────────
+
+/// A well-formed, self-signed `Subscription` for `feed`, expiring at `expires` (§25.4.1).
+fn pubsub_fixture(ik: &IdentityKey, feed: &[u8], expires: u64) -> Subscription {
+    let mut s = Subscription {
+        v: 0,
+        suite: Suite::Classical,
+        subscriber: ik.public(),
+        feed: feed.to_vec(),
+        topic: "news".into(),
+        issued: 1_000,
+        expires,
+        nonce: vec![0x5Au8; SUBSCRIPTION_NONCE_MIN],
+        signer: ik.public(),
+        sig: vec![],
+    };
+    s.sign(ik);
+    s
+}
+
+/// DMTAP-PUBSUB-01 (§25.4.1): `subscription_id` and the signing preimage follow the stated
+/// formulas, and a flipped signature bit is rejected (`0x090E`).
+fn pubsub_subscription_signing_preimage() -> Result<(), String> {
+    let ik = IdentityKey::generate();
+    let s = pubsub_fixture(&ik, &[9u8; 32], 9_000);
+
+    // `subscription_id` is over the COMPLETE, SIGNED object (§18.9.4 derived-anchor rule), so it is
+    // reproducible by anyone holding the wire bytes and nothing else.
+    if s.subscription_id() != ContentId::of(&s.det_cbor()) {
+        return Err("subscription_id must equal 0x1e‖BLAKE3-256(det_cbor(Subscription))".into());
+    }
+    // The preimage EXCLUDES key 10, or the signature would have to cover itself.
+    if s.signing_preimage() == s.det_cbor() {
+        return Err("signing preimage must exclude `sig` (key 10)".into());
+    }
+    s.verify().map_err(|e| format!("the unmodified object must verify, got {e:?}"))?;
+
+    let mut tampered = s.clone();
+    tampered.sig[0] ^= 0x01;
+    match tampered.verify() {
+        Err(PubError::SubscriptionSigInvalid) => {}
+        other => return Err(format!("a flipped sig bit must be rejected 0x090E, got {other:?}")),
+    }
+    // The address is over the signed bytes, so tampering also moves the address — a tampered object
+    // is not merely invalid, it is a different object.
+    if tampered.subscription_id() == s.subscription_id() {
+        return Err("tampering `sig` must change subscription_id".into());
+    }
+    Ok(())
+}
+
+/// DMTAP-PUBSUB-02 (§25.4.1): `signer` must be authorized by `subscriber` through a `DeviceCert`
+/// chain, mirroring §22.3.3 step 4 (`0x090E`).
+fn pubsub_subscription_signer_authorization() -> Result<(), String> {
+    let ik = IdentityKey::generate();
+    let device = IdentityKey::generate();
+    let mut s = pubsub_fixture(&ik, &[9u8; 32], 9_000);
+    s.signer = device.public();
+    s.sign(&device);
+
+    // The signature is perfectly valid — that is exactly the point. Nothing has tied `device` to
+    // the subscriber, so a validly-self-signed object is still unauthorized.
+    match s.verify() {
+        Err(PubError::SubscriptionSigInvalid) => {}
+        other => return Err(format!("an uncertified operational signer must be rejected, got {other:?}")),
+    }
+
+    let cert = DeviceCert::issue(&ik, device.public(), "phone", 0, None, vec![Cap::Send]);
+    s.verify_with_cert(&cert)
+        .map_err(|e| format!("a DeviceCert from the subscriber must authorize the signer, got {e:?}"))?;
+
+    // A cert from a DIFFERENT identity must not authorize this signer, or the chain would prove
+    // only that SOMEONE certified the device, not that the subscriber did.
+    let other_ik = IdentityKey::generate();
+    let wrong = DeviceCert::issue(&other_ik, device.public(), "phone", 0, None, vec![Cap::Send]);
+    match s.verify_with_cert(&wrong) {
+        Err(PubError::SubscriptionSigInvalid) => Ok(()),
+        other => Err(format!("a cert from another identity must not authorize, got {other:?}")),
+    }
+}
+
+/// DMTAP-PUBSUB-03 (§25.4.2) and DMTAP-PUBSUB-14 (§25.4.1): `expires` (key 7) and `topic` (key 5)
+/// are mandatory. Absence is malformed — for `expires` it is NOT "never expires", and for `topic`
+/// it is NOT a synonym for the default feed, whose only spelling is `""`.
+fn pubsub_subscription_required_fields() -> Result<(), String> {
+    let ik = IdentityKey::generate();
+    let s = pubsub_fixture(&ik, &[9u8; 32], 9_000);
+    let bytes = s.det_cbor();
+
+    // Positive control: the baseline decodes, so each rejection below is the missing key.
+    Subscription::from_det_cbor(&bytes)
+        .map_err(|e| format!("positive control: the baseline Subscription must decode, got {e:?}"))?;
+
+    for (key, name) in [(7u64, "expires"), (5, "topic")] {
+        let spliced = remove_key(&bytes, key)?;
+        match Subscription::from_det_cbor(&spliced) {
+            Err(PubError::Cbor(CborError::MissingKey(k))) if k == key => {}
+            other => {
+                return Err(format!(
+                    "a Subscription without `{name}` (key {key}) must be rejected as malformed, got {other:?}"
+                ))
+            }
+        }
+    }
+
+    // The empty topic IS valid — "" names the default feed, and rejecting it would make the
+    // untopiced feed unsubscribable.
+    let mut default_feed = pubsub_fixture(&ik, &[9u8; 32], 9_000);
+    default_feed.topic = String::new();
+    default_feed.sign(&ik);
+    Subscription::from_det_cbor(&default_feed.det_cbor())
+        .map_err(|e| format!("an empty topic must decode — it names the default feed, got {e:?}"))?;
+    default_feed.verify().map_err(|e| format!("empty-topic subscription must verify, got {e:?}"))
+}
+
+/// DMTAP-PUBSUB-04 (§25.4.2): an expired `Subscription` MUST NOT be treated as active or justify a
+/// pushed `FeedHint` (`0x090F`).
+fn pubsub_subscription_expiry() -> Result<(), String> {
+    let ik = IdentityKey::generate();
+    let s = pubsub_fixture(&ik, &[9u8; 32], 9_000);
+
+    // Expiry is a lifecycle question, not a validity one: the object stays cryptographically sound
+    // forever, which is why a holder must check the clock rather than infer liveness from `verify`.
+    s.verify().map_err(|e| format!("an expired subscription is still a VALID object, got {e:?}"))?;
+
+    s.check_active(9_000).map_err(|e| format!("`now == expires` must still be active, got {e:?}"))?;
+    match s.check_active(9_001) {
+        Err(PubError::SubscriptionExpired) => Ok(()),
+        other => Err(format!("past `expires` must be rejected 0x090F, got {other:?}")),
+    }
+}
+
+/// DMTAP-PUBSUB-05 (§25.5.1): only the subscriber who granted a subscription may withdraw it
+/// (`0x0911`).
+fn pubsub_revoke_same_author() -> Result<(), String> {
+    let ik = IdentityKey::generate();
+    let s = pubsub_fixture(&ik, &[9u8; 32], 9_000);
+
+    let mut good = SubscriptionRevoke {
+        subscription: s.subscription_id(),
+        ts: 2_000,
+        signer: ik.public(),
+        sig: vec![],
+    };
+    good.sign(&ik);
+    good.verify_for(&s, None)
+        .map_err(|e| format!("the subscriber's own revoke must be honored, got {e:?}"))?;
+
+    // A revoke naming a REAL subscription_id but signed by someone else. Without the same-author
+    // check, anyone on path could unsubscribe anyone — including the publisher, who is precisely
+    // the party with an incentive to keep a subscriber list from shrinking.
+    let attacker = IdentityKey::generate();
+    let mut cross = SubscriptionRevoke {
+        subscription: s.subscription_id(),
+        ts: 2_000,
+        signer: attacker.public(),
+        sig: vec![],
+    };
+    cross.sign(&attacker);
+    match cross.verify_for(&s, None) {
+        Err(PubError::SubscriptionRevokeInvalid) => Ok(()),
+        other => Err(format!("a cross-subscriber revoke must be rejected 0x0911, got {other:?}")),
+    }
+}
+
+/// DMTAP-PUBSUB-06 (§25.5.2): once a valid revoke is accepted, the named `Subscription` MUST NOT
+/// justify further hint service (`0x0910`) — even though it has not expired.
+fn pubsub_revoke_effect() -> Result<(), String> {
+    let ik = IdentityKey::generate();
+    let s = pubsub_fixture(&ik, &[9u8; 32], 9_000);
+    let mut revoke = SubscriptionRevoke {
+        subscription: s.subscription_id(),
+        ts: 2_000,
+        signer: ik.public(),
+        sig: vec![],
+    };
+    revoke.sign(&ik);
+    revoke.verify_for(&s, None).map_err(|e| format!("the revoke must verify, got {e:?}"))?;
+
+    // A holder's accepted-revoke set, keyed by subscription_id — the state §25.5.2 requires.
+    let accepted: Vec<ContentId> = vec![revoke.subscription.clone()];
+
+    // Re-presenting the same, still-unexpired Subscription must not restore service. Both the
+    // signature and the clock still say yes; only the revoke says no, which is why the revoke must
+    // be consulted separately rather than folded into either check.
+    s.verify().map_err(|e| format!("the subscription is still a valid object, got {e:?}"))?;
+    s.check_active(3_000).map_err(|e| format!("the subscription has not expired, got {e:?}"))?;
+    if !accepted.contains(&s.subscription_id()) {
+        return Err("the accepted revoke must match the re-presented subscription by id".into());
+    }
+
+    // A DIFFERENT subscription by the same subscriber must remain serviceable — a revoke withdraws
+    // one capability, not the relationship.
+    let mut other = pubsub_fixture(&ik, &[9u8; 32], 9_000);
+    other.nonce = vec![0xA5u8; SUBSCRIPTION_NONCE_MIN];
+    other.sign(&ik);
+    if accepted.contains(&other.subscription_id()) {
+        return Err("a revoke must not extend to the subscriber's other subscriptions".into());
+    }
+    Ok(())
+}
+
+/// DMTAP-PUBSUB-09 (§25.6.2): `FeedHint.seq`/`tip` are ADVISORY. A hint claiming `seq = 5` against a
+/// feed whose verified head is `seq = 3` is accepted as a hint and disregarded as evidence.
+fn pubsub_hint_is_advisory_only() -> Result<(), String> {
+    let publisher = IdentityKey::generate();
+
+    // The verified truth: a signed FeedHead at seq = 3.
+    let mut head = FeedHead {
+        v: 0,
+        suite: Suite::Classical,
+        publisher: publisher.public(),
+        seq: 3,
+        tip: ContentId::of(b"entry-3"),
+        ts: 1_000,
+        signer: publisher.public(),
+        sig: vec![],
+    };
+    head.sign(&publisher);
+    head.verify().map_err(|e| format!("the real head must verify, got {e:?}"))?;
+
+    // The hint claims more than the feed can prove.
+    let hint = FeedHint {
+        feed: publisher.public(),
+        topic: "news".into(),
+        seq: 5,
+        tip: Some(ContentId::of(b"entry-5")),
+        announce: None,
+    };
+    // A hint is accepted AS A HINT — it round-trips and is not itself an error.
+    if FeedHint::from_det_cbor(&hint.det_cbor()).as_ref() != Ok(&hint) {
+        return Err("a well-formed FeedHint must decode".into());
+    }
+
+    // ...but it carries no authority. The only way to reach seq = 5 is a head signed by the
+    // publisher, and a head fabricated from the hint's claims does not verify. That is the whole
+    // content of "advisory": the hint changes WHEN you check, never WHAT you accept.
+    let mut forged = head.clone();
+    forged.seq = hint.seq;
+    forged.tip = hint.tip.clone().unwrap();
+    match forged.verify() {
+        Err(PubError::FeedSigInvalid) => {}
+        other => {
+            return Err(format!(
+                "a head carrying the hint's claims must not verify — otherwise a hint could be \
+                 laundered into feed state, got {other:?}"
+            ))
+        }
+    }
+    // The verified watermark is unchanged by having seen the hint.
+    if head.seq != 3 {
+        return Err("the verified head's seq must remain 3".into());
+    }
+    Ok(())
+}
+
+/// DMTAP-PUBSUB-11 (§25.7.1): a holder applies an AGGREGATE subscriber-admission bound
+/// (`0x0912`, DENY_POLICY) — the bound the per-message cold-sender gate cannot provide.
+fn pubsub_subscribe_quota() -> Result<(), String> {
+    let policy = SubscribePolicy {
+        max_active_per_topic: Some(2),
+        max_active_per_subscriber: Some(1),
+    };
+    policy.admit(0, 0).map_err(|e| format!("the first subscriber must be admitted, got {e:?}"))?;
+    policy.admit(1, 0).map_err(|e| format!("the second must be admitted, got {e:?}"))?;
+    match policy.admit(2, 0) {
+        Err(PubError::SubscribeQuota) => {}
+        other => return Err(format!("past the aggregate bound must deny 0x0912, got {other:?}")),
+    }
+    match policy.admit(0, 1) {
+        Err(PubError::SubscribeQuota) => {}
+        other => return Err(format!("the per-subscriber bound must deny 0x0912, got {other:?}")),
+    }
+    // An unconfigured policy denies nothing — the bound is node configuration, not a spec constant.
+    SubscribePolicy::default()
+        .admit(1_000_000, 1_000_000)
+        .map_err(|e| format!("an unconfigured policy must not deny, got {e:?}"))
+}
+
+/// DMTAP-PUBSUB-12 (§25.7.2): the SUBSCRIBER's own node bounds inbound hints per publisher,
+/// independent of the publisher's limiter (`0x0913`, DROP_SILENT).
+fn pubsub_hint_rate_limit() -> Result<(), String> {
+    let mut budget = HintBudget::new(2, 1_000, 0);
+    budget.admit(0).map_err(|e| format!("first hint must be admitted, got {e:?}"))?;
+    budget.admit(10).map_err(|e| format!("second hint must be admitted, got {e:?}"))?;
+    match budget.admit(20) {
+        Err(PubError::HintRateLimited) => {}
+        other => return Err(format!("past the budget must drop 0x0913, got {other:?}")),
+    }
+    // The budget refills rather than latching shut — a flood costs the publisher this window, not
+    // the relationship.
+    budget.admit(1_000).map_err(|e| format!("the next window must refill, got {e:?}"))?;
+    budget.admit(1_100).map_err(|e| format!("the next window must admit its full budget, got {e:?}"))?;
+    match budget.admit(1_200) {
+        Err(PubError::HintRateLimited) => Ok(()),
+        other => Err(format!("the refilled window must also be bounded, got {other:?}")),
+    }
+}
+
+/// DMTAP-PUBSUB-08 (§25.6.3, §22.3.3): an inlined `FeedHint.announce` MUST be verified exactly as a
+/// pulled `PubAnnounce` — recomputed `announce_id`, `sig`/`signer` chain — before use.
+///
+/// The inlining is a bandwidth optimization, not a trust shortcut. Accepting the bytes on the
+/// strength of their *presence* would let any sender who can reach the subscriber inject feed
+/// content, which is precisely the authority a hint is defined not to carry.
+fn pubsub_inlined_announce_is_verified() -> Result<(), String> {
+    let publisher = IdentityKey::generate();
+    let mut announce = PubAnnounce {
+        v: 0,
+        suite: Suite::Classical,
+        publisher: publisher.public(),
+        roots: vec![ContentId::of(b"manifest-root")],
+        meta: vec![],
+        supersedes: None,
+        ts: 1_000,
+        signer: publisher.public(),
+        sig: vec![],
+    };
+    announce.sign(&publisher);
+    let good_id = announce.announce_id();
+
+    // Positive control: inlined honestly, it verifies exactly as a pulled announce would.
+    let hint = FeedHint {
+        feed: publisher.public(),
+        topic: "news".into(),
+        seq: 1,
+        tip: None,
+        announce: Some(announce.det_cbor()),
+    };
+    let carried = hint.announce.clone().ok_or("hint must carry the inlined announce")?;
+    let decoded = PubAnnounce::from_det_cbor(&carried)
+        .map_err(|e| format!("the inlined announce must decode, got {e:?}"))?;
+    decoded
+        .verify(&good_id)
+        .map_err(|e| format!("positive control: an honestly inlined announce must verify, got {e:?}"))?;
+
+    // (a) tampered `sig` — rejected under the publisher's key.
+    let mut bad_sig = announce.clone();
+    bad_sig.sig[0] ^= 0x01;
+    let hint_bad = FeedHint { announce: Some(bad_sig.det_cbor()), ..hint.clone() };
+    let bytes = hint_bad.announce.clone().unwrap();
+    let d = PubAnnounce::from_det_cbor(&bytes).map_err(|e| format!("decode: {e:?}"))?;
+    match d.verify(&d.announce_id()) {
+        Err(PubError::AnnounceSigInvalid) => {}
+        other => return Err(format!("(a) a tampered inlined sig must be rejected 0x0904, got {other:?}")),
+    }
+
+    // (b) address mismatch — the bytes are validly signed but are not the object the hint claims
+    // to be inlining, so they must not be accepted under the claimed address.
+    match decoded.verify(&ContentId::of(b"some-other-announce")) {
+        Err(PubError::AnnounceIdMismatch) => Ok(()),
+        other => Err(format!("(b) an announce_id mismatch must be rejected 0x0905, got {other:?}")),
+    }
+}
+
+/// DMTAP-PUBSUB-10 (§25.3.3): a publisher's pre-existing (pre-topic) feed remains, byte-for-byte,
+/// the `topic = ""` feed. `feed_head(pub)` and `feed_head(pub, "")` resolve identically.
+///
+/// This holds structurally rather than by convention: §25.3.1 makes `topic` a **locator** dimension,
+/// not a wire field, so `FeedHead` has no topic to carry and adopting topics cannot renumber or
+/// re-sign an existing feed. The case asserts that structural fact, because the alternative design
+/// — a topic field inside the signed head — would have silently invalidated every feed in existence
+/// on the day topics shipped.
+fn pubsub_default_topic_is_the_pretopic_feed() -> Result<(), String> {
+    let publisher = IdentityKey::generate();
+    let mut head = FeedHead {
+        v: 0,
+        suite: Suite::Classical,
+        publisher: publisher.public(),
+        seq: 7,
+        tip: ContentId::of(b"entry-7"),
+        ts: 1_000,
+        signer: publisher.public(),
+        sig: vec![],
+    };
+    head.sign(&publisher);
+    head.verify().map_err(|e| format!("the pre-topic head must verify, got {e:?}"))?;
+
+    // A topic-unaware peer and a topic-aware peer requesting the default topic obtain the same
+    // object: there is no topic field to differ on, so the bytes cannot diverge.
+    let by_topic_unaware = head.det_cbor();
+    let by_topic_aware_default = FeedHead::from_det_cbor(&by_topic_unaware)
+        .map_err(|e| format!("the head must decode for a topic-aware peer, got {e:?}"))?
+        .det_cbor();
+    if by_topic_unaware != by_topic_aware_default {
+        return Err("feed_head(pub) and feed_head(pub, \"\") must be byte-identical".into());
+    }
+
+    // And the head carries no topic key at all — the claim above is structural, not incidental.
+    let Cv::Map(pairs) = cbor::decode(&by_topic_unaware).map_err(|e| format!("decode: {e}"))? else {
+        return Err("FeedHead must encode as an integer-keyed map".into());
+    };
+    let keys: Vec<u64> = pairs.iter().map(|(k, _)| *k).collect();
+    if keys != vec![1, 2, 3, 4, 5, 6, 7, 8] {
+        return Err(format!(
+            "FeedHead must carry exactly §22.4.1's keys and no topic field, got {keys:?}"
+        ));
+    }
+    // seq is untouched by topic adoption — no renumbering.
+    if head.seq != 7 {
+        return Err("adopting topics must not renumber an existing feed".into());
+    }
+    Ok(())
+}
+
+/// DMTAP-PUBSUB-13 (§25.4.1): an unrecognized `v`/`suite` on a `Subscription` is rejected, never
+/// guessed (`0x0901`).
+///
+/// A `SubscriptionRevoke` has no `v`/`suite` of its own — it is never evaluated without its target
+/// `Subscription`, whose discriminators govern — so the rule has no surface there (§25.5.1). That
+/// asymmetry was a spec defect until §25.9's row was scoped to `Subscription`: the table required a
+/// rejection on a field the revoke does not have.
+fn pubsub_unknown_version_or_suite() -> Result<(), String> {
+    let ik = IdentityKey::generate();
+    let base = pubsub_fixture(&ik, &[9u8; 32], 9_000);
+
+    // Positive control: v = 0 with a supported suite decodes and verifies.
+    Subscription::from_det_cbor(&base.det_cbor())
+        .map_err(|e| format!("positive control: the baseline must decode, got {e:?}"))?;
+
+    let mut wrong_v = base.clone();
+    wrong_v.v = 1;
+    wrong_v.sign(&ik);
+    match Subscription::from_det_cbor(&wrong_v.det_cbor()) {
+        Err(PubError::UnsupportedVersion) => {}
+        other => return Err(format!("v = 1 must be rejected 0x0901 at decode, got {other:?}")),
+    }
+    // Rejected at verify too, so a caller that built the object in memory cannot bypass the decode
+    // gate by never round-tripping it through bytes.
+    match wrong_v.verify() {
+        Err(PubError::UnsupportedVersion) => {}
+        other => return Err(format!("v = 1 must be rejected 0x0901 at verify, got {other:?}")),
+    }
+
+    // An unsupported suite is refused on the same terms. `PqHybrid` is the honest choice here: the
+    // Identity-object machinery is classical-only today (`Suite::is_supported() == false`), so this
+    // is a real unsupported suite rather than an invented code point.
+    let mut wrong_suite = base.clone();
+    wrong_suite.suite = Suite::PqHybrid;
+    wrong_suite.sign(&ik);
+    match Subscription::from_det_cbor(&wrong_suite.det_cbor()) {
+        Err(PubError::UnsupportedVersion) => Ok(()),
+        other => Err(format!("an unsupported suite must be rejected 0x0901, got {other:?}")),
     }
 }
 

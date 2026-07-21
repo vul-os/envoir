@@ -91,6 +91,31 @@ pub enum PubError {
     /// `0x090D` — a serving node's admission policy (size/quota/rate) is exceeded (§22.6.3).
     #[error("ERR_PUB_SERVE_QUOTA (0x090D)")]
     ServeQuota,
+    /// `0x090E` — `Subscription.sig` fails under `signer`, or `signer` is not authorized by
+    /// `subscriber` via a `DeviceCert` chain (§25.4.1).
+    #[error("ERR_PUB_SUBSCRIPTION_SIG_INVALID (0x090E)")]
+    SubscriptionSigInvalid,
+    /// `0x090F` — a `Subscription` is presented, or still being honored, past its `expires`
+    /// (§25.4.2). Retriable: the subscriber may issue a fresh `Subscription`.
+    #[error("ERR_PUB_SUBSCRIPTION_EXPIRED (0x090F)")]
+    SubscriptionExpired,
+    /// `0x0910` — a `Subscription` matching an already-accepted `SubscriptionRevoke` is presented
+    /// or still being acted on (§25.5.2).
+    #[error("ERR_PUB_SUBSCRIPTION_REVOKED (0x0910)")]
+    SubscriptionRevoked,
+    /// `0x0911` — `SubscriptionRevoke.sig` fails, or `signer` is not the target `Subscription`'s
+    /// `subscriber` (nor an authorized device thereof) — only the subscriber who granted a
+    /// subscription may withdraw it (§25.5.1).
+    #[error("ERR_PUB_SUBSCRIPTION_REVOKE_INVALID (0x0911)")]
+    SubscriptionRevokeInvalid,
+    /// `0x0912` — a holder's aggregate subscriber-admission bound is exceeded (§25.7.1). A policy
+    /// deny, never a security/crypto gate.
+    #[error("ERR_PUB_SUBSCRIBE_QUOTA (0x0912)")]
+    SubscribeQuota,
+    /// `0x0913` — a subscriber's configured inbound `FeedHint` budget is exceeded; excess hints are
+    /// dropped rather than surfaced (§25.7.2, DROP_SILENT).
+    #[error("ERR_PUB_HINT_RATE_LIMITED (0x0913)")]
+    HintRateLimited,
     /// A lower-level canonical-CBOR violation on decode (§18.1.1) — malformed bytes, wrong type,
     /// unknown key in a signed object, etc.
     #[error("CBOR: {0}")]
@@ -115,6 +140,12 @@ impl PubError {
             PubError::SupersedeInvalid => 0x090B,
             PubError::NotServed => 0x090C,
             PubError::ServeQuota => 0x090D,
+            PubError::SubscriptionSigInvalid => 0x090E,
+            PubError::SubscriptionExpired => 0x090F,
+            PubError::SubscriptionRevoked => 0x0910,
+            PubError::SubscriptionRevokeInvalid => 0x0911,
+            PubError::SubscribeQuota => 0x0912,
+            PubError::HintRateLimited => 0x0913,
             PubError::Cbor(_) => 0x0900,
         }
     }
@@ -135,6 +166,12 @@ impl PubError {
             PubError::SupersedeInvalid => "ERR_PUB_SUPERSEDE_INVALID",
             PubError::NotServed => "ERR_PUB_NOT_SERVED",
             PubError::ServeQuota => "ERR_PUB_SERVE_QUOTA",
+            PubError::SubscriptionSigInvalid => "ERR_PUB_SUBSCRIPTION_SIG_INVALID",
+            PubError::SubscriptionExpired => "ERR_PUB_SUBSCRIPTION_EXPIRED",
+            PubError::SubscriptionRevoked => "ERR_PUB_SUBSCRIPTION_REVOKED",
+            PubError::SubscriptionRevokeInvalid => "ERR_PUB_SUBSCRIPTION_REVOKE_INVALID",
+            PubError::SubscribeQuota => "ERR_PUB_SUBSCRIBE_QUOTA",
+            PubError::HintRateLimited => "ERR_PUB_HINT_RATE_LIMITED",
             PubError::Cbor(_) => "ERR_PUB_CBOR",
         }
     }
@@ -224,9 +261,21 @@ pub fn sealed_style_root(chunks: &[ContentId]) -> ContentId {
 
 /// Decode a `suite` byte, mapping an unknown suite to [`PubError::UnsupportedVersion`] (`0x0901`,
 /// the §22 analogue of the unknown-suite rule §1.1/`0x0101`).
-fn pub_suite(cv: Cv) -> Result<Suite, PubError> {
+/// Decode a `suite` field for any §22/§25 PUB object, fail-closed (`0x0901`).
+///
+/// Rejects both an UNKNOWN code point and a KNOWN-but-unsupported one. The second half was missing:
+/// `Suite::from_u8` answers "is this a code point I can name", not "is this a suite I can verify",
+/// so a `PqHybrid` (`0x02`) object decoded cleanly on a build whose `is_supported()` is `false` and
+/// was only refused later, at signature verification. §22.3.1 and §25.4.1 both say a `suite` "this
+/// implementation does not support" is rejected fail-closed — at decode, before anything else is
+/// believed about the bytes.
+pub(crate) fn pub_suite(cv: Cv) -> Result<Suite, PubError> {
     let b = as_u8(cv)?;
-    Suite::from_u8(b).ok_or(PubError::UnsupportedVersion)
+    let s = Suite::from_u8(b).ok_or(PubError::UnsupportedVersion)?;
+    if !s.is_supported() {
+        return Err(PubError::UnsupportedVersion);
+    }
+    Ok(s)
 }
 
 // ── PubManifest (§22.2.1) ────────────────────────────────────────────────────────────────────
@@ -893,6 +942,47 @@ impl FeedFollower {
 
 #[cfg(test)]
 mod tests {
+
+    /// §22.3.1/§22.4.1: a `suite` "this implementation does not support" is rejected fail-closed at
+    /// DECODE. `PqHybrid` is a known code point whose `is_supported()` is `false` on this build, so
+    /// it decoded cleanly and was only refused at signature verification — the object was believed
+    /// well-formed in between. The same gap existed on `Subscription` (§25) and is fixed with it.
+    #[test]
+    fn a_known_but_unsupported_suite_is_refused_at_decode() {
+        assert!(!Suite::PqHybrid.is_supported(), "premise: this build cannot verify PqHybrid");
+        let k = IdentityKey::generate();
+
+        let mut a = PubAnnounce {
+            v: PUB_V0,
+            suite: Suite::PqHybrid,
+            publisher: k.public(),
+            roots: vec![ContentId::of(b"root")],
+            meta: vec![],
+            supersedes: None,
+            ts: 1,
+            signer: k.public(),
+            sig: vec![],
+        };
+        a.sign(&k);
+        assert_eq!(
+            PubAnnounce::from_det_cbor(&a.det_cbor()).unwrap_err(),
+            PubError::UnsupportedVersion
+        );
+
+        let mut h = FeedHead {
+            v: PUB_V0,
+            suite: Suite::PqHybrid,
+            publisher: k.public(),
+            seq: 0,
+            tip: ContentId::of(b"tip"),
+            ts: 1,
+            signer: k.public(),
+            sig: vec![],
+        };
+        h.sign(&k);
+        assert_eq!(FeedHead::from_det_cbor(&h.det_cbor()).unwrap_err(), PubError::UnsupportedVersion);
+    }
+
     use super::*;
 
     fn cid(hexs: &str) -> ContentId {

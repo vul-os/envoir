@@ -75,6 +75,7 @@ pub mod policy;
 pub mod pq;
 pub mod profile;
 pub mod pubobj;
+pub mod pubsub;
 pub mod push;
 pub mod safety;
 pub mod sphinx;
