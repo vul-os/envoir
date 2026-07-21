@@ -1,0 +1,36 @@
+# dmtap-operator — reference machinery for a third-party DMTAP operator: usage tracking, flat
+# quotas, fail-closed gateway authorization, and gateway-domain DNS automation. Folded in from an
+# earlier, retired control-plane prototype (envoir-cloud) — everything commercial (price book,
+# invoicing, proration, dunning, payment-processor integration, multi-tenant superadmin) was
+# dropped; only the load-bearing, non-commercial operator machinery survived. See src/lib.rs.
+[package]
+name = "dmtap-operator"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+description = "Reference DMTAP operator machinery: a bounded/idempotent usage-ingest queue, flat quotas, fail-closed gateway authorization (spec §12.2), and gateway-domain DNS record automation — implements dmtap-seam with no billing logic"
+repository = "https://example.invalid/envoir"
+
+[dependencies]
+# The seam this crate implements reference impls of (Metering's UsageEvent/UsageKind, Policy,
+# GatewayAuthz, BillingSink/UsageTotal for the queue's export path).
+dmtap-seam = { path = "../dmtap-seam" }
+
+# --- DNS onboarding record-set shaping (pure) + the Cloudflare API envelope (dns.rs) ---
+serde_json = "1"
+thiserror = "1"
+
+# --- The ONE real outbound HTTP client (dns.rs's live Cloudflare calls), mirroring the sibling
+# `dmtap-namechain-rpc` crate's UreqTransport/HttpTransport split ---
+# Optional + OFF by default: the DNS record-set generation, the Cloudflare request/response shaping,
+# and every fail-closed path are unit-tested offline against canned bytes with no TLS stack; only
+# `--features net` pulls in a real socket.
+ureq = { version = "2", default-features = false, features = ["tls"], optional = true }
+
+[features]
+net = ["dep:ureq"]
+
+[lib]
+name = "dmtap_operator"
+path = "src/lib.rs"
