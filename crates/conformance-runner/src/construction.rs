@@ -80,12 +80,14 @@ use dmtap_clustersync::{
 };
 use envoir_gateway::alias_map::{AliasTarget, GatewayAliasError, GatewayAliasMap};
 use envoir_gateway::attestation::{AttestationError as GwAttestationError, AttestationKey};
+use envoir_gateway::authz::{AliasAllocator, AliasError};
 use envoir_gateway::forwarded_addr::{self, ForwardedAddrError};
 use envoir_gateway::outbound::{
     AlwaysRequireTls, GovernedSend, OutboundError, OutboundGateway, OutboundTransport,
     TransportResult,
 };
 use envoir_gateway::outbound_guard::{OutboundSenderGuard, SenderVerdict};
+use envoir_gateway::provenance::{chain_append, GatewayAttestation, ProvenanceError};
 
 use crate::{CaseOutcome, SuiteCase};
 
@@ -114,6 +116,8 @@ pub fn run_construction_case(case: &SuiteCase) -> CaseOutcome {
         "DMTAP-PRIV-06" => Some(mix_descriptor_stale_rejected()),
         "DMTAP-ORG-03" => Some(domain_directory_non_pinned_authority_rejected()),
         "DMTAP-GWALIAS-02" => Some(gateway_alias_unmapped_rejected()),
+        "DMTAP-GWNAME-02" => Some(gwalias_vanity_dotfree_and_fully_qualified_only()),
+        "DMTAP-GWNAME-03" => Some(gwalias_vanity_yields_to_anchored_name()),
         "DMTAP-FILE-01" => Some(manifest_root_order_sensitive()),
         "DMTAP-FILE-02" => Some(chunk_hash_mismatch_rejected()),
         "DMTAP-FILE-03" => Some(size_tier_mismatch_detected()),
@@ -159,6 +163,10 @@ pub fn run_construction_case(case: &SuiteCase) -> CaseOutcome {
         "DMTAP-GRP-01" => Some(grp_foreign_commit_rejected()),
         "DMTAP-GRP-03" => Some(grp_stale_epoch_decrypt_rejected()),
         "DMTAP-LEG-01" => Some(leg_gateway_attestation_invalid_rejected()),
+        "DMTAP-GWATT-01" => Some(gwatt_domain_key_untrusted_rejected()),
+        "DMTAP-GWATT-02" => Some(gwatt_msg_digest_binding_rejected()),
+        "DMTAP-GWATT-05" => Some(gwatt_chain_per_entry_domain_verified()),
+        "DMTAP-GWATT-06" => Some(gwatt_unknown_discriminator_rejected()),
         "DMTAP-LEG-02" => Some(leg_dkim_undelegated_domain_rejected()),
         "DMTAP-LEG-03" => Some(leg_outbound_open_relay_refused()),
         "DMTAP-ALIAS-03" => Some(alias_multiple_names_same_identity()),
@@ -286,6 +294,12 @@ fn skip_reason(id: &str, operation: &str) -> String {
             same reason as DMTAP-WIRE-07: dmtap-mls's `LogEntry` (committer.rs) is the closest analogue \
             but does not carry an opaque verbatim MLSMessage blob (`mls`) plus `log_seq`/`prev` in the \
             §18.6.2 wire shape — it is an internal ordering primitive, not this wire object.",
+        "DMTAP-GWATT-04" => "envoir-gateway's attestation/provenance modules (attestation.rs, \
+            provenance.rs) model exactly one assurance tier: a flat DNS-published `_dmtap-gw` key \
+            resolved via `GwKeyResolver`. There is no KT-anchored binding option, no notion of a \
+            'high-value recipient' policy tier, and no second, stronger verification path to select \
+            between — so 'requires the KT-anchored form at high assurance' has no distinct code path \
+            to construct against; the crate always does the one thing it does.",
         _ => {
             return format!(
                 "unrecognized construction-todo case (operation `{operation}`) — not yet triaged by \
@@ -946,6 +960,83 @@ fn gateway_alias_unmapped_rejected() -> Result<(), String> {
             }
         }
         other => Err(format!("expected a burned alias to be Unmapped, got {other:?}")),
+    }
+}
+
+/// DMTAP-GWNAME-02 (§7.10.5/§3.13.1): a gateway vanity is a user-chosen local-part scoped to the
+/// gateway's own domain — it MUST be dot-free (dots are reserved for the `local.nativedomain`
+/// forwarded-address encoding, §7.10.2) and MUST be meaningful only fully-qualified
+/// (`vanity@gatewaydomain`), never as a bare handle (no flat-namespace registry to allocate a
+/// global name from). `AliasAllocator::allocate_vanity` refuses a dotted local-part
+/// (`AliasError::ContainsDot`) fail-closed rather than stripping the dot, and every allocated /
+/// resolved form is qualified with the gateway's own domain (`AliasAllocator::resolve` refuses a
+/// bare handle with no `@` at all, rule 2). Positive control: a clean, dot-free vanity allocates
+/// and resolves only in its fully-qualified form.
+fn gwalias_vanity_dotfree_and_fully_qualified_only() -> Result<(), String> {
+    let mut allocator = AliasAllocator::for_domain("gw.example").map_err(|e| format!("for_domain: {e:?}"))?;
+    let key = IdentityKey::generate().public();
+
+    // Positive control: a clean vanity allocates to its fully-qualified form.
+    let fq = allocator
+        .allocate_vanity(&key, "imran")
+        .map_err(|e| format!("positive control: a clean vanity must allocate, got {e:?}"))?;
+    if fq != "imran@gw.example" {
+        return Err(format!("expected the fully-qualified form imran@gw.example, got {fq}"));
+    }
+    // It resolves ONLY fully-qualified; the bare local-part alone has no anchor.
+    if allocator.resolve("imran", &[key.clone()]).is_some() {
+        return Err("a bare, un-anchored local-part (no '@') must never resolve".into());
+    }
+    if allocator.resolve(&fq, &[key.clone()]) != Some(key.clone()) {
+        return Err("the fully-qualified vanity must resolve back to its bound key".into());
+    }
+
+    // Negative: a dotted local-part is refused — reserved for the forwarded-address encoding.
+    let other_key = IdentityKey::generate().public();
+    match allocator.allocate_vanity(&other_key, "bob.smith") {
+        Err(AliasError::ContainsDot(_)) => Ok(()),
+        other => Err(format!("expected Err(ContainsDot) for a dotted vanity, got {other:?}")),
+    }
+}
+
+/// DMTAP-GWNAME-03 (§7.10.5): a vanity yields to, and never shadows, a real (operator-directory /
+/// anchored) name on the same gateway domain — first-come-and-revocable ownership stops exactly
+/// where a real account begins. `AliasAllocator::reserve_directory_address` models the anchored
+/// name: reserving it (a) purges any vanity ALREADY allocated at that local-part (the anchored
+/// name wins even over a pre-existing vanity holder, who falls back to their conflict-free
+/// key-derived default) and (b) refuses every FUTURE vanity allocation attempt at that local-part
+/// (`AliasError::ShadowsDirectoryIdentity`) — a chosen vanity can never mask or intercept delivery
+/// to the real address, regardless of allocate/reserve ordering.
+fn gwalias_vanity_yields_to_anchored_name() -> Result<(), String> {
+    let mut allocator = AliasAllocator::for_domain("gw.example").map_err(|e| format!("for_domain: {e:?}"))?;
+    let squatter = IdentityKey::generate().public();
+
+    // A vanity is allocated first...
+    allocator
+        .allocate_vanity(&squatter, "alice")
+        .map_err(|e| format!("sanity: the vanity must allocate before the reservation, got {e:?}"))?;
+    if allocator.resolve("alice@gw.example", &[squatter.clone()]) != Some(squatter.clone()) {
+        return Err("sanity: the vanity must resolve to the squatter before the reservation".into());
+    }
+
+    // ...then the operator reserves the SAME local-part as a real directory identity. The anchored
+    // name wins: the pre-existing vanity is purged, so delivery no longer reaches the squatter.
+    if !allocator.reserve_directory_address("alice@gw.example") {
+        return Err("reserve_directory_address must report the address was on this gateway's domain".into());
+    }
+    if allocator.resolve("alice@gw.example", &[squatter.clone()]) == Some(squatter.clone()) {
+        return Err(
+            "the vanity must yield once the local-part is reserved as a real directory identity, \
+             but it still resolved to the squatter"
+                .into(),
+        );
+    }
+
+    // And a vanity can never be (re-)allocated over the anchored name afterwards, by anyone.
+    let another = IdentityKey::generate().public();
+    match allocator.allocate_vanity(&another, "alice") {
+        Err(AliasError::ShadowsDirectoryIdentity(_)) => Ok(()),
+        other => Err(format!("expected Err(ShadowsDirectoryIdentity), got {other:?}")),
     }
 }
 
@@ -3763,6 +3854,122 @@ fn leg_gateway_attestation_invalid_rejected() -> Result<(), String> {
     }
 }
 
+/// DMTAP-GWATT-01 (§7.2a/§18.3.11): the recipient MUST verify a `GatewayAttestation` against a key
+/// published under the entry's `domain`, **bound to the domain the verifier actually requires**
+/// (the recipient's own, for the entry that bridged mail for the recipient) — never accept an
+/// attestation self-asserting a domain other than the one the verifier looked its key up under.
+/// `GatewayAttestation::verify`'s `expected_domain` parameter is exactly this cross-check: an
+/// attestation genuinely signed for `sender-side-gw.example` presented where the recipient requires
+/// `recipient.example` is rejected as `KeyUntrusted` (`ERR_GATEWAY_ATTESTATION_KEY_UNTRUSTED`,
+/// `0x0602`) — even with a wholly valid signature and a real published key for its OWN domain.
+/// Positive control: the matching-domain case verifies.
+fn gwatt_domain_key_untrusted_rejected() -> Result<(), String> {
+    const RFC: &[u8] = b"From: a@gmail.com\r\nTo: alice@recipient.example\r\nSubject: hi\r\n\r\nbody\r\n";
+    let key = AttestationKey::generate("recipient.example", "gw1");
+    let att = GatewayAttestation::sign(&key, RFC, Some("a@gmail.com"), 1_700_000_000_000, 0);
+
+    // Positive control: verified against the domain it is actually anchored to.
+    att.verify("recipient.example", Some(&key.public()), RFC)
+        .map_err(|e| format!("positive control: a genuine same-domain attestation must verify, got {e:?}"))?;
+
+    // Negative: the verifier requires a DIFFERENT domain than the one this attestation is anchored
+    // to (a look-alike gateway's genuinely-signed attestation cannot cover the recipient's domain).
+    match att.verify("attacker-gateway.example", Some(&key.public()), RFC) {
+        Err(ProvenanceError::KeyUntrusted) => Ok(()),
+        other => Err(format!(
+            "expected Err(KeyUntrusted) (0x0602) for a domain the attestation is not anchored to, got {other:?}"
+        )),
+    }
+}
+
+/// DMTAP-GWATT-02 (§7.2a/§18.3.11/§18.9.11): `msg_digest = 0x1e ‖ BLAKE3-256(rfc5322_bytes)` binds
+/// a `GatewayAttestation` to the EXACT legacy bytes it was issued for. `verify` recomputes the
+/// digest from the `rfc5322_bytes` the recipient actually decrypted and rejects a mismatch
+/// (`ERR_GATEWAY_ATTESTATION_INVALID`, `0x0601`) — a valid attestation cannot be lifted from the
+/// message it was issued for and re-presented over different content. Positive control: the
+/// original bytes verify.
+fn gwatt_msg_digest_binding_rejected() -> Result<(), String> {
+    const ISSUED_FOR: &[u8] = b"From: a@gmail.com\r\nTo: alice@recipient.example\r\nSubject: hi\r\n\r\nbody\r\n";
+    const SUBSTITUTED: &[u8] = b"From: a@gmail.com\r\nTo: alice@recipient.example\r\nSubject: hi\r\n\r\nDIFFERENT BODY\r\n";
+    let key = AttestationKey::generate("recipient.example", "gw1");
+    let att = GatewayAttestation::sign(&key, ISSUED_FOR, Some("a@gmail.com"), 1_700_000_000_000, 0);
+
+    att.verify("recipient.example", Some(&key.public()), ISSUED_FOR)
+        .map_err(|e| format!("positive control: the attestation must verify over the bytes it was issued for, got {e:?}"))?;
+
+    match att.verify("recipient.example", Some(&key.public()), SUBSTITUTED) {
+        Err(ProvenanceError::Invalid) => Ok(()),
+        other => Err(format!(
+            "expected Err(Invalid) (0x0601) for an attestation re-presented over substituted content, got {other:?}"
+        )),
+    }
+}
+
+/// DMTAP-GWATT-05 (§7.8.3/§18.3.11): a multi-gateway `GatewayAttestation` chain verifies **entry by
+/// entry**, each against the domain it is actually anchored to — `verify`'s `expected_domain` is
+/// per-call, so a caller walking the chain naturally checks the entry that bridged mail *for the
+/// recipient* against the recipient's own domain (accept) while an entry anchored to some other
+/// domain the recipient has no key for is REJECTED for that domain (`KeyUntrusted`) rather than
+/// silently accepted as if it were recipient-anchored too. Whether the recipient additionally
+/// trusts that other domain (and so renders it a verified vs. an "unverified hop" in the
+/// client-facing `ProvenanceRecord`) is caller/client UI policy this crate does not model —
+/// `ProvenanceRecord::assemble` takes only an already-verified chain, with no notion of a
+/// surfaced-but-unverified entry; what IS proven here is the real, structural half: per-entry
+/// domain-scoped verification never conflates one domain's anchoring with another's.
+fn gwatt_chain_per_entry_domain_verified() -> Result<(), String> {
+    const RFC: &[u8] = b"From: a@gmail.com\r\nTo: alice@recipient.example\r\nSubject: hi\r\n\r\nbody\r\n";
+    let recipient_key = AttestationKey::generate("recipient.example", "gw1");
+    let other_key = AttestationKey::generate("relay-gateway.example", "gw1");
+
+    // Entry 0: the hop that bridged mail for the recipient — anchored to the recipient's own domain.
+    let entry0 = GatewayAttestation::sign(&recipient_key, RFC, Some("a@gmail.com"), 1_700_000_000_000, 0);
+    // Entry 1: an earlier relay hop, anchored to a DIFFERENT domain the recipient has no key for.
+    let entry1 = GatewayAttestation::sign(&other_key, RFC, Some("a@gmail.com"), 1_700_000_000_050, 1);
+    let chain = chain_append(&[entry0.clone()], entry1.clone());
+    if chain.len() != 2 || chain[0] != entry0 || chain[1] != entry1 {
+        return Err("chain_append did not preserve temporal (seq) order".into());
+    }
+
+    // The recipient-facing entry verifies against the recipient's own domain.
+    chain[0]
+        .verify("recipient.example", Some(&recipient_key.public()), RFC)
+        .map_err(|e| format!("entry 0 (recipient-anchored) must verify, got {e:?}"))?;
+
+    // The other-domain entry is REJECTED when the recipient has no key published for it (not in
+    // the recipient's trusted gateway set) — it must never be silently treated as recipient-anchored.
+    match chain[1].verify("recipient.example", None, RFC) {
+        Err(ProvenanceError::KeyUntrusted) => Ok(()),
+        other => Err(format!(
+            "expected Err(KeyUntrusted) for an other-domain hop the recipient has no key for, got {other:?}"
+        )),
+    }
+}
+
+/// DMTAP-GWATT-06 (§21.24a/§18.3.11): an unrecognized `GatewayAttestation.disc` MUST be treated as
+/// an unverifiable attestation — never silently ignored (which would let a forger downgrade a
+/// message to "no attestation present") — and never silently accepted as if it were the one known
+/// bridge kind. `verify` rejects any `disc` other than the sole defined discriminator with
+/// `ProvenanceError::Invalid` (`ERR_GATEWAY_ATTESTATION_INVALID`, `0x0601`), the SAME fail-closed
+/// code a corrupt signature gets — an unknown kind is not a lesser failure mode. Positive control:
+/// the genuine discriminator verifies.
+fn gwatt_unknown_discriminator_rejected() -> Result<(), String> {
+    const RFC: &[u8] = b"From: a@gmail.com\r\nTo: alice@recipient.example\r\nSubject: hi\r\n\r\nbody\r\n";
+    let key = AttestationKey::generate("recipient.example", "gw1");
+    let genuine = GatewayAttestation::sign(&key, RFC, Some("a@gmail.com"), 1_700_000_000_000, 0);
+    genuine
+        .verify("recipient.example", Some(&key.public()), RFC)
+        .map_err(|e| format!("positive control: the genuine discriminator must verify, got {e:?}"))?;
+
+    let mut unknown_disc = genuine.clone();
+    unknown_disc.disc = 7; // no such discriminator is defined (only DISC_LEGACY_BRIDGE = 1)
+    match unknown_disc.verify("recipient.example", Some(&key.public()), RFC) {
+        Err(ProvenanceError::Invalid) => Ok(()),
+        other => Err(format!(
+            "expected Err(Invalid) (0x0601) for an unrecognized discriminator, got {other:?}"
+        )),
+    }
+}
+
 /// A no-op [`OutboundTransport`]: DMTAP-LEG-02 only exercises `translate_and_sign` (the
 /// delegation-refusal gate), which returns before any transport call, so this stub is never
 /// actually invoked — it exists only to satisfy `OutboundGateway::new`'s constructor shape.
@@ -3864,6 +4071,8 @@ pub fn recognized_ids() -> BTreeMap<&'static str, ()> {
     [
         "DMTAP-CBOR-11", "DMTAP-CBOR-12", "DMTAP-CADASM-01", "DMTAP-WIRE-01", "DMTAP-WIRE-02",
         "DMTAP-WIRE-05", "DMTAP-WIRE-06", "DMTAP-WIRE-09", "DMTAP-WIRE-10",
+        "DMTAP-GWATT-01", "DMTAP-GWATT-02", "DMTAP-GWATT-05", "DMTAP-GWATT-06",
+        "DMTAP-GWNAME-02", "DMTAP-GWNAME-03",
         "DMTAP-IDENT-01", "DMTAP-IDENT-02", "DMTAP-IDENT-03",
         "DMTAP-IDENT-05", "DMTAP-PRIV-01", "DMTAP-PRIV-02", "DMTAP-FILE-01", "DMTAP-FILE-02",
         "DMTAP-FILE-03", "DMTAP-FILE-04", "DMTAP-FILE-05", "DMTAP-VAL-01", "DMTAP-VAL-02",
@@ -3884,3 +4093,4 @@ pub fn recognized_ids() -> BTreeMap<&'static str, ()> {
     .map(|id| (id, ()))
     .collect()
 }
+
