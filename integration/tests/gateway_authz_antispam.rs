@@ -78,7 +78,7 @@ fn sample_payload(subject: &str, body: &str) -> Payload {
     Payload {
         from: sender.public(),
         sig: vec![0u8; 64],
-        headers: Headers { thread: None, subject: Some(subject.into()), mime: None, cc: vec![] },
+        headers: Headers { thread: None, subject: Some(subject.into()), mime: None, cc: vec![], ext: vec![], sensitive: None },
         body: body.as_bytes().to_vec(),
         refs: vec![],
         attach: vec![],

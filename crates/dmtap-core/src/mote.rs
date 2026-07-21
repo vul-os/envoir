@@ -30,7 +30,9 @@ use rand_core::OsRng;
 use sha2::Sha256;
 use x25519_dalek::{PublicKey as XPublicKey, StaticSecret};
 
-use crate::cbor::{self, as_array, as_bytes, as_text, as_u32, as_u64, as_u8, CborError, Cv, Fields};
+use crate::cbor::{
+    self, as_array, as_bool, as_bytes, as_text, as_u32, as_u64, as_u8, CborError, Cv, Fields,
+};
 use crate::id::ContentId;
 use crate::identity::{verify_domain, IdentityKey};
 use crate::pq::{verify_hybrid_domain, HybridSigningKey};
@@ -760,6 +762,17 @@ pub struct Headers {
     pub subject: Option<String>, // key 2 — mail only
     pub mime: Option<String>,    // key 3
     pub cc: Vec<Vec<u8>>,        // key 4 — additional recipient keys
+    /// key 5 — extension headers (§18.3.6, §21.20). Held **opaquely**: a receiver MUST ignore any
+    /// key it does not recognize, and an unrecognized key MUST NOT cause validation failure or
+    /// message rejection. Keeping the whole map verbatim is what makes that possible *and* keeps
+    /// the object re-encodable byte-for-byte, which matters because `Payload.sig` covers it — a
+    /// decoder that dropped unknown entries would silently invalidate the signature it is about to
+    /// check.
+    pub ext: Vec<(String, Cv)>,
+    /// key 6 — `sensitive` (§6.7, MAY-send / MUST-honor): the receiving client MUST NOT persist
+    /// this message at rest. Cooperative, like `redact`/`expires` — a least-persistence reduction,
+    /// not a guarantee against a live endpoint.
+    pub sensitive: Option<bool>,
 }
 
 impl Headers {
@@ -775,6 +788,14 @@ impl Headers {
             m.push((3, Cv::Text(mm.clone())));
         }
         m.push((4, Cv::Array(self.cc.iter().map(|k| Cv::Bytes(k.clone())).collect())));
+        // Both are OPTIONAL and omitted when absent, so a Headers carrying neither encodes exactly
+        // as it did before these keys existed — the existing vectors are unaffected.
+        if !self.ext.is_empty() {
+            m.push((5, Cv::TextMap(self.ext.clone())));
+        }
+        if let Some(b) = self.sensitive {
+            m.push((6, Cv::Bool(b)));
+        }
         Cv::Map(m)
     }
 
@@ -787,8 +808,25 @@ impl Headers {
             .into_iter()
             .map(as_bytes)
             .collect::<Result<_, _>>()?;
+        // §21.20 forward compatibility: unknown keys INSIDE `ext` are carried verbatim, never
+        // inspected and never a reason to reject. This is the whole point of the field — a receiver
+        // that rejected an ext key it did not know would make every future extension a breaking
+        // change, which is the opposite of what §21.20 requires.
+        //
+        // Note the asymmetry, which is deliberate: unknown keys at the TOP level of a signed object
+        // are still refused by `deny_unknown` below (§18.1.1, DMTAP-CBOR-12). "Ignore what you do
+        // not know" applies to the extension container, not to the signed envelope around it.
+        let ext = match f.take(5) {
+            None => Vec::new(),
+            Some(Cv::TextMap(m)) => m,
+            // An empty CBOR map is indistinguishable between the text- and integer-keyed shapes, so
+            // accept it as an empty extension set rather than a type error.
+            Some(Cv::Map(m)) if m.is_empty() => Vec::new(),
+            Some(_) => return Err(CborError::TypeMismatch),
+        };
+        let sensitive = f.take(6).map(as_bool).transpose()?;
         f.deny_unknown()?;
-        Ok(Headers { thread, subject, mime, cc })
+        Ok(Headers { thread, subject, mime, cc, ext, sensitive })
     }
 }
 
@@ -2203,6 +2241,87 @@ mod tests {
         };
         let bytes = m.det_cbor();
         assert_eq!(Manifest::from_det_cbor(&bytes), Err(CborError::ManifestEmptyChunks));
+    }
+
+    /// §21.20 / §21.21 (DMTAP-FWDCOMPAT-01/02): an unrecognized `Headers.ext` key is IGNORED —
+    /// carried verbatim, never inspected, and never a reason to reject.
+    ///
+    /// Before `ext` existed as a field, `deny_unknown` rejected the whole Headers map on sight of
+    /// key 5. That is the exact inverse of the rule: it made every future extension a breaking
+    /// change for every deployed receiver, which is what forward compatibility exists to prevent.
+    ///
+    /// Carrying the map VERBATIM (rather than parsing and re-emitting known entries) is load-bearing
+    /// for a second reason: `Payload.sig` covers the headers, so a decoder that dropped unknown
+    /// entries would re-encode to different bytes and invalidate the signature it is about to check.
+    #[test]
+    fn an_unknown_headers_ext_key_is_ignored_not_rejected() {
+        let h = Headers {
+            thread: None,
+            subject: Some("hi".into()),
+            mime: None,
+            cc: vec![],
+            ext: vec![
+                ("x-vendor-hint".into(), Cv::Text("something-we-do-not-know".into())),
+                ("futureparam".into(), Cv::U64(7)),
+            ],
+            sensitive: None,
+        };
+        let round = Headers::from_cv(cbor::decode(&cbor::encode(&h.to_cv())).unwrap()).unwrap();
+
+        // Entry ORDER is not preserved, and must not be: §18.1.1 requires canonical ascending
+        // key order, so the encoder sorts. That is precisely what makes the byte-identity below
+        // hold no matter what order a sender happened to build the map in — the property
+        // `Payload.sig` actually depends on.
+        let mut got = round.ext.clone();
+        let mut want = h.ext.clone();
+        got.sort_by(|a, b| a.0.cmp(&b.0));
+        want.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(got, want, "every unknown ext entry must survive decode, unmodified");
+        assert_eq!(
+            cbor::encode(&round.to_cv()),
+            cbor::encode(&h.to_cv()),
+            "re-encoding must be byte-identical, or Payload.sig over these headers would break"
+        );
+    }
+
+    /// §6.7 (`sensitive`, MAY-send / MUST-honor): the flag decodes rather than being rejected. A
+    /// receiver that cannot even parse it cannot honor "MUST NOT persist at rest".
+    #[test]
+    fn the_sensitive_flag_decodes() {
+        for flag in [Some(true), Some(false), None] {
+            let h = Headers {
+                thread: None,
+                subject: None,
+                mime: None,
+                cc: vec![],
+                ext: vec![],
+                sensitive: flag,
+            };
+            let round = Headers::from_cv(cbor::decode(&cbor::encode(&h.to_cv())).unwrap()).unwrap();
+            assert_eq!(round.sensitive, flag);
+        }
+    }
+
+    /// Both new keys are OPTIONAL and omitted when unset, so a Headers carrying neither encodes
+    /// exactly as it did before they existed. This is what keeps the committed vectors valid — if
+    /// this fails, every signature over a legacy Headers has silently changed.
+    #[test]
+    fn absent_ext_and_sensitive_do_not_change_the_encoding() {
+        let h = Headers { thread: None, subject: Some("s".into()), mime: None, cc: vec![], ext: vec![], sensitive: None };
+        let Cv::Map(pairs) = h.to_cv() else { panic!("not a map") };
+        let keys: Vec<u64> = pairs.iter().map(|(k, _)| *k).collect();
+        assert_eq!(keys, vec![2, 4], "only the fields actually set may be emitted");
+    }
+
+    /// The asymmetry is deliberate: "ignore what you do not know" applies to the EXTENSION
+    /// container, not to the signed object around it. An unknown key at the top level of Headers is
+    /// still refused (§18.1.1, and DMTAP-CBOR-12 asserts it for signed objects generally).
+    #[test]
+    fn an_unknown_top_level_headers_key_is_still_rejected() {
+        let h = Headers { thread: None, subject: None, mime: None, cc: vec![], ext: vec![], sensitive: None };
+        let Cv::Map(mut pairs) = h.to_cv() else { panic!("not a map") };
+        pairs.push((99, Cv::U64(1)));
+        assert!(Headers::from_cv(Cv::Map(pairs)).is_err());
     }
 
     #[test]

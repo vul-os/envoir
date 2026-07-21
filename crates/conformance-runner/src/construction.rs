@@ -156,6 +156,8 @@ pub fn run_construction_case(case: &SuiteCase) -> CaseOutcome {
         "DMTAP-VAL-10" => Some(val_suite_downgrade_rejected()),
         "DMTAP-VAL-12" => Some(val_cold_sender_absent_challenge_defers()),
         "DMTAP-VAL-13" => Some(val_kind_unknown_rejected()),
+        "DMTAP-FWDCOMPAT-01" => Some(forward_compat_three_dispositions()),
+        "DMTAP-FWDCOMPAT-02" => Some(forward_compat_ext_and_x_prefix()),
         "DMTAP-ORG-04" => Some(cap_chain_attenuation_violation_rejected()),
         "DMTAP-ORG-05" => Some(cap_token_revoked_rejected()),
         "DMTAP-KTV1-01" => Some(kt_equal_size_differing_root_rejected()),
@@ -2691,6 +2693,131 @@ fn val_bad_payload_sig() -> Result<(), String> {
 /// envelope's CBOR with key 7 (kind) set to an unknown byte and confirm `Envelope::from_det_cbor`
 /// fails closed (rather than silently defaulting) — the earliest point such a MOTE can be
 /// rejected.
+/// DMTAP-FWDCOMPAT-01 (§21.25, §10.1, §21.20): three unknown values, three DIFFERENT dispositions.
+/// An unknown suite is rejected fail-closed (no processing); an unknown kind is not acknowledged
+/// but MAY be ignored rather than rejected; an unknown `Headers.ext` key is ignored and MUST NOT
+/// cause rejection. The whole point of the case is that these are NOT the same disposition — a
+/// receiver that treated all three alike would be wrong three ways at once.
+fn forward_compat_three_dispositions() -> Result<(), String> {
+    // (1) UNKNOWN SUITE — rejected fail-closed, before any processing. `sample_envelope` splices an
+    //     unregistered suite byte into an otherwise-valid envelope; decode/validate must refuse it.
+    let env = sample_envelope();
+    let cv = cbor::decode(&env.det_cbor()).map_err(|e| format!("decode: {e}"))?;
+    let Cv::Map(mut pairs) = cv else { return Err("envelope is not a map".into()) };
+    let mut set = false;
+    for (k, v) in pairs.iter_mut() {
+        if *k == 2 {
+            *v = Cv::U64(0x7e); // an unregistered suite code point
+            set = true;
+        }
+    }
+    if !set {
+        return Err("envelope has no key 2 (suite)".into());
+    }
+    match Envelope::from_det_cbor(&cbor::encode(&Cv::Map(pairs))) {
+        Err(CborError::UnknownSuite(_)) => {}
+        other => return Err(format!("(1) an unknown suite must be rejected fail-closed, got {other:?}")),
+    }
+
+    // (2) UNKNOWN KIND — not acked, but not a hard decode rejection of the transport: it is a
+    //     recognized-shape envelope whose `kind` this node does not implement. The reference
+    //     surfaces it as `UnknownDiscriminant` at decode, which the node maps to IGNORE_NO_ACK
+    //     (0x020A) — distinct from the suite case, which never reaches processing at all.
+    let env2 = sample_envelope();
+    let Cv::Map(mut p2) = cbor::decode(&env2.det_cbor()).map_err(|e| format!("decode: {e}"))? else {
+        return Err("envelope is not a map".into());
+    };
+    for (k, v) in p2.iter_mut() {
+        if *k == 7 {
+            *v = Cv::U64(0x41); // an unassigned kind in the extension range
+        }
+    }
+    match Envelope::from_det_cbor(&cbor::encode(&Cv::Map(p2))) {
+        Err(CborError::UnknownDiscriminant(_)) => {}
+        other => return Err(format!("(2) an unknown kind must be distinguishable (not acked), got {other:?}")),
+    }
+
+    // (3) UNKNOWN ext KEY — ignored. A full MOTE carrying an unrecognized `Headers.ext` key is
+    //     built, sealed, and validated end-to-end; it MUST be accepted, and the unknown key MUST
+    //     survive rather than being stripped (or `Payload.sig` over the headers would break).
+    let sender = IdentityKey::generate();
+    let ephemeral = IdentityKey::generate();
+    let recipient = IdentityKey::generate();
+    let seal = SealKeypair::generate();
+    let mut draft = MoteDraft::new(Kind::Mail, 1_700_000_000_000, b"fwdcompat ext body".to_vec());
+    draft.headers.ext = vec![("x-vendor-hint".into(), Cv::Text("ignore-me".into()))];
+    let env3 = build_mote(&Hpke, &sender, &ephemeral, &recipient.public(), seal.public(), draft)
+        .map_err(|e| format!("build_mote with an ext key must succeed: {e:?}"))?;
+    let ctx = RecipientCtx {
+        our_ik: &recipient.public(),
+        seal_secret: seal.secret(),
+        sender_is_known: true,
+    };
+    match mote::validate(&Hpke, &env3, &ctx) {
+        Ok(Outcome::Accepted(payload)) => {
+            let got = payload.headers.ext.iter().find(|(k, _)| k == "x-vendor-hint");
+            if got.is_none() {
+                return Err("(3) the unknown ext key must survive validation, not be stripped".into());
+            }
+            Ok(())
+        }
+        other => Err(format!("(3) a MOTE with an unknown ext key must be ACCEPTED, got {other:?}")),
+    }
+}
+
+/// DMTAP-FWDCOMPAT-02 (§21.20, §21.21): unknown keys are ignored in `ext`, and an `x-` key is never
+/// assumed portable. A receiver MUST ignore any `Headers.ext` key it does not recognize, and an
+/// unrecognized key MUST NOT cause validation failure — the same forward-compatibility posture the
+/// DNS `_dmtap` record applies to unknown TXT params.
+///
+/// The DNS half (a `_dmtap` TXT carrying an unrecognized `futureparam=`) has no wire object in this
+/// crate — resolver parsing lives in `dmtap-naming` and is exercised there — so this executes the
+/// portion the reference core owns: the `ext` ignore rule, and the absence of any semantic attached
+/// to an `x-` prefix.
+fn forward_compat_ext_and_x_prefix() -> Result<(), String> {
+    let recipient = IdentityKey::generate();
+    let seal = SealKeypair::generate();
+    let ctx = RecipientCtx {
+        our_ik: &recipient.public(),
+        seal_secret: seal.secret(),
+        sender_is_known: true,
+    };
+    let build = |ext: Vec<(String, Cv)>| -> Result<Payload, String> {
+        let sender = IdentityKey::generate();
+        let ephemeral = IdentityKey::generate();
+        let mut draft = MoteDraft::new(Kind::Mail, 1_700_000_000_000, b"fwdcompat body".to_vec());
+        draft.headers.ext = ext;
+        let env = build_mote(&Hpke, &sender, &ephemeral, &recipient.public(), seal.public(), draft)
+            .map_err(|e| format!("build_mote: {e:?}"))?;
+        match mote::validate(&Hpke, &env, &ctx) {
+            Ok(Outcome::Accepted(p)) => Ok(*p),
+            other => Err(format!("a MOTE carrying these ext keys must be ACCEPTED, got {other:?}")),
+        }
+    };
+
+    // (b) an `x-vendor-hint` AND a non-`x-` unknown key both survive an end-to-end
+    //     build/seal/validate unread — the whole MOTE is accepted and the keys are still present.
+    let p = build(vec![
+        ("x-vendor-hint".into(), Cv::Text("opaque".into())),
+        ("futureparam".into(), Cv::U64(9)),
+    ])?;
+    if !p.headers.ext.iter().any(|(k, _)| k == "x-vendor-hint") {
+        return Err("(b) the x- key must survive validation".into());
+    }
+    if !p.headers.ext.iter().any(|(k, _)| k == "futureparam") {
+        return Err("(b) a non-x- unknown key must survive too — nothing about the `x-` prefix is special".into());
+    }
+
+    // (c) the implementation's own `x-` key being ABSENT must not degrade function. An x- key is a
+    //     vendor hint, never required, so its absence is the ordinary empty-ext case and the MOTE
+    //     validates exactly as any other would.
+    let p2 = build(vec![])?;
+    if !p2.headers.ext.is_empty() {
+        return Err("(c) an absent ext set must be empty, not a failure".into());
+    }
+    Ok(())
+}
+
 fn val_kind_unknown_rejected() -> Result<(), String> {
     let env = sample_envelope();
     let bytes = env.det_cbor();

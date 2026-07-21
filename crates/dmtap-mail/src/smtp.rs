@@ -388,6 +388,10 @@ pub fn build_mote_draft(data: &[u8], ts: TimestampMs) -> MoteDraft {
         subject: parsed.header("Subject").map(crate::mime::decode_encoded_words),
         mime: parsed.header("Content-Type").map(str::to_string),
         cc: Vec::new(),
+        // A legacy SMTP message carries no DMTAP extension headers and no `sensitive` flag; both
+        // are DMTAP-native and a gateway must not invent them (§7).
+        ext: Vec::new(),
+        sensitive: None,
     };
     draft
 }

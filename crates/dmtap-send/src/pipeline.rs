@@ -97,6 +97,8 @@ impl SendService {
                 subject: if req.subject.is_empty() { None } else { Some(req.subject.clone()) },
                 mime: req.mime.clone(),
                 cc: Vec::new(),
+                ext: Vec::new(),
+                sensitive: None,
             },
             body: req.body.clone().into_bytes(),
             refs: Vec::new(),

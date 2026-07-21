@@ -410,6 +410,10 @@ fn build_all() -> VectorFile {
             subject: Some("hello".into()),
             mime: Some("text/plain; charset=utf-8".into()),
             cc: vec![],
+            // Both omitted on the wire when unset, so this vector's bytes are unchanged by the
+            // addition of Headers keys 5 (`ext`) and 6 (`sensitive`).
+            ext: vec![],
+            sensitive: None,
         },
         body: b"hello dmtap".to_vec(),
         refs: vec![ContentId::of(b"parent-mote")],

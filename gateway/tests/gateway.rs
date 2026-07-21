@@ -454,6 +454,8 @@ fn sample_payload() -> Payload {
             subject: Some("meeting notes".into()),
             mime: None,
             cc: vec![],
+            ext: vec![],
+            sensitive: None,
         },
         body: b"Here are the notes from today.\r\n".to_vec(),
         refs: vec![],
