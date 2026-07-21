@@ -314,3 +314,10 @@ is the gate before any production deployment. Treat everything here as pre-alpha
 [MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE) — © VulOS. Dual-licensed (Apache
 adds an explicit patent grant); source and issues at
 [github.com/vul-os/envoir](https://github.com/vul-os/envoir).
+
+---
+
+<p align="center">
+  <a href="https://vulos.org"><img src="docs/assets/vulos-logo.png" alt="vulos" height="20"></a><br>
+  <sub><a href="https://vulos.org"><b>vulos</b></a> — open by design</sub>
+</p>
