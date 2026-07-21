@@ -23,9 +23,10 @@ use dmtap_core::deniable::{
 use dmtap_core::directory::{DomainDirectory, DomainDirectoryError, Visibility};
 use dmtap_core::id::ContentId;
 use dmtap_core::identity::{
-    authorize_key_rotation, verify_domain, Cap, DeviceCert, Identity, IdentityError, IdentityKey,
-    KeyPackageBundleRef, KeyRotation, KeyRotationError, MethodPredicate, MoveRecord,
-    RecoveryMethod, RecoveryPolicy, Threshold,
+    authorize_key_rotation, authorize_recovery_change, sign_recovery_approval, verify_domain, Cap,
+    DeviceCert, GuardianApproval, Identity, IdentityError, IdentityKey, KeyPackageBundleRef,
+    KeyRotation, KeyRotationError, MethodPredicate, MoveRecord, RecoveryGuardError, RecoveryMethod,
+    RecoveryPolicy, Threshold, RECOVERY_VETO_WINDOW_MS,
 };
 use dmtap_core::kt::{
     identity_leaf_for, verify_consistency, ConsistencyProof, InclusionProof, KtError, MerkleTree,
@@ -107,6 +108,10 @@ pub fn run_construction_case(case: &SuiteCase) -> CaseOutcome {
         "DMTAP-WIRE-10" => Some(assertion_missing_cnf_rejected()),
         "DMTAP-IDENT-01" => Some(ident_tampered_sig_rejected()),
         "DMTAP-IDENT-02" => Some(ident_rollback_rejected()),
+        "DMTAP-IDENT-90" => Some(recovery_threshold_same_kind_ordering()),
+        "DMTAP-IDENT-91" => Some(eviction_is_durable_against_the_chain()),
+        "DMTAP-WIRE-03" => Some(recovery_policy_required_fields_and_ordering()),
+        "DMTAP-WIRE-04" => Some(recovery_method_and_threshold_shapes_rejected()),
         "DMTAP-IDENT-03" => Some(ident_broken_prev_chain_rejected()),
         "DMTAP-IDENT-05" => Some(device_cert_tampered_sig_rejected()),
         "DMTAP-IDENT-06" => Some(suite_negotiation_empty_intersection_rejected()),
@@ -267,23 +272,6 @@ fn skip_reason(id: &str, operation: &str) -> String {
             advertised deniable-1:1' to a deniable-session refusal — a caller simply has no \
             `DeniablePrekeyBundle` to call `initiate()` with in that case, which is a structural absence \
             of input, not an executable 'refuse and notify' decision this crate makes.",
-        "DMTAP-WIRE-03" => "RecoveryPolicy::verify() (identity.rs) checks only that rotate_threshold's \
-            `any_of` is non-empty — it does NOT compare rotate_threshold's strength against \
-            recover_threshold's (no `ERR_RECOVERY_THRESHOLD_INVALID`/0x010C variant exists anywhere in \
-            IdentityError/RecoveryGuardError), so 'rotate_threshold weaker than recover_threshold at \
-            decode/verify time' is not a check this crate performs on a single policy object — the private \
-            `threshold_min` comparator is only ever applied cross-VERSION (weakening detection between two \
-            policies), never as a same-object structural invariant. This is a genuine reference gap, not an \
-            honestly-constructible rejection: see the conformance-runner report.",
-        "DMTAP-WIRE-04" => "genuine reference gap, not an honest skip of convenience: \
-            `recovery_change_is_weakening` (identity.rs) treats re-adding a previously-evicted \
-            `RecoveryMethod` (identical key material) as a purely ADDITIVE change when compared only \
-            against the immediately-prior policy version — B (phrase evicted) -> C (same phrase \
-            re-added) is not flagged as weakening, so `authorize_recovery_change` lets it through on \
-            IK alone with no rotate_threshold quorum and no veto window, even though the factor's \
-            eviction was never really enforced. Catching this needs comparing against every PRIOR \
-            version a factor was ever removed from, which no function in this crate does. Reported \
-            prominently as a spec-vs-implementation gap rather than silently constructed around.",
         "DMTAP-WIRE-07" => "no `GroupState` CBOR wire type exists anywhere in this workspace. \
             dmtap-mls (committer.rs/session.rs/member.rs) models `LogEntry`/`Committer`/`Session`/ \
             `Handshake` as in-process abstractions, not the §18.6.1 committer-signed CBOR projection \
@@ -463,6 +451,24 @@ fn cbor_signed_unknown_key_rejected() -> Result<(), String> {
 /// `from_det_cbor` of their own (`KeyPackageRef` inside `Envelope`, `KeyPackageBundleRef` inside
 /// `Identity`) — the embedding object's own decoder is what actually enforces the sub-object's
 /// required fields, so splicing at the outer object's bytes is the honest way to exercise it.
+/// Remove a TOP-LEVEL key from a canonical integer-keyed map and re-encode, so a "required field
+/// absent" case is built by deleting the field from a genuinely valid object rather than by
+/// assembling a fresh one that might be malformed for some unrelated reason. Errors if the key was
+/// not there to begin with — a splice that silently no-ops would turn this into a positive control
+/// wearing a negative control's name.
+fn remove_key(bytes: &[u8], key: u64) -> Result<Vec<u8>, String> {
+    let cv = cbor::decode(bytes).map_err(|e| format!("decode base object: {e}"))?;
+    let Cv::Map(mut pairs) = cv else {
+        return Err("base object is not an integer-keyed map".into());
+    };
+    let before = pairs.len();
+    pairs.retain(|(k, _)| *k != key);
+    if pairs.len() == before {
+        return Err(format!("key {key} not present in base object"));
+    }
+    Ok(cbor::encode(&Cv::Map(pairs)))
+}
+
 fn remove_inner_key(bytes: &[u8], outer_key: u64, inner_key: u64) -> Result<Vec<u8>, String> {
     let cv = cbor::decode(bytes).map_err(|e| format!("decode base object: {e}"))?;
     let mut pairs = match cv {
@@ -582,6 +588,342 @@ fn ident_tampered_sig_rejected() -> Result<(), String> {
     match id.verify(None) {
         Err(IdentityError::BadSignature) => Ok(()),
         other => Err(format!("expected Err(BadSignature), got {other:?}")),
+    }
+}
+
+/// DMTAP-WIRE-03: `RecoveryPolicy` required fields, plus the load-bearing ordering constraint
+/// `rotate_threshold >= recover_threshold` (`ERR_RECOVERY_THRESHOLD_INVALID`, `0x010C`).
+///
+/// Four branches, each with its own code: the ordering violation (`0x010C`), a missing required
+/// field (`0x020D`), a version rollback (`0x0105`) and an `IK`-alone guardian removal (`0x010E`).
+/// The ordering one is the escalation §1.4 rule 2 exists to prevent — a policy whose rotate bar
+/// sits below its recover bar lets a single recovered factor rewrite the policy governing recovery.
+fn recovery_policy_required_fields_and_ordering() -> Result<(), String> {
+    let ik = IdentityKey::generate();
+    let guardian_keys: Vec<IdentityKey> =
+        (0..5).map(|s| IdentityKey::from_seed(&[s; 32])).collect();
+    let guardians: Vec<Vec<u8>> = guardian_keys.iter().map(|g| g.public()).collect();
+    let g_methods = |n: u8| vec![RecoveryMethod::Social { guardians: guardians.clone(), threshold: n }];
+
+    let mk = |recover: u8, rotate: u8, ver: u64, prev: Option<ContentId>| {
+        let mut p = RecoveryPolicy {
+            suite: Suite::Classical,
+            ik: ik.public(),
+            version: ver,
+            methods: g_methods(rotate),
+            recover_threshold: Threshold { any_of: vec![MethodPredicate::Guardians(recover)] },
+            rotate_threshold: Threshold { any_of: vec![MethodPredicate::Guardians(rotate)] },
+            prev,
+            ts: ver,
+            sig: vec![],
+        };
+        p.sign(&ik);
+        p
+    };
+
+    // Positive control: a well-ordered policy verifies, so the rejections below are the constraint
+    // firing rather than a fixture that never verified in the first place.
+    mk(2, 3, 1, None).verify().map_err(|e| format!("positive control: rotate(3) >= recover(2) must verify, got {e:?}"))?;
+
+    // (1) rotate_threshold BELOW recover_threshold — a single recovered factor could rewrite the
+    // policy that governs recovery.
+    match mk(3, 2, 1, None).verify() {
+        Err(IdentityError::RecoveryThresholdInvalid) => {}
+        other => return Err(format!("(1) rotate(2) < recover(3) must be rejected 0x010C, got {other:?}")),
+    }
+
+    // (2) a required field absent — `methods` (key 4) spliced out of an otherwise valid encoding.
+    let valid = mk(2, 3, 1, None).det_cbor();
+    let without_methods = remove_key(&valid, 4)?;
+    match RecoveryPolicy::from_det_cbor(&without_methods) {
+        Err(IdentityError::BadEncoding(CborError::MissingKey(4))) => {}
+        other => return Err(format!("(2) policy without `methods` must be rejected 0x020D, got {other:?}")),
+    }
+
+    // (3) a policy at the pinned version is a rollback. It is validly signed — only the pin can
+    // tell it is superseded, which is why replay is a live threat and not a decode concern.
+    match mk(2, 3, 7, None).check_rollback(Some(7)) {
+        Err(RecoveryGuardError::StaleRollback) => {}
+        other => return Err(format!("(3) version == pinned must be rejected 0x0105, got {other:?}")),
+    }
+    if let Err(e) = mk(2, 3, 8, None).check_rollback(Some(7)) {
+        return Err(format!("(3) a strictly newer version must be accepted, got {e:?}"));
+    }
+
+    // (4) IK alone removing a guardian — weakening without the rotate_threshold quorum.
+    let v1 = mk(2, 3, 1, None);
+    let mut v2 = RecoveryPolicy {
+        suite: Suite::Classical,
+        ik: ik.public(),
+        version: 2,
+        methods: vec![RecoveryMethod::Social { guardians: guardians[..3].to_vec(), threshold: 3 }],
+        recover_threshold: Threshold { any_of: vec![MethodPredicate::Guardians(2)] },
+        rotate_threshold: Threshold { any_of: vec![MethodPredicate::Guardians(3)] },
+        prev: Some(v1.content_id()),
+        ts: 2,
+        sig: vec![],
+    };
+    v2.sign(&ik);
+    match authorize_recovery_change(
+        std::slice::from_ref(&v1), &v2, &guardians, &[], &[], 1_000_000,
+        1_000_000 + RECOVERY_VETO_WINDOW_MS,
+    ) {
+        Err(RecoveryGuardError::WeakeningUnquorumed) => Ok(()),
+        other => Err(format!("(4) IK-alone guardian removal must be rejected 0x010E, got {other:?}")),
+    }
+}
+
+/// DMTAP-WIRE-04: `RecoveryMethod` / `Threshold` wire shapes (`ERR_MALFORMED_OBJECT`, `0x020D`),
+/// plus the §1.4 rule-3 consequence that a dropped-and-re-added factor is not merely a list edit.
+///
+/// (b) and the `count >= 1` floor were accepted-and-normalised until the decoder was tightened: an
+/// `"ik"` predicate with `count = 2` decoded to `Ik`, and `"device"` with `count = 0` decoded to
+/// `Devices(0)` — a predicate satisfiable by no factors at all, inside the very structure whose job
+/// is to say how many factors are required.
+fn recovery_method_and_threshold_shapes_rejected() -> Result<(), String> {
+    let ik = IdentityKey::generate();
+
+    // A well-formed policy body, used as the baseline every negative below perturbs by one field.
+    let policy_cv = |methods: Vec<Cv>, preds: Vec<Cv>| -> Vec<u8> {
+        let threshold = Cv::Map(vec![(1, Cv::Array(preds))]);
+        cbor::encode(&Cv::Map(vec![
+            (1, Cv::U64(Suite::Classical.as_u8() as u64)),
+            (2, Cv::Bytes(ik.public())),
+            (3, Cv::U64(1)),
+            (4, Cv::Array(methods)),
+            (5, threshold.clone()),
+            (6, threshold),
+            (8, Cv::U64(1_700_000_000_000)),
+            (9, Cv::Bytes(vec![0u8; 64])),
+        ]))
+    };
+    let social = |with_threshold: bool| {
+        let mut m = vec![(0u64, Cv::U64(3)), (1, Cv::Array(vec![Cv::Bytes(vec![1u8; 32])]))];
+        if with_threshold {
+            m.push((2, Cv::U64(1)));
+        }
+        Cv::Map(m)
+    };
+    let pred = |method: &str, count: u64| Cv::Map(vec![(1u64, Cv::Text(method.into())), (2, Cv::U64(count))]);
+
+    // Positive control: the baseline really is well-formed, so every rejection below is caused by
+    // the single field that was perturbed and not by a broken fixture.
+    RecoveryPolicy::from_det_cbor(&policy_cv(vec![social(true)], vec![pred("social", 1)]))
+        .map_err(|e| format!("positive control: the baseline policy must decode, got {e:?}"))?;
+
+    // (a) SocialMethod with guardians present and `threshold` absent.
+    match RecoveryPolicy::from_det_cbor(&policy_cv(vec![social(false)], vec![pred("social", 1)])) {
+        Err(IdentityError::BadEncoding(CborError::MissingKey(2))) => {}
+        other => return Err(format!("(a) SocialMethod without `threshold` must be rejected, got {other:?}")),
+    }
+
+    // (b) a MethodPredicate naming "ik" with count 2 — "ik" names no RecoveryMethod and cannot be
+    // held twice, so this is malformed rather than something to normalise to 1.
+    match RecoveryPolicy::from_det_cbor(&policy_cv(vec![social(true)], vec![pred("ik", 2)])) {
+        Err(IdentityError::BadEncoding(CborError::IntRange)) => {}
+        other => return Err(format!("(b) predicate ik/count=2 must be rejected, got {other:?}")),
+    }
+
+    // The `count >= 1` floor, same rationale: a zero-count predicate is not a threshold.
+    match RecoveryPolicy::from_det_cbor(&policy_cv(vec![social(true)], vec![pred("device", 0)])) {
+        Err(IdentityError::BadEncoding(CborError::IntRange)) => {}
+        other => return Err(format!("predicate device/count=0 must be rejected, got {other:?}")),
+    }
+
+    // (c) an unknown method string — fail closed, never ignore-and-continue.
+    match RecoveryPolicy::from_det_cbor(&policy_cv(vec![social(true)], vec![pred("retina", 1)])) {
+        Err(IdentityError::BadEncoding(CborError::TypeMismatch)) => {}
+        other => return Err(format!("(c) unknown predicate method must be rejected, got {other:?}")),
+    }
+
+    // (d) dropping and re-adding a PhraseMethod with the SAME underlying secret. The list changed
+    // while the secret did not, so the evicted factor still opens the account — §1.4 rule 3. This
+    // is judged against the chain, so it is quorum-gated rather than read as additive.
+    let phrase = RecoveryMethod::Phrase { recovery_key: vec![0x5A; 32] };
+    let device = RecoveryMethod::Device { device_key: vec![0xBB; 32], label: "kept".into() };
+    let mk = |methods: Vec<RecoveryMethod>, ver: u64, prev: Option<ContentId>| {
+        let mut p = RecoveryPolicy {
+            suite: Suite::Classical,
+            ik: ik.public(),
+            version: ver,
+            methods,
+            recover_threshold: Threshold { any_of: vec![MethodPredicate::Guardians(3)] },
+            rotate_threshold: Threshold { any_of: vec![MethodPredicate::Guardians(3)] },
+            prev,
+            ts: ver,
+            sig: vec![],
+        };
+        p.sign(&ik);
+        p
+    };
+    let v1 = mk(vec![phrase.clone(), device.clone()], 1, None);
+    let v2 = mk(vec![device.clone()], 2, Some(v1.content_id()));
+    let v3 = mk(vec![device, phrase], 3, Some(v2.content_id())); // same secret returns
+    let guardians: Vec<Vec<u8>> = (0..5u8).map(|s| IdentityKey::from_seed(&[s; 32]).public()).collect();
+    match authorize_recovery_change(
+        &[v1, v2], &v3, &guardians, &[], &[], 1_000_000, 1_000_000 + RECOVERY_VETO_WINDOW_MS,
+    ) {
+        Err(RecoveryGuardError::WeakeningUnquorumed) => Ok(()),
+        other => Err(format!(
+            "(d) re-adding the same phrase secret is a rule-3 weakening, not a list edit, got {other:?}"
+        )),
+    }
+}
+
+/// DMTAP-IDENT-91: §1.4 — **eviction is durable**, judged against the policy hash CHAIN rather
+/// than the previous version alone (`ERR_RECOVERY_WEAKENING_UNQUORUMED`, `0x010E`).
+///
+/// Re-adding a factor an earlier version evicted looks purely additive against `prev`. Accepting it
+/// lets an attacker who transiently holds `IK` restore a factor they control — which then SURVIVES
+/// the `IK` rotation the owner performs to recover, because it lives in the recovery policy rather
+/// than in the key. A temporary key compromise becomes a permanent foothold.
+fn eviction_is_durable_against_the_chain() -> Result<(), String> {
+    let ik = IdentityKey::generate();
+    let guardian_keys: Vec<IdentityKey> =
+        (0..5).map(|s| IdentityKey::from_seed(&[s; 32])).collect();
+    let guardians: Vec<Vec<u8>> = guardian_keys.iter().map(|g| g.public()).collect();
+
+    let a = RecoveryMethod::Device { device_key: vec![0xAA; 32], label: "a".into() };
+    let b = RecoveryMethod::Device { device_key: vec![0xBB; 32], label: "b".into() };
+
+    let mk = |methods: Vec<RecoveryMethod>, ver: u64, prev: Option<ContentId>| {
+        let mut p = RecoveryPolicy {
+            suite: Suite::Classical,
+            ik: ik.public(),
+            version: ver,
+            methods,
+            recover_threshold: Threshold { any_of: vec![MethodPredicate::Guardians(3)] },
+            rotate_threshold: Threshold { any_of: vec![MethodPredicate::Guardians(3)] },
+            prev,
+            ts: ver,
+            sig: vec![],
+        };
+        p.sign(&ik);
+        p
+    };
+
+    let v1 = mk(vec![a.clone(), b.clone()], 1, None);
+    let v2 = mk(vec![b.clone()], 2, Some(v1.content_id())); // evicts A
+    let v3 = mk(vec![b.clone(), a.clone()], 3, Some(v2.content_id())); // re-adds A
+    let history = vec![v1.clone(), v2.clone()];
+    let announced = 1_000_000u64;
+    let after = announced + RECOVERY_VETO_WINDOW_MS;
+
+    // (a) IK alone re-adding the evicted factor MUST be rejected.
+    match authorize_recovery_change(&history, &v3, &guardians, &[], &[], announced, after) {
+        Err(RecoveryGuardError::WeakeningUnquorumed) => {}
+        other => {
+            return Err(format!(
+                "(a) re-adding an evicted factor with IK alone MUST be rejected 0x010E, got {other:?}"
+            ))
+        }
+    }
+
+    // (b) quorum + elapsed veto window: accepted. Eviction is durable, not irreversible.
+    let approvals: Vec<GuardianApproval> =
+        guardian_keys[..3].iter().map(|g| sign_recovery_approval(g, &v3)).collect();
+    if let Err(e) =
+        authorize_recovery_change(&history, &v3, &guardians, &approvals, &[], announced, after)
+    {
+        return Err(format!("(b) quorum + elapsed window must permit the re-addition, got {e:?}"));
+    }
+
+    // (c) a NEVER-evicted factor stays additive — ordinary hygiene must not become quorum-gated.
+    let c = RecoveryMethod::Device { device_key: vec![0xCC; 32], label: "c".into() };
+    let v3_add = mk(vec![b.clone(), c], 3, Some(v2.content_id()));
+    if let Err(e) =
+        authorize_recovery_change(&history, &v3_add, &guardians, &[], &[], announced, after)
+    {
+        return Err(format!("(c) adding a never-evicted factor must stay additive, got {e:?}"));
+    }
+
+    // (d) a verifier holding only v2 cannot see the eviction and MUST fail closed rather than
+    // assume the change is additive — assuming is precisely what produced the defect.
+    match authorize_recovery_change(
+        std::slice::from_ref(&v2), &v3, &guardians, &[], &[], announced, after,
+    ) {
+        Err(RecoveryGuardError::IncompleteHistory) => Ok(()),
+        other => Err(format!(
+            "(d) a verifier holding only the prior version MUST fail closed, got {other:?}"
+        )),
+    }
+}
+
+/// DMTAP-IDENT-90: §1.4 rule 2 — `rotate_threshold >= recover_threshold`, where the comparison is
+/// **same-kind counts**, and different kinds are **incomparable** and impose no constraint on each
+/// other (`ERR_RECOVERY_THRESHOLD_INVALID`, `0x010C`).
+///
+/// The case exists because rule 2 was, as originally written, unimplementable: `Threshold` is a set
+/// of heterogeneous predicates with no total order, so ">=" had no meaning. §1.4 now defines it.
+/// All five constructions from the case are exercised, and (c) is the one that matters — a
+/// subset-based reading rejects it, and that wrong reading is exactly how the ambiguity surfaced.
+fn recovery_threshold_same_kind_ordering() -> Result<(), String> {
+    let ik = IdentityKey::generate();
+
+    // Every policy is genuinely SIGNED, so an accepted case proves the threshold rule let it
+    // through rather than the signature check failing first. `verify()` evaluates rule 2 BEFORE the
+    // signature, so an unsigned policy would "reject" for the right code by accident.
+    let policy = |recover: Vec<MethodPredicate>, rotate: Vec<MethodPredicate>| -> RecoveryPolicy {
+        let mut p = RecoveryPolicy {
+            suite: Suite::Classical,
+            ik: ik.public(),
+            version: 1,
+            // Rule 2 is a relation between the two thresholds; `methods` is not consulted by it.
+            methods: vec![RecoveryMethod::Phrase { recovery_key: vec![7u8; 32] }],
+            recover_threshold: Threshold { any_of: recover },
+            rotate_threshold: Threshold { any_of: rotate },
+            prev: None,
+            ts: 1_700_000_000_000,
+            sig: vec![],
+        };
+        p.sign(&ik);
+        p
+    };
+
+    use MethodPredicate::{Devices, Guardians, Ik, Phrase};
+
+    // (a) same kind, rotate CHEAPER than recover: any two guardians could evict the owner.
+    match policy(vec![Guardians(2)], vec![Guardians(1)]).verify() {
+        Err(IdentityError::RecoveryThresholdInvalid) => {}
+        other => {
+            return Err(format!(
+                "(a) recover={{Guardians(2)}}, rotate={{Guardians(1)}}: expected \
+                 Err(RecoveryThresholdInvalid) (0x010C), got {other:?}"
+            ))
+        }
+    }
+
+    // (b) the same defect hidden among several kinds — Devices(1) < Devices(2) still decides it.
+    match policy(vec![Devices(2), Phrase], vec![Devices(1), Ik]).verify() {
+        Err(IdentityError::RecoveryThresholdInvalid) => {}
+        other => {
+            return Err(format!(
+                "(b) recover={{Devices(2),Phrase}}, rotate={{Devices(1),Ik}}: expected \
+                 Err(RecoveryThresholdInvalid) (0x010C), got {other:?}"
+            ))
+        }
+    }
+
+    // (c) MUST BE ACCEPTED. No kind appears on both sides, so nothing is comparable and rule 2
+    // constrains nothing: the phrase-holder can recover without being able to rotate, which is what
+    // the rule wants. A subset reading rejects this and is non-conformant.
+    if let Err(e) = policy(vec![Phrase], vec![Ik, Guardians(2)]).verify() {
+        return Err(format!(
+            "(c) recover={{Phrase}}, rotate={{Ik,Guardians(2)}}: MUST be accepted — kinds are \
+             incomparable — but got Err({e:?}). A subset-based reading of rule 2 fails exactly here."
+        ));
+    }
+
+    // (d) equality is permitted; rule 3 (weakening across versions) gates the rest independently.
+    if let Err(e) = policy(vec![Guardians(3)], vec![Guardians(3)]).verify() {
+        return Err(format!("(d) recover=rotate={{Guardians(3)}}: '>=' permits equality, got Err({e:?})"));
+    }
+
+    // (e) an empty rotate_threshold is malformed — nothing could ever satisfy it, so the policy
+    // would be unrotatable. This is a structural rejection, distinct from the rule-2 comparison.
+    match policy(vec![Guardians(1)], vec![]).verify() {
+        Err(IdentityError::Malformed(_)) => Ok(()),
+        other => Err(format!("(e) empty rotate_threshold: expected Err(Malformed), got {other:?}")),
     }
 }
 

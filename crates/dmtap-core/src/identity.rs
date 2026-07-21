@@ -656,11 +656,21 @@ impl MethodPredicate {
         let count = as_u64(f.req(2)?)?;
         f.deny_unknown()?;
         let n = u8::try_from(count).map_err(|_| CborError::IntRange)?;
+        // §1.4: `count` is at least 1, and exactly 1 for "ik" (which names no RecoveryMethod and
+        // so cannot be held "twice"). Both were previously accepted and silently normalised away:
+        // "ik" with count 2 decoded to `Ik`, and "device" with count 0 decoded to `Devices(0)` — a
+        // predicate no factor is needed to satisfy, sitting in a structure whose entire purpose is
+        // to say how many factors are needed. Fail closed instead of re-encoding the caller's
+        // object into something they did not send.
+        if n < 1 {
+            return Err(CborError::IntRange);
+        }
         Ok(match method.as_str() {
             "phrase" => MethodPredicate::Phrase,
             "device" => MethodPredicate::Devices(n),
             "social" => MethodPredicate::Guardians(n),
-            "ik" => MethodPredicate::Ik,
+            "ik" if n == 1 => MethodPredicate::Ik,
+            "ik" => return Err(CborError::IntRange),
             _ => return Err(CborError::TypeMismatch),
         })
     }
@@ -768,6 +778,21 @@ impl RecoveryPolicy {
         verify_domain(&self.ik, RECOVERY_POLICY_DS, &self.signing_body(), &self.sig)
     }
 
+    /// Rollback guard (§1.4): reject this policy if its `version` is at or below `last_pinned`.
+    /// `None` ⇒ first observation. Returns [`StaleRollback`](RecoveryGuardError::StaleRollback)
+    /// (`0x0105`) on a replay of a superseded version.
+    ///
+    /// A superseded policy carries a perfectly valid `IK` signature — nothing about the object
+    /// itself reveals that it was replaced. Only the pinned version does, which is why this check
+    /// cannot live inside [`verify`](RecoveryPolicy::verify) and must be applied by the holder of
+    /// the pin.
+    pub fn check_rollback(&self, last_pinned: Option<u64>) -> Result<(), RecoveryGuardError> {
+        match last_pinned {
+            Some(v) if self.version <= v => Err(RecoveryGuardError::StaleRollback),
+            _ => Ok(()),
+        }
+    }
+
     /// Content address of this policy version (`0x1e ‖ BLAKE3-256(det_cbor(policy))`) — the value a
     /// guardian counter-signs when approving or vetoing a change (see [`authorize_recovery_change`]).
     pub fn content_id(&self) -> ContentId {
@@ -808,14 +833,41 @@ pub enum RecoveryGuardError {
     #[error("recovery-weakening change was vetoed by a rotate_threshold-backed quorum \
              (ERR_RECOVERY_VETO_WINDOW, 0x010F)")]
     Vetoed,
+    /// The supplied policy `history` is not a verifiable chain from genesis to the version `next`
+    /// supersedes, so which factors were ever **evicted** cannot be determined.
+    ///
+    /// §1.4: "a verifier that cannot obtain the chain MUST fail closed rather than assume a change
+    /// is additive." This is that fail-closed. It is deliberately NOT recoverable by passing just
+    /// the previous version: re-adding an evicted factor looks purely additive against `prev`
+    /// alone, so accepting a one-element history would silently reinstate the very defect the
+    /// history-aware check exists to close.
+    /// `ERR_RECOVERY_WEAKENING_UNQUORUMED` (`0x010E`), FAIL_CLOSED_BLOCK.
+    #[error("recovery-policy history is not a complete chain from genesis — cannot determine what \
+             was evicted, so the change cannot be judged additive \
+             (ERR_RECOVERY_WEAKENING_UNQUORUMED, 0x010E)")]
+    IncompleteHistory,
+    /// A `RecoveryPolicy` at or below the pinned version was presented as current — a replay of a
+    /// superseded, still-validly-signed policy (§1.4: `version` is monotonic).
+    ///
+    /// This matters for the same reason eviction durability does, approached from the other side:
+    /// an old version is signed just as validly as the newest one, so an attacker who wants an
+    /// evicted factor back does not need to author a *change* at all — they can re-present the
+    /// version that still contained it. Forward-change quorum gating is worth nothing if the
+    /// past can simply be replayed. `ERR_STALE_ROLLBACK` (`0x0105`).
+    #[error("recovery policy version is at or below the pinned version — replay of a superseded \
+             policy (ERR_STALE_ROLLBACK, 0x0105)")]
+    StaleRollback,
 }
 
 impl RecoveryGuardError {
     /// The normative DMTAP wire error code (§21.3).
     pub fn code(&self) -> u16 {
         match self {
-            RecoveryGuardError::WeakeningUnquorumed => 0x010E,
+            RecoveryGuardError::WeakeningUnquorumed | RecoveryGuardError::IncompleteHistory => {
+                0x010E
+            }
             RecoveryGuardError::VetoWindowActive | RecoveryGuardError::Vetoed => 0x010F,
+            RecoveryGuardError::StaleRollback => 0x0105,
         }
     }
 }
@@ -967,11 +1019,44 @@ pub fn recovery_change_is_weakening_vs_history(
     next.methods.iter().any(|nm| evicted.iter().any(|em| *em == nm))
 }
 
+/// Check that `history` is a complete, hash-linked chain of policy versions from **genesis**
+/// (`prev == None`) to its last element, with strictly increasing `version`.
+///
+/// This is what makes "was this factor ever evicted?" answerable. A caller holding only the newest
+/// version cannot answer it, and §1.4 requires such a caller to fail closed rather than assume the
+/// change is additive — so a one-element history is accepted only when that element IS genesis.
+fn verify_policy_chain(history: &[RecoveryPolicy]) -> Result<(), RecoveryGuardError> {
+    let Some(first) = history.first() else {
+        return Err(RecoveryGuardError::IncompleteHistory);
+    };
+    if first.prev.is_some() {
+        // Starts mid-chain: earlier versions exist that we cannot see, and an eviction may live in
+        // exactly the part we are missing.
+        return Err(RecoveryGuardError::IncompleteHistory);
+    }
+    for pair in history.windows(2) {
+        let (a, b) = (&pair[0], &pair[1]);
+        if b.prev.as_ref() != Some(&a.content_id()) || b.version <= a.version {
+            return Err(RecoveryGuardError::IncompleteHistory);
+        }
+    }
+    Ok(())
+}
+
 /// Authorize a recovery-policy change under the §1.4 rules 3–4 / §16.8 weakening guard. Clock and
 /// veto-window are **explicit parameters** — this core never reads a wall clock (§16.1).
 ///
-/// A **non-weakening** change ([`recovery_change_is_weakening`] `== false`) is permitted immediately
-/// (`Ok`) — `IK` alone may sign an additive change with no delay (§1.4 rule 3).
+/// Weakening is judged against the whole **`history`** (oldest first, ending at the version `next`
+/// supersedes), not against the previous version alone, because **eviction must be durable**:
+/// re-adding a factor an earlier version evicted reads as purely additive against `prev`, and
+/// accepting it lets a transient `IK` holder restore a factor they control which then SURVIVES the
+/// `IK` rotation the owner performs to recover — a temporary key compromise become a permanent
+/// foothold in recovery. `history` MUST be a complete chain from genesis; anything else is
+/// [`IncompleteHistory`](RecoveryGuardError::IncompleteHistory), never an assumption that the
+/// change was additive (§1.4).
+///
+/// A **non-weakening** change ([`recovery_change_is_weakening_vs_history`] `== false`) is permitted
+/// immediately (`Ok`) — `IK` alone may sign an additive change with no delay (§1.4 rule 3).
 ///
 /// A **weakening** change is fail-closed unless, in order:
 /// 1. it satisfies the `rotate_threshold` guardian quorum — a strict `> n/2` majority of `guardians`
@@ -987,7 +1072,7 @@ pub fn recovery_change_is_weakening_vs_history(
 ///    NOT take effect instantly.
 #[allow(clippy::too_many_arguments)]
 pub fn authorize_recovery_change(
-    prev: &RecoveryPolicy,
+    history: &[RecoveryPolicy],
     next: &RecoveryPolicy,
     guardians: &[Vec<u8>],
     approvals: &[GuardianApproval],
@@ -995,7 +1080,12 @@ pub fn authorize_recovery_change(
     announced_at: TimestampMs,
     now: TimestampMs,
 ) -> Result<(), RecoveryGuardError> {
-    if !recovery_change_is_weakening(prev, next) {
+    // Fail closed before anything else: without a verifiable chain we cannot know what was ever
+    // evicted, and "looks additive against the newest version I happen to hold" is precisely the
+    // reasoning this guard exists to reject.
+    verify_policy_chain(history)?;
+    let prev = history.last().ok_or(RecoveryGuardError::IncompleteHistory)?;
+    if !recovery_change_is_weakening_vs_history(history, next) {
         return Ok(());
     }
     let n = guardians.len();
@@ -1588,7 +1678,7 @@ mod tests {
         );
         assert!(!recovery_change_is_weakening(&prev, &next));
         // Even with no guardians, no approvals, and now == announced (window not elapsed): OK.
-        assert!(authorize_recovery_change(&prev, &next, &[], &[], &[], 0, 0).is_ok());
+        assert!(authorize_recovery_change(std::slice::from_ref(&prev), &next, &[], &[], &[], 0, 0).is_ok());
     }
 
     #[test]
@@ -1651,7 +1741,7 @@ mod tests {
         );
         // A weakening change is gated: IK alone (no guardians/approvals) is refused.
         assert!(matches!(
-            authorize_recovery_change(&prev_phrase, &swapped_phrase, &[], &[], &[], 0, 0),
+            authorize_recovery_change(std::slice::from_ref(&prev_phrase), &swapped_phrase, &[], &[], &[], 0, 0),
             Err(RecoveryGuardError::WeakeningUnquorumed)
         ));
         // Identical key material is NOT a change ⇒ not weakening (benign re-sign / version bump).
@@ -1714,7 +1804,7 @@ mod tests {
         let after_window = announced + RECOVERY_VETO_WINDOW_MS;
 
         // (a) No quorum — even past the window — fails closed 0x010E.
-        let e = authorize_recovery_change(&prev, &next, &guardians, &[], &[], announced, after_window).unwrap_err();
+        let e = authorize_recovery_change(std::slice::from_ref(&prev), &next, &guardians, &[], &[], announced, after_window).unwrap_err();
         assert_eq!(e, RecoveryGuardError::WeakeningUnquorumed);
         assert_eq!(e.code(), 0x010E);
 
@@ -1723,29 +1813,29 @@ mod tests {
             guardian_keys[..3].iter().map(|g| sign_recovery_approval(g, &next)).collect();
 
         // (b) Quorum met but still inside the 72h window — hold, 0x010F.
-        let e = authorize_recovery_change(&prev, &next, &guardians, &approvals, &[], announced, announced + 1).unwrap_err();
+        let e = authorize_recovery_change(std::slice::from_ref(&prev), &next, &guardians, &approvals, &[], announced, announced + 1).unwrap_err();
         assert_eq!(e, RecoveryGuardError::VetoWindowActive);
         assert_eq!(e.code(), 0x010F);
 
         // (c) Quorum met + a rotate_threshold-backed veto (3 of 5) — aborted, 0x010F.
         let vetoes: Vec<GuardianApproval> =
             guardian_keys[..3].iter().map(|g| sign_recovery_veto(g, &next)).collect();
-        let e = authorize_recovery_change(&prev, &next, &guardians, &approvals, &vetoes, announced, after_window).unwrap_err();
+        let e = authorize_recovery_change(std::slice::from_ref(&prev), &next, &guardians, &approvals, &vetoes, announced, after_window).unwrap_err();
         assert_eq!(e, RecoveryGuardError::Vetoed);
 
         // (d) A single-guardian veto is NOT a quorum veto and cannot block (asymmetric veto).
         let lone_veto = vec![sign_recovery_veto(&guardian_keys[0], &next)];
-        assert!(authorize_recovery_change(&prev, &next, &guardians, &approvals, &lone_veto, announced, after_window).is_ok());
+        assert!(authorize_recovery_change(std::slice::from_ref(&prev), &next, &guardians, &approvals, &lone_veto, announced, after_window).is_ok());
 
         // (e) Quorum met, no veto, window elapsed — the change is finally authorized.
-        assert!(authorize_recovery_change(&prev, &next, &guardians, &approvals, &[], announced, after_window).is_ok());
+        assert!(authorize_recovery_change(std::slice::from_ref(&prev), &next, &guardians, &approvals, &[], announced, after_window).is_ok());
 
         // Forged approvals from non-guardians do not count toward quorum.
         let outsiders: Vec<GuardianApproval> = (100..103u8)
             .map(|s| sign_recovery_approval(&IdentityKey::from_seed(&[s; 32]), &next))
             .collect();
         assert_eq!(
-            authorize_recovery_change(&prev, &next, &guardians, &outsiders, &[], announced, after_window),
+            authorize_recovery_change(std::slice::from_ref(&prev), &next, &guardians, &outsiders, &[], announced, after_window),
             Err(RecoveryGuardError::WeakeningUnquorumed)
         );
     }
@@ -1790,14 +1880,14 @@ mod tests {
         let three: Vec<GuardianApproval> =
             guardian_keys[..3].iter().map(|g| sign_recovery_approval(g, &next)).collect();
         assert_eq!(
-            authorize_recovery_change(&prev, &next, &guardians, &three, &[], announced, after_window),
+            authorize_recovery_change(std::slice::from_ref(&prev), &next, &guardians, &three, &[], announced, after_window),
             Err(RecoveryGuardError::WeakeningUnquorumed)
         );
 
         // Meeting the configured M-of-N (4 of 5), no veto, past the window — authorized.
         let four: Vec<GuardianApproval> =
             guardian_keys[..4].iter().map(|g| sign_recovery_approval(g, &next)).collect();
-        assert!(authorize_recovery_change(&prev, &next, &guardians, &four, &[], announced, after_window).is_ok());
+        assert!(authorize_recovery_change(std::slice::from_ref(&prev), &next, &guardians, &four, &[], announced, after_window).is_ok());
     }
 
     // --- Key rotation (§1.5, §18.4.5) authorization ----------------------------------------

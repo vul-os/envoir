@@ -733,6 +733,103 @@ fn recovery_policy_with_empty_rotate_threshold_is_rejected() {
 /// a 72h asymmetric veto window (`ERR_RECOVERY_VETO_WINDOW`, `0x010F`). Enforced by
 /// [`authorize_recovery_change`]: [`recovery_change_is_weakening`] detects the weakening,
 /// [`sign_recovery_approval`]/[`sign_recovery_veto`] model the guardian counter-signatures, and the
+/// §1.4 — EVICTION IS DURABLE, **on the enforcement path**.
+///
+/// `recovery_change_is_weakening_vs_history` existed, and was unit-tested, while
+/// `authorize_recovery_change` — the function that actually gates a change — still compared only
+/// against the previous version. The predicate was right and nothing consulted it: an
+/// "exists but nothing enforces it" gap, which is the failure mode a passing test suite is least
+/// likely to reveal, because every test of the predicate passed.
+///
+/// The attack it left open: an attacker transiently holding `IK` cannot *weaken* the policy
+/// (rule 3 forbids that), but they could **re-add a factor they control that an earlier version
+/// evicted** — which reads as purely additive against `prev`. The owner then detects the `IK`
+/// compromise and rotates `IK` (§1.5), and the attacker's factor SURVIVES the rotation, because it
+/// lives in the recovery policy rather than in the key. A temporary key compromise becomes a
+/// permanent foothold in recovery.
+#[test]
+fn readding_an_evicted_factor_is_rejected_by_the_authorizer_not_just_the_predicate() {
+    let ik = IdentityKey::generate();
+    let guardian_keys: Vec<IdentityKey> =
+        (0..5).map(|s| IdentityKey::from_seed(&[s; 32])).collect();
+    let guardians: Vec<Vec<u8>> = guardian_keys.iter().map(|g| g.public()).collect();
+
+    let attacker = RecoveryMethod::Device { device_key: vec![0xAA; 32], label: "attacker".into() };
+    let owner = RecoveryMethod::Device { device_key: vec![0xBB; 32], label: "owner".into() };
+
+    let mk = |methods: Vec<RecoveryMethod>, ver: u64, prev: Option<ContentId>| {
+        let mut p = RecoveryPolicy {
+            suite: Suite::Classical,
+            ik: ik.public(),
+            version: ver,
+            methods,
+            recover_threshold: Threshold { any_of: vec![MethodPredicate::Guardians(3)] },
+            rotate_threshold: Threshold { any_of: vec![MethodPredicate::Guardians(3)] },
+            prev,
+            ts: ver,
+            sig: vec![],
+        };
+        p.sign(&ik);
+        p
+    };
+
+    // v1 = {attacker-controlled, owner}; v2 evicts the attacker's factor.
+    let v1 = mk(vec![attacker.clone(), owner.clone()], 1, None);
+    let v2 = mk(vec![owner.clone()], 2, Some(v1.content_id()));
+    // v3 re-adds it. Against v2 alone this is indistinguishable from ordinary additive hygiene.
+    let v3 = mk(vec![owner.clone(), attacker.clone()], 3, Some(v2.content_id()));
+
+    let history = vec![v1.clone(), v2.clone()];
+    let announced = 1_000_000u64;
+    let after_window = announced + RECOVERY_VETO_WINDOW_MS;
+
+    // (a) IK alone re-adding the evicted factor MUST be rejected. This is the case that silently
+    // passed before the history-aware check was wired into the authorizer.
+    let e = authorize_recovery_change(&history, &v3, &guardians, &[], &[], announced, after_window)
+        .unwrap_err();
+    assert_eq!(e, RecoveryGuardError::WeakeningUnquorumed);
+    assert_eq!(e.code(), 0x010E);
+
+    // (b) with the rotate_threshold quorum and an elapsed veto window, the re-addition is allowed —
+    // eviction is durable, not irreversible. The owner can undo their own eviction.
+    let approvals: Vec<GuardianApproval> =
+        guardian_keys[..3].iter().map(|g| sign_recovery_approval(g, &v3)).collect();
+    assert!(
+        authorize_recovery_change(&history, &v3, &guardians, &approvals, &[], announced, after_window)
+            .is_ok(),
+        "quorum + elapsed window must be able to re-add an evicted factor"
+    );
+
+    // (c) adding a NEVER-evicted factor stays additive: IK alone, no delay. The rule must not turn
+    // ordinary recovery hygiene into a quorum-gated ceremony.
+    let fresh = RecoveryMethod::Device { device_key: vec![0xCC; 32], label: "new".into() };
+    let v3_additive = mk(vec![owner.clone(), fresh], 3, Some(v2.content_id()));
+    assert!(
+        authorize_recovery_change(&history, &v3_additive, &guardians, &[], &[], announced, after_window)
+            .is_ok(),
+        "adding a never-evicted factor must remain additive"
+    );
+
+    // (d) a verifier holding ONLY v2 cannot see the eviction, and MUST fail closed rather than
+    // assume the change is additive (§1.4). Passing the newest version alone is exactly the
+    // reasoning that produced the defect, so it is refused rather than quietly trusted.
+    let e = authorize_recovery_change(
+        std::slice::from_ref(&v2), &v3, &guardians, &[], &[], announced, after_window,
+    )
+    .unwrap_err();
+    assert_eq!(e, RecoveryGuardError::IncompleteHistory);
+    assert_eq!(e.code(), 0x010E);
+
+    // (e) a chain whose links do not match is not a chain. A forged "history" must not be able to
+    // launder a re-addition by omitting the version that performed the eviction.
+    let forged = vec![v1.clone(), mk(vec![owner.clone()], 2, Some(ContentId::of(b"not-v1")))];
+    assert_eq!(
+        authorize_recovery_change(&forged, &v3, &guardians, &[], &[], announced, after_window)
+            .unwrap_err(),
+        RecoveryGuardError::IncompleteHistory
+    );
+}
+
 /// clock / window are explicit parameters (no wall-clock read).
 #[test]
 fn recovery_weakening_without_quorum_and_veto_window_should_be_rejected() {
@@ -779,7 +876,7 @@ fn recovery_weakening_without_quorum_and_veto_window_should_be_rejected() {
     let after_window = announced + RECOVERY_VETO_WINDOW_MS;
 
     // (a) No quorum — even past the window — fails closed: IK alone must not weaken recovery.
-    let e = authorize_recovery_change(&prev, &next, &guardians, &[], &[], announced, after_window)
+    let e = authorize_recovery_change(std::slice::from_ref(&prev), &next, &guardians, &[], &[], announced, after_window)
         .unwrap_err();
     assert_eq!(e, RecoveryGuardError::WeakeningUnquorumed);
     assert_eq!(e.code(), 0x010E);
@@ -789,7 +886,7 @@ fn recovery_weakening_without_quorum_and_veto_window_should_be_rejected() {
         guardian_keys[..3].iter().map(|g| sign_recovery_approval(g, &next)).collect();
 
     // (b) Quorum met but still inside the 72h veto window — hold, 0x010F.
-    let e = authorize_recovery_change(&prev, &next, &guardians, &approvals, &[], announced, announced + 1)
+    let e = authorize_recovery_change(std::slice::from_ref(&prev), &next, &guardians, &approvals, &[], announced, announced + 1)
         .unwrap_err();
     assert_eq!(e, RecoveryGuardError::VetoWindowActive);
     assert_eq!(e.code(), 0x010F);
@@ -797,15 +894,15 @@ fn recovery_weakening_without_quorum_and_veto_window_should_be_rejected() {
     // (c) Quorum met + a rotate_threshold-backed veto (3 of 5) — aborted, 0x010F.
     let vetoes: Vec<GuardianApproval> =
         guardian_keys[..3].iter().map(|g| sign_recovery_veto(g, &next)).collect();
-    let e = authorize_recovery_change(&prev, &next, &guardians, &approvals, &vetoes, announced, after_window)
+    let e = authorize_recovery_change(std::slice::from_ref(&prev), &next, &guardians, &approvals, &vetoes, announced, after_window)
         .unwrap_err();
     assert_eq!(e, RecoveryGuardError::Vetoed);
     assert_eq!(e.code(), 0x010F);
 
     // (d) A lone-guardian veto is NOT a quorum veto and cannot block (asymmetric veto, §1.4 rule 4).
     let lone_veto = vec![sign_recovery_veto(&guardian_keys[0], &next)];
-    assert!(authorize_recovery_change(&prev, &next, &guardians, &approvals, &lone_veto, announced, after_window).is_ok());
+    assert!(authorize_recovery_change(std::slice::from_ref(&prev), &next, &guardians, &approvals, &lone_veto, announced, after_window).is_ok());
 
     // (e) Quorum met, no quorum veto, 72h window elapsed — the weakening is finally authorized.
-    assert!(authorize_recovery_change(&prev, &next, &guardians, &approvals, &[], announced, after_window).is_ok());
+    assert!(authorize_recovery_change(std::slice::from_ref(&prev), &next, &guardians, &approvals, &[], announced, after_window).is_ok());
 }

@@ -3,7 +3,7 @@
 This page collects everything in the repository that lets you check Envoir's security claims
 yourself, rather than take them on faith: machine-checked formal proofs, fuzzing of every wire
 decoder, a byte-exact conformance suite, and a dedicated downgrade/fail-closed regression suite —
-backed by `cargo test --workspace`, which currently runs **1493 passing tests** (0 failing) across
+backed by `cargo test --workspace`, which currently runs **1494 passing tests** (0 failing) across
 every crate and the node. It closes with the honest gate that stands between this
 code and any production deployment.
 

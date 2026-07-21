@@ -55,8 +55,8 @@ sign-in, MLS group keys, key-transparency append-only logs, mixnet unlinkability
 suite-downgrade ratchet, §5.1 group-committer fork evidence, and the §2.7/§9.2a cold-sender gate
 binding; every wire
 decoder is fuzzed; a 352-case conformance suite exists (drawn against the spec's own registered
-error-code catalog), with 171 of 352 cases executing and passing today (0 failures; the rest are
-construction recipes skipped with a documented reason); and
+error-code catalog), with 175 of 352 cases executing and passing today (0 failures) — of the 177
+that do not execute, 35 have a specific documented reason and 142 are still awaiting triage; and
 `cargo test --workspace` runs 1493 passing tests across 95 binaries — but none of that substitutes for the independent
 external audit the project treats as a hard gate before any production deployment. See
 [security.md](security.md).
