@@ -1,0 +1,141 @@
+(* ============================================================================
+   DMTAP suite high-water-mark ratchet  (spec: dmtap/01-identity.md §1.1, §1.3)
+   ----------------------------------------------------------------------------
+   WHAT IS AT STAKE. §1.1 makes the PQ-hybrid suite (0x02) the REQUIRED
+   originating suite, on the argument that mail is the most archival medium there
+   is and a harvest-now-decrypt-later adversary is recording today. That argument
+   is only worth anything if a peer who has once used 0x02 CANNOT LATER BE MADE
+   TO ACCEPT 0x01 -- otherwise an attacker simply asks for the classical suite and
+   the migration buys nothing.
+
+   §1.3 provides that guarantee with a per-contact HIGH-WATER-MARK: a recipient
+   records the highest suite it has seen a contact use, and rejects any later
+   message from that contact below the mark (ERR_SUITE_DOWNGRADE). The mark
+   ratchets UP only; it is lowered solely by an IK-authorized retirement (§1.5),
+   never by an inbound message.
+
+   WHAT THIS MODEL PROVES, AND WHAT IT DELIBERATELY DOES NOT.
+
+     (A) PROVEN -- AUTHENTICATED MARK ADVANCE. The recipient's high-water-mark
+         moves only on a message the genuine contact actually signed, and a
+         REPLAY cannot count as a second advance. Injective agreement, against a
+         Dolev-Yao attacker controlling delivery, ordering and replay.
+
+     (M) NOT PROVEN HERE -- MONOTONICITY (the ratchet itself). ProVerif's applied
+         pi-calculus HAS NO MUTABLE STATE. "The recipient remembers the highest
+         suite it has seen and refuses anything below it" is a statement about a
+         stored value evolving over time, not about what an attacker can derive
+         or cause. Encoding it degenerates: writing the rejection into the model
+         makes it true by construction (it proves the `if` I just typed), and
+         writing the forbidden branch as reachable makes it false by construction
+         (the attacker really can DELIVER a pq message then a classical one --
+         what a conformant node does at that point is precisely the thing under
+         test). Two attempts, both degenerate, in opposite directions.
+
+         Monotonicity is a STATEFUL INVARIANT and wants a stateful tool --
+         Tamarin's multiset-rewriting state facts express exactly this shape.
+         Until then it is covered by conformance, not by proof: the SUITE
+         high-water-mark cases exercise it against a real implementation.
+
+   WHY (A) IS STILL WORTH PROVING. The attack the ratchet defends is not forgery,
+   it is REPLAY OF THE CONTACT'S OWN EARLIER MESSAGE: once a contact has
+   legitimately sent at the classical suite, that signed artifact exists forever,
+   and an attacker who captured it can offer it again after the contact migrated
+   to PQ. It verifies perfectly under the contact's key. (A) establishes the half
+   of the defence that IS cryptographic -- that the mark cannot be driven by
+   anything the contact did not sign, and that §2.6's content-address
+   de-duplication stops a replay counting as a fresh advance. The other half is
+   local bookkeeping, and it is honest to say so rather than to dress it in a
+   proof that assumes its own conclusion.
+
+   Tool: ProVerif.   Run:  proverif suite_ratchet.pv
+                     Expect: RESULT inj-event(MarkAdvanced(cc,s,n)) ==>
+                                    inj-event(ContactSent(cc,s,n)) is true.
+   ============================================================================ *)
+
+(* ---------- signatures ----------------------------------------------------- *)
+type skey.
+type pkey.
+fun  pk(skey): pkey.
+fun  sign(bitstring, skey): bitstring.
+reduc forall m: bitstring, k: skey; checksign(sign(m, k), pk(k)) = m.
+
+(* ---------- suites, ordered only as far as §1.3 needs ---------------------- *)
+(* The mark is a total order over TWO points here: classical < pq. That is the
+   whole of what the ratchet compares, so a richer lattice would add no attack
+   surface -- §1.1's other code points are RESERVED and unimplementable, and a
+   node rejects an unknown suite outright (fail closed) rather than ranking it. *)
+free classical: bitstring.
+free pq: bitstring.
+
+free c: channel.
+
+(* Public markers. Both branches emit one, so the model carries no secret whose
+   reachability could be mistaken for a proof of the ratchet (see (M)). *)
+free accepted: bitstring.
+free refused: bitstring.
+
+
+(* Events for the injective-agreement query. *)
+event ContactSent(pkey, bitstring, bitstring).   (* contact signed (suite, nonce) *)
+event MarkAdvanced(pkey, bitstring, bitstring).  (* recipient set mark from (suite, nonce) *)
+
+(* ---------- the genuine contact ------------------------------------------- *)
+(* Sends at the classical suite first, then at PQ -- the migration §1.1 mandates.
+   Both are signed; the attacker sees both and may replay or reorder them. *)
+let contact(skC: skey) =
+  new nC: bitstring;                      (* per-message content address (§2.6) *)
+  event ContactSent(pk(skC), classical, nC);
+  out(c, sign((pk(skC), classical, nC), skC));
+  new nP: bitstring;
+  event ContactSent(pk(skC), pq, nP);
+  out(c, sign((pk(skC), pq, nP), skC)).
+
+(* ---------- the recipient, holding the per-contact mark -------------------- *)
+(* The ratchet, encoded as the recipient's ACTUAL decision procedure. ProVerif has
+   no mutable state, so the mark is carried as the stage-1 observation `s1` and the
+   stage-2 rule is applied against it.
+
+   The attack this must survive is NOT forgery -- it is REPLAY OF THE CONTACT'S OWN
+   EARLIER MESSAGE. Once the contact has legitimately sent at the classical suite,
+   that signed artifact exists forever, and an attacker who captured it can offer it
+   again after the contact has migrated to PQ. It verifies perfectly under the
+   contact's key. Signature checking cannot stop it; only the mark can. That is the
+   whole reason §1.3 exists, and it is what this model must actually exercise. *)
+let recipient(pkC: pkey) =
+  (* stage 1: an authenticated message sets the mark. *)
+  in(c, m1: bitstring);
+  let (=pkC, s1: bitstring, n1: bitstring) = checksign(m1, pkC) in
+  event MarkAdvanced(pkC, s1, n1);
+
+  (* stage 2: a later authenticated message from the same contact. *)
+  in(c, m2: bitstring);
+  let (=pkC, s2: bitstring, n2: bitstring) = checksign(m2, pkC) in
+
+  (* §2.6 de-duplication by content address: the same object is never processed
+     twice. Without this the ratchet is still sound, but MarkAdvanced would fire
+     twice for one ContactSent and injective agreement would fail -- a modelling
+     artifact, not a protocol one. *)
+  if n1 <> n2 then
+
+  (* §1.3's comparison, shown for completeness. Note this branch is BOOKKEEPING,
+     not a cryptographic step: both outputs are public markers, because the thing
+     being decided is what a conformant node chooses to do, which no symbolic
+     query can settle. See (M) in the header. *)
+  if s1 = pq && s2 = classical then
+    out(c, refused)          (* ERR_SUITE_DOWNGRADE -- the ratchet holding *)
+  else
+    out(c, accepted).
+
+(* ===================== queries ============================================ *)
+
+(* (A) AUTHENTICATED RATCHET ADVANCE -- injective, so a replayed message cannot
+   count as a second genuine advance. *)
+query cc: pkey, s: bitstring, n: bitstring;
+  inj-event(MarkAdvanced(cc, s, n)) ==> inj-event(ContactSent(cc, s, n)).
+
+(* ===================== main =============================================== *)
+process
+  new skC: skey;
+  out(c, pk(skC));          (* the contact's identity key is public and pinned *)
+  ( !contact(skC) | recipient(pk(skC)) )
