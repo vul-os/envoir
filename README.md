@@ -12,7 +12,7 @@
   <a href="LICENSE-MIT"><img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-4C4DFF"></a>
   <a href="node/Cargo.toml"><img alt="Rust" src="https://img.shields.io/badge/rust-1.75%2B-9A4DFF?logo=rust&logoColor=white"></a>
   <img alt="Status" src="https://img.shields.io/badge/status-pre--alpha%20reference-00E0C7">
-  <a href="https://github.com/vul-os/dmtap"><img alt="Spec: DMTAP" src="https://img.shields.io/badge/spec-DMTAP-4C4DFF"></a>
+  <a href="https://github.com/vul-os/kotva"><img alt="Spec: KOTVA-Mail" src="https://img.shields.io/badge/spec-KOTVA--Mail%20%28DMTAP%29-4C4DFF"></a>
 </p>
 
 <p align="center">
@@ -343,10 +343,11 @@ for `envoir-node`) is available — see its own [`README.md`](deploy/README.md) 
 ## Spec
 
 The normative specification is **not** in this repository — it lives in the sibling
-**[env-oir/dmtap](https://github.com/vul-os/dmtap)** repo: markdown sections spanning identity,
-MOTE, naming, transport, messaging, privacy, the legacy gateway, clients, anti-abuse, conformance
-and more, a registry of error codes (§21 plus the extension profiles that register their own),
-grounded against current standards, plus a compiled **`dmtap.pdf`**. This repo is one
+**[vul-os/kotva](https://github.com/vul-os/kotva)** repo (the KOTVA substrate; DMTAP is its **mail
+profile**, which envoir implements): markdown sections spanning identity, MOTE, naming, transport,
+messaging, privacy, the legacy gateway, clients, anti-abuse, conformance and more, a registry of
+error codes (§21 plus the extension profiles that register their own), grounded against current
+standards, plus a compiled spec PDF. This repo is one
 implementation of that spec — the node — and no longer carries the gateway's own share of the
 catalog (the gateway, and its conformance coverage, moved to Wakala). Conformance is checked
 mechanically by [`crates/conformance-runner`](crates/conformance-runner) — see
