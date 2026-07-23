@@ -316,7 +316,7 @@ function drawAliases(root, id) {
       ${a.kind !== 'primary' ? `<button class="icon-btn sm" data-del="${esc(a.address)}" title="Remove">${icon('trash')}</button>` : ''}
     </div>`;
   }).join('');
-  wrap.querySelectorAll('[data-primary]').forEach(b => b.onclick = () => { makePrimary(b.dataset.primary); bus.rerender(); bus.refreshChrome(); toast(`${icon('check')} Primary address is now ${b.dataset.primary}`); });
+  wrap.querySelectorAll('[data-primary]').forEach(b => b.onclick = () => { makePrimary(b.dataset.primary); bus.rerender(); bus.refreshChrome(); toast(`${icon('check')} Primary address is now ${esc(b.dataset.primary)}`); });
   wrap.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { removeAlias(b.dataset.del); bus.rerender(); });
 
   root.querySelector('#addalias').onclick = async () => {
@@ -421,6 +421,6 @@ function drawBlockLists(root) {
   awrap.innerHTML = state.settings.allowed.length ? state.settings.allowed.map(a => rowHtml(a, 'unallow')).join('') : `<div class="set-hint inline">No allow-listed senders.</div>`;
   bwrap.querySelectorAll('[data-unblock]').forEach(b => b.onclick = () => { unblockSender(b.dataset.unblock); bus.rerender(); });
   awrap.querySelectorAll('[data-unallow]').forEach(b => b.onclick = () => { state.settings.allowed = state.settings.allowed.filter(x => x !== b.dataset.unallow); saveSettings(); bus.rerender(); });
-  root.querySelector('#addblock').onclick = () => { const v = root.querySelector('#newblock').value.trim(); if (v) { blockSender(v); bus.rerender(); toast(`${icon('shield')} ${v} blocked`); } };
-  root.querySelector('#addallow').onclick = () => { const v = root.querySelector('#newallow').value.trim(); if (v) { allowSender(v); bus.rerender(); toast(`${icon('check')} ${v} allow-listed`); } };
+  root.querySelector('#addblock').onclick = () => { const v = root.querySelector('#newblock').value.trim(); if (v) { blockSender(v); bus.rerender(); toast(`${icon('shield')} ${esc(v)} blocked`); } };
+  root.querySelector('#addallow').onclick = () => { const v = root.querySelector('#newallow').value.trim(); if (v) { allowSender(v); bus.rerender(); toast(`${icon('check')} ${esc(v)} allow-listed`); } };
 }

@@ -41,12 +41,23 @@ use crate::alias_map::AliasTarget;
 use crate::authz::Quota;
 use crate::inbound::RecipientKey;
 use crate::multidomain::{MultiDomainError, MultiDomainGateway, UsageMeter};
+use crate::net::ConnLimiter;
 
 /// Largest admin request head (request line + headers) we will buffer — a bounded, fail-closed cap so
 /// a hostile client cannot drive the server to OOM before auth.
 const MAX_HEAD_BYTES: usize = 64 * 1024;
 /// Largest admin request body we will read (recipient keys, alias params — all small).
 const MAX_BODY_BYTES: usize = 256 * 1024;
+
+/// The per-read/write socket idle timeout applied to every admin API connection (§4 in the security
+/// review — the slowloris finding): the admin API is one small request/response exchange
+/// (`Connection: close`), so a short bound is appropriate — a legitimate operator request completes
+/// in well under a second.
+const ADMIN_IO_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Default cap on concurrent admin-API connections one [`AdminServer`] serves (the other half of the
+/// slowloris mitigation). Override with [`AdminServer::with_max_connections`].
+const DEFAULT_MAX_CONNECTIONS: usize = 256;
 
 // ── Authentication ────────────────────────────────────────────────────────────────────────────
 
@@ -680,16 +691,30 @@ pub struct AdminServer {
     listener: TcpListener,
     tls: Arc<ServerConfig>,
     api: AdminApi,
+    limiter: ConnLimiter,
 }
 
 impl AdminServer {
     /// Bind the admin server on `addr` with the gateway's TLS config and the built [`AdminApi`].
+    /// Concurrent connections default to [`DEFAULT_MAX_CONNECTIONS`]; override with
+    /// [`Self::with_max_connections`].
     pub fn bind(
         addr: impl std::net::ToSocketAddrs,
         tls: Arc<ServerConfig>,
         api: AdminApi,
     ) -> io::Result<Self> {
-        Ok(AdminServer { listener: TcpListener::bind(addr)?, tls, api })
+        Ok(AdminServer {
+            listener: TcpListener::bind(addr)?,
+            tls,
+            api,
+            limiter: ConnLimiter::new(DEFAULT_MAX_CONNECTIONS),
+        })
+    }
+
+    /// Override the concurrent-connection cap (default [`DEFAULT_MAX_CONNECTIONS`]).
+    pub fn with_max_connections(mut self, max: usize) -> Self {
+        self.limiter = ConnLimiter::new(max);
+        self
     }
 
     /// The bound address (useful with an ephemeral `:0` port in tests).
@@ -716,6 +741,13 @@ impl AdminServer {
             }
             match self.listener.accept() {
                 Ok((stream, peer)) => {
+                    // Concurrent-connection cap (§4 — the other half of the slowloris mitigation).
+                    let Some(guard) = self.limiter.try_acquire() else {
+                        eprintln!(
+                            "gateway[admin]: {peer}: at the concurrent-connection limit, refusing"
+                        );
+                        continue;
+                    };
                     if let Err(e) = stream.set_nonblocking(false) {
                         eprintln!("gateway[admin]: {peer}: cannot set blocking: {e}");
                         continue;
@@ -723,6 +755,7 @@ impl AdminServer {
                     let tls = self.tls.clone();
                     let api = self.api.clone();
                     std::thread::spawn(move || {
+                        let _guard = guard; // held for the connection's lifetime, released on drop
                         if let Err(e) = handle_connection(stream, tls, &api) {
                             if e.kind() != io::ErrorKind::UnexpectedEof {
                                 eprintln!("gateway[admin]: session with {peer} ended: {e}");
@@ -747,6 +780,11 @@ fn now_ms() -> u64 {
 
 /// Terminate TLS, read one HTTP request, dispatch it, and write the response.
 fn handle_connection(stream: TcpStream, tls: Arc<ServerConfig>, api: &AdminApi) -> io::Result<()> {
+    // Slowloris guard (§4 in the security review): bound every read/write BEFORE the TLS handshake —
+    // the timeout is a socket-level attribute that keeps applying through and after the handshake on
+    // the same underlying fd.
+    stream.set_read_timeout(Some(ADMIN_IO_TIMEOUT))?;
+    stream.set_write_timeout(Some(ADMIN_IO_TIMEOUT))?;
     let conn = ServerConnection::new(tls).map_err(io::Error::other)?;
     let mut tls_stream = StreamOwned::new(conn, stream);
     tls_stream.conn.complete_io(&mut tls_stream.sock)?;

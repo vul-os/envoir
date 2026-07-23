@@ -15,6 +15,8 @@
 //! (§7.2a). This module provides the signable attestation object, the domain-anchored signing
 //! key, an abstract `GwKeyResolver` (the DNS TXT lookup), and the recipient-side verify.
 
+use std::sync::Arc;
+
 use dmtap_core::identity::{verify_domain, IdentityError, IdentityKey};
 use dmtap_core::ContentId;
 use dmtap_core::TimestampMs;
@@ -26,16 +28,38 @@ const ATTESTATION_DS: &[u8] = b"DMTAP-v0/gateway-attestation\x00";
 /// The gateway's domain-anchored attestation signing key (§7.2a). This is the private half of the
 /// key published at `<selector>._dmtap-gw.<domain>`; it is **not** the operator's arbitrary key —
 /// binding is what makes the attestation meaningful.
+///
+/// **§7.2a normative note.** The spec requires this to be **the gateway's own `IK`** — "not a
+/// second signing key invented only for attestation" — the SAME key whose public half is
+/// `Payload.from` on every MOTE this gateway injects (§7.2 step 4), so a recipient's
+/// `Payload.from == the attesting domain's published _dmtap-gw key` check is well-defined. `key`
+/// is therefore held as an `Arc` here rather than owned outright: it lets [`InboundGateway`]
+/// (`crate::inbound`) construct every `AttestationKey` it holds by SHARING its own `ik` — see
+/// [`Self::sharing`] — rather than each domain accidentally getting its own unrelated key, which
+/// is exactly the anti-pattern the spec calls out. [`Self::new`]/[`Self::generate`] remain
+/// available (and unchanged in signature) for callers that deliberately need an attestation key
+/// independent of any particular gateway identity — e.g. this crate's own multi-gateway-chain
+/// provenance tests, which model several DIFFERENT gateways, each with its own `IK`.
+///
+/// [`InboundGateway`]: crate::inbound::InboundGateway
 pub struct AttestationKey {
     domain: String,
     selector: String,
-    key: IdentityKey,
+    key: Arc<IdentityKey>,
 }
 
 impl AttestationKey {
     /// Create an attestation key bound to `domain`/`selector`. In production the private key is
     /// operator-held and the public half is published in DNS; here `key` is supplied directly.
     pub fn new(domain: impl Into<String>, selector: impl Into<String>, key: IdentityKey) -> Self {
+        Self::sharing(domain, selector, Arc::new(key))
+    }
+
+    /// As [`Self::new`], but explicitly SHARING an already-`Arc`'d identity key rather than taking
+    /// ownership of a fresh one — the constructor [`crate::inbound::InboundGateway`] uses so its
+    /// `attest_keys` carry the SAME key material as its own `Payload.from` (§7.2a normative note
+    /// above), never an independently generated one.
+    pub fn sharing(domain: impl Into<String>, selector: impl Into<String>, key: Arc<IdentityKey>) -> Self {
         AttestationKey { domain: domain.into(), selector: selector.into(), key }
     }
 

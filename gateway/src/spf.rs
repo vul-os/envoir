@@ -15,9 +15,13 @@
 //!   expensive, privacy-costly forward-confirmed-reverse-DNS). This implementation charges its DNS
 //!   lookup budget (so a record cannot use `ptr` to dodge the lookup limit) but never claims a
 //!   match — a safe, conservative simplification (it can only under-match, never falsely pass).
-//! - **`a`/`mx` are IPv4-only.** [`crate::dns`] has no AAAA decoder (see its module docs), so `a`
-//!   and `mx` mechanisms only ever match an IPv4 connecting sender; a literal `ip6:` mechanism still
-//!   works (it needs no DNS lookup). An IPv6 sender can only match via `ip6`, `include`, or `all`.
+//! - **`a`/`mx` are dual-stack.** [`crate::dns`] decodes both A and AAAA (RFC 3596), and
+//!   [`SpfResolver::lookup_aaaa`] feeds `a`/`mx` for an IPv6 connecting sender exactly as
+//!   [`SpfResolver::lookup_a`] does for IPv4 (RFC 7208 §5.3/§5.4: "as appropriate for the
+//!   connection type") — including the independent `ip6-cidr-length` half of a dual-cidr suffix
+//!   (`a:example.org/24/64`). `exists` stays A-only per RFC 7208 §5.7, which is explicit that its
+//!   lookup type is always `A` regardless of the connecting family — that is not a narrowing, it is
+//!   the spec.
 //! - **The void-lookup cap (RFC 7208 §4.6.4) IS enforced**, separately from the aggregate lookup
 //!   ceiling: an `a`/`mx`/`exists` mechanism (or a per-MX-host `A` lookup) that resolves to no
 //!   records (NXDOMAIN/NODATA) is a "void lookup", and more than two of them across one evaluation
@@ -94,13 +98,23 @@ impl SpfOutcome {
 // The `()` error is deliberate: a resolution failure here carries no detail the SPF evaluator
 // acts on — it maps uniformly to `SpfResult::TempError` — and is intentionally distinct from
 // NODATA (`Ok(vec![])`). See the module docs. So the unit error is by design, not laziness.
+/// `Send + Sync`: [`crate::inbound::InboundGateway`] is shared (via `Arc`) across the
+/// per-connection threads the real MX listener spawns (§7.2, [`crate::inbound_tcp`]
+/// thread-per-connection) — every trait object it owns must therefore be safely usable from
+/// multiple threads at once.
 #[allow(clippy::result_unit_err)]
-pub trait SpfResolver {
+pub trait SpfResolver: Send + Sync {
     /// TXT records for `name` (RFC 7208 §3: candidates are filtered to `v=spf1` records by the
     /// caller). `Err` is a genuine resolution failure (timeout, SERVFAIL, malformed reply).
     fn lookup_txt(&self, name: &str) -> Result<Vec<String>, ()>;
-    /// A (IPv4-only, see module docs) records for `name`, used by the `a`/`mx`/`exists` mechanisms.
+    /// A records for `name`, used by the `a`/`mx`/`exists` mechanisms against an IPv4 connecting
+    /// sender.
     fn lookup_a(&self, name: &str) -> Result<Vec<Ipv4Addr>, ()>;
+    /// AAAA records for `name`, used by the `a`/`mx`/`exists` mechanisms against an IPv6
+    /// connecting sender (RFC 7208 §5.3/§5.4 apply identically to both address families). A
+    /// resolver with no IPv6 reach MAY return `Ok(vec![])` (NODATA) rather than implementing this
+    /// — the evaluator then treats an IPv6 sender as simply not matching, never mis-evaluated.
+    fn lookup_aaaa(&self, name: &str) -> Result<Vec<Ipv6Addr>, ()>;
     /// MX exchange hostnames for `name` (preference order does not matter for SPF), used by `mx`.
     fn lookup_mx(&self, name: &str) -> Result<Vec<String>, ()>;
 }
@@ -111,6 +125,7 @@ pub trait SpfResolver {
 pub struct InMemorySpfResolver {
     txt: HashMap<String, Vec<String>>,
     a: HashMap<String, Vec<Ipv4Addr>>,
+    aaaa: HashMap<String, Vec<Ipv6Addr>>,
     mx: HashMap<String, Vec<String>>,
     failing: HashSet<String>,
 }
@@ -127,12 +142,16 @@ impl InMemorySpfResolver {
         self.a.insert(name.to_ascii_lowercase(), ips.to_vec());
         self
     }
+    pub fn with_aaaa(mut self, name: &str, ips: &[Ipv6Addr]) -> Self {
+        self.aaaa.insert(name.to_ascii_lowercase(), ips.to_vec());
+        self
+    }
     pub fn with_mx(mut self, name: &str, hosts: &[&str]) -> Self {
         self.mx.insert(name.to_ascii_lowercase(), hosts.iter().map(|h| h.to_string()).collect());
         self
     }
-    /// Every lookup (TXT/A/MX) against `name` fails with `Err(())` — models a genuinely broken
-    /// resolver/nameserver for `name`, distinct from `name` simply having no records.
+    /// Every lookup (TXT/A/AAAA/MX) against `name` fails with `Err(())` — models a genuinely
+    /// broken resolver/nameserver for `name`, distinct from `name` simply having no records.
     pub fn with_failure(mut self, name: &str) -> Self {
         self.failing.insert(name.to_ascii_lowercase());
         self
@@ -153,6 +172,13 @@ impl SpfResolver for InMemorySpfResolver {
             return Err(());
         }
         Ok(self.a.get(&key).cloned().unwrap_or_default())
+    }
+    fn lookup_aaaa(&self, name: &str) -> Result<Vec<Ipv6Addr>, ()> {
+        let key = name.to_ascii_lowercase();
+        if self.failing.contains(&key) {
+            return Err(());
+        }
+        Ok(self.aaaa.get(&key).cloned().unwrap_or_default())
     }
     fn lookup_mx(&self, name: &str) -> Result<Vec<String>, ()> {
         let key = name.to_ascii_lowercase();
@@ -191,6 +217,15 @@ impl SpfResolver for DnsSpfResolver {
             .iter()
             .filter(|rr| rr.rtype == TYPE_A)
             .filter_map(dns::parse_a_rdata)
+            .collect())
+    }
+    fn lookup_aaaa(&self, name: &str) -> Result<Vec<Ipv6Addr>, ()> {
+        let msg = self.client.query(name, dns::TYPE_AAAA).map_err(|_| ())?;
+        Ok(msg
+            .answers
+            .iter()
+            .filter(|rr| rr.rtype == dns::TYPE_AAAA)
+            .filter_map(dns::parse_aaaa_rdata)
             .collect())
     }
     fn lookup_mx(&self, name: &str) -> Result<Vec<String>, ()> {
@@ -239,8 +274,11 @@ fn qualifier_to_result(q: Qualifier) -> SpfResult {
 enum Mechanism {
     All,
     Include(String),
-    A { domain: Option<String>, cidr4: u8 },
-    Mx { domain: Option<String>, cidr4: u8 },
+    /// `cidr4`/`cidr6` are the independent dual-cidr halves (RFC 7208 §5.3): `cidr4` gates an A
+    /// match against an IPv4 sender, `cidr6` gates an AAAA match against an IPv6 sender.
+    A { domain: Option<String>, cidr4: u8, cidr6: u8 },
+    /// As [`Mechanism::A`] but resolving the domain's MX hosts first (RFC 7208 §5.4).
+    Mx { domain: Option<String>, cidr4: u8, cidr6: u8 },
     Ip4 { net: Ipv4Addr, cidr: u8 },
     Ip6 { net: Ipv6Addr, cidr: u8 },
     Ptr,
@@ -325,12 +363,12 @@ fn parse_mechanism(s: &str) -> Result<Mechanism, ()> {
             Ok(Mechanism::Exists(v.to_string()))
         }
         "a" => {
-            let (domain, cidr4) = parse_domain_spec(rest)?;
-            Ok(Mechanism::A { domain, cidr4 })
+            let (domain, cidr4, cidr6) = parse_domain_spec(rest)?;
+            Ok(Mechanism::A { domain, cidr4, cidr6 })
         }
         "mx" => {
-            let (domain, cidr4) = parse_domain_spec(rest)?;
-            Ok(Mechanism::Mx { domain, cidr4 })
+            let (domain, cidr4, cidr6) = parse_domain_spec(rest)?;
+            Ok(Mechanism::Mx { domain, cidr4, cidr6 })
         }
         "ptr" => {
             // A domain-spec is legal syntax here (`ptr:some.domain`) but this implementation never
@@ -355,9 +393,9 @@ fn parse_mechanism(s: &str) -> Result<Mechanism, ()> {
 }
 
 /// Parse the optional `[":" domain-spec] [dual-cidr-length]` suffix shared by `a`/`mx` (RFC 7208
-/// §5.3/§5.4). Only `cidr4` is returned/used for matching (see module docs: `a`/`mx` are IPv4-only
-/// here); a syntactically-present `ip6-cidr-length` is validated for shape but otherwise unused.
-fn parse_domain_spec(rest: &str) -> Result<(Option<String>, u8), ()> {
+/// §5.3/§5.4). Returns `(domain, cidr4, cidr6)`: both cidr halves are kept (and used — see
+/// [`Evaluator::eval_mechanism`]) since `a`/`mx` are dual-stack.
+fn parse_domain_spec(rest: &str) -> Result<(Option<String>, u8, u8), ()> {
     let (domain_part, cidr_part) = match rest.find('/') {
         Some(idx) => (&rest[..idx], &rest[idx..]),
         None => (rest, ""),
@@ -372,21 +410,21 @@ fn parse_domain_spec(rest: &str) -> Result<(Option<String>, u8), ()> {
     } else {
         return Err(());
     };
-    let cidr4 = parse_dual_cidr(cidr_part)?;
-    Ok((domain, cidr4))
+    let (cidr4, cidr6) = parse_dual_cidr(cidr_part)?;
+    Ok((domain, cidr4, cidr6))
 }
 
-fn parse_dual_cidr(cidr_part: &str) -> Result<u8, ()> {
+fn parse_dual_cidr(cidr_part: &str) -> Result<(u8, u8), ()> {
     if cidr_part.is_empty() {
-        return Ok(32);
+        return Ok((32, 128));
     }
     if let Some(v6only) = cidr_part.strip_prefix("//") {
-        // ip6-only shorthand ("//64"): ip4 defaults to /32; the ip6 value is validated but unused.
+        // ip6-only shorthand ("//64"): ip4 stays at its default /32.
         let v: u8 = v6only.parse().map_err(|_| ())?;
         if v > 128 {
             return Err(());
         }
-        return Ok(32);
+        return Ok((32, v));
     }
     let rest = cidr_part.strip_prefix('/').ok_or(())?;
     let parts: Vec<&str> = rest.split('/').collect();
@@ -396,7 +434,7 @@ fn parse_dual_cidr(cidr_part: &str) -> Result<u8, ()> {
             if c4 > 32 {
                 return Err(());
             }
-            Ok(c4)
+            Ok((c4, 128))
         }
         2 => {
             let c4: u8 = parts[0].parse().map_err(|_| ())?;
@@ -404,7 +442,7 @@ fn parse_dual_cidr(cidr_part: &str) -> Result<u8, ()> {
             if c4 > 32 || c6 > 128 {
                 return Err(());
             }
-            Ok(c4)
+            Ok((c4, c6))
         }
         _ => Err(()),
     }
@@ -560,6 +598,52 @@ impl<'r> Evaluator<'r> {
         SpfResult::Neutral
     }
 
+    /// Resolve `target`'s address record for `ip`'s family (A for IPv4, AAAA for IPv6 — RFC 7208
+    /// §5.3/§5.4 "as appropriate for the connection type") and test it against the matching cidr
+    /// half. Shared by the `a` and `mx` mechanisms (`mx` calls this once per exchange host). Does
+    /// **not** itself charge the resolving lookup — the caller already did, once, before choosing
+    /// this target (both `a` and each `mx` host iteration charge exactly one lookup regardless of
+    /// which address family is then queried).
+    fn match_address_lookup(
+        &mut self,
+        target: &str,
+        ip: IpAddr,
+        cidr4: u8,
+        cidr6: u8,
+    ) -> MechOutcome {
+        match ip {
+            IpAddr::V4(v4) => match self.resolver.lookup_a(target) {
+                Err(()) => MechOutcome::Abort(SpfResult::TempError),
+                Ok(ips) if ips.is_empty() => match self.charge_void() {
+                    // NXDOMAIN/NODATA for the target (RFC 7208 §4.6.4 void lookup).
+                    Ok(()) => MechOutcome::NoMatch,
+                    Err(e) => MechOutcome::Abort(e),
+                },
+                Ok(ips) => {
+                    if ips.iter().any(|a| ipv4_in_cidr(v4, *a, cidr4)) {
+                        MechOutcome::Match
+                    } else {
+                        MechOutcome::NoMatch
+                    }
+                }
+            },
+            IpAddr::V6(v6) => match self.resolver.lookup_aaaa(target) {
+                Err(()) => MechOutcome::Abort(SpfResult::TempError),
+                Ok(ips) if ips.is_empty() => match self.charge_void() {
+                    Ok(()) => MechOutcome::NoMatch,
+                    Err(e) => MechOutcome::Abort(e),
+                },
+                Ok(ips) => {
+                    if ips.iter().any(|a| ipv6_in_cidr(v6, *a, cidr6)) {
+                        MechOutcome::Match
+                    } else {
+                        MechOutcome::NoMatch
+                    }
+                }
+            },
+        }
+    }
+
     fn eval_mechanism(
         &mut self,
         m: &Mechanism,
@@ -607,36 +691,14 @@ impl<'r> Evaluator<'r> {
                 }
                 IpAddr::V4(_) => MechOutcome::NoMatch,
             },
-            Mechanism::A { domain, cidr4 } => {
-                let v4 = match ip {
-                    IpAddr::V4(v4) => v4,
-                    IpAddr::V6(_) => return MechOutcome::NoMatch, // narrowing: no AAAA, see module docs
-                };
+            Mechanism::A { domain, cidr4, cidr6 } => {
                 let target = domain.clone().unwrap_or_else(|| current_domain.to_string());
                 if let Err(e) = self.charge_lookup() {
                     return MechOutcome::Abort(e);
                 }
-                match self.resolver.lookup_a(&normalize(&target)) {
-                    Err(()) => MechOutcome::Abort(SpfResult::TempError),
-                    Ok(ips) if ips.is_empty() => match self.charge_void() {
-                        // NXDOMAIN/NODATA for the `a` target (RFC 7208 §4.6.4 void lookup).
-                        Ok(()) => MechOutcome::NoMatch,
-                        Err(e) => MechOutcome::Abort(e),
-                    },
-                    Ok(ips) => {
-                        if ips.iter().any(|a| ipv4_in_cidr(v4, *a, *cidr4)) {
-                            MechOutcome::Match
-                        } else {
-                            MechOutcome::NoMatch
-                        }
-                    }
-                }
+                self.match_address_lookup(&normalize(&target), ip, *cidr4, *cidr6)
             }
-            Mechanism::Mx { domain, cidr4 } => {
-                let v4 = match ip {
-                    IpAddr::V4(v4) => v4,
-                    IpAddr::V6(_) => return MechOutcome::NoMatch,
-                };
+            Mechanism::Mx { domain, cidr4, cidr6 } => {
                 let target = domain.clone().unwrap_or_else(|| current_domain.to_string());
                 if let Err(e) = self.charge_lookup() {
                     return MechOutcome::Abort(e);
@@ -656,19 +718,10 @@ impl<'r> Evaluator<'r> {
                     if let Err(e) = self.charge_lookup() {
                         return MechOutcome::Abort(e);
                     }
-                    match self.resolver.lookup_a(&normalize(&host)) {
-                        Err(()) => return MechOutcome::Abort(SpfResult::TempError),
-                        Ok(ips) if ips.is_empty() => {
-                            // This MX host resolves to no address — a void lookup (§4.6.4).
-                            if let Err(e) = self.charge_void() {
-                                return MechOutcome::Abort(e);
-                            }
-                        }
-                        Ok(ips) => {
-                            if ips.iter().any(|a| ipv4_in_cidr(v4, *a, *cidr4)) {
-                                return MechOutcome::Match;
-                            }
-                        }
+                    match self.match_address_lookup(&normalize(&host), ip, *cidr4, *cidr6) {
+                        MechOutcome::Match => return MechOutcome::Match,
+                        MechOutcome::Abort(r) => return MechOutcome::Abort(r),
+                        MechOutcome::NoMatch => continue,
                     }
                 }
                 MechOutcome::NoMatch
@@ -843,7 +896,7 @@ mod tests {
     }
 
     #[test]
-    fn a_and_mx_mechanisms_match_ipv4_only() {
+    fn a_and_mx_mechanisms_match_ipv4() {
         let r = InMemorySpfResolver::new()
             .with_txt("a-mech.example", &["v=spf1 a -all"])
             .with_a("a-mech.example", &[Ipv4Addr::new(203, 0, 113, 9)])
@@ -854,12 +907,47 @@ mod tests {
         assert_eq!(check_host(&r, v4("203.0.113.9"), "a-mech.example", "a@x"), SpfResult::Pass);
         assert_eq!(check_host(&r, v4("203.0.113.10"), "a-mech.example", "a@x"), SpfResult::Fail);
         assert_eq!(check_host(&r, v4("198.51.100.9"), "mx-mech.example", "a@x"), SpfResult::Pass);
-        // IPv6 sender can never match `a`/`mx` here — a documented narrowing (no AAAA support).
+        // An IPv6 sender against a domain that publishes only A (no AAAA) simply doesn't match —
+        // falls through to `-all` — never mis-evaluated against the wrong family's records.
         assert_eq!(
             check_host(&r, v6("2001:db8::1"), "a-mech.example", "a@x"),
             SpfResult::Fail,
-            "ipv6 sender falls through to -all since a/mx cannot match it"
+            "ipv6 sender doesn't match an a-mechanism whose domain publishes no AAAA"
         );
+    }
+
+    #[test]
+    fn a_and_mx_mechanisms_match_ipv6_via_aaaa() {
+        // The dual-stack case: a domain publishing AAAA is matched by an `a`/`mx` mechanism against
+        // an IPv6 connecting sender, exactly as A/IPv4 works (RFC 7208 §5.3/§5.4).
+        let r = InMemorySpfResolver::new()
+            .with_txt("a6.example", &["v=spf1 a -all"])
+            .with_aaaa("a6.example", &["2001:db8::9".parse().unwrap()])
+            .with_txt("mx6.example", &["v=spf1 mx -all"])
+            .with_mx("mx6.example", &["mail1.mx6.example"])
+            .with_aaaa("mail1.mx6.example", &["2001:db8:1::9".parse().unwrap()]);
+
+        assert_eq!(check_host(&r, v6("2001:db8::9"), "a6.example", "a@x"), SpfResult::Pass);
+        assert_eq!(check_host(&r, v6("2001:db8::10"), "a6.example", "a@x"), SpfResult::Fail);
+        assert_eq!(check_host(&r, v6("2001:db8:1::9"), "mx6.example", "a@x"), SpfResult::Pass);
+        // A pure-IPv4 sender against a domain that publishes only AAAA doesn't match either.
+        assert_eq!(check_host(&r, v4("9.9.9.9"), "a6.example", "a@x"), SpfResult::Fail);
+    }
+
+    #[test]
+    fn a_mechanism_dual_cidr_gates_each_family_independently() {
+        // `a:example/24/64` — cidr4=24 gates IPv4 matches, cidr6=64 gates IPv6 matches,
+        // independently of each other (RFC 7208 §5.3 dual-cidr-length).
+        let r = InMemorySpfResolver::new()
+            .with_txt("dual.example", &["v=spf1 a:dual.example/24/64 -all"])
+            .with_a("dual.example", &[Ipv4Addr::new(203, 0, 113, 1)])
+            .with_aaaa("dual.example", &["2001:db8::1".parse().unwrap()]);
+        // /24 covers 203.0.113.0/24.
+        assert_eq!(check_host(&r, v4("203.0.113.200"), "dual.example", "a@x"), SpfResult::Pass);
+        assert_eq!(check_host(&r, v4("203.0.114.1"), "dual.example", "a@x"), SpfResult::Fail);
+        // /64 covers 2001:db8::/64.
+        assert_eq!(check_host(&r, v6("2001:db8::dead"), "dual.example", "a@x"), SpfResult::Pass);
+        assert_eq!(check_host(&r, v6("2001:db9::1"), "dual.example", "a@x"), SpfResult::Fail);
     }
 
     #[test]

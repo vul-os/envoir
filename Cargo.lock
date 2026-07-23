@@ -819,10 +819,12 @@ name = "dmtap-mls"
 version = "0.0.1"
 dependencies = [
  "blake3",
+ "dmtap-core",
  "openmls",
  "openmls_basic_credential",
  "openmls_rust_crypto",
  "openmls_traits",
+ "zeroize",
 ]
 
 [[package]]

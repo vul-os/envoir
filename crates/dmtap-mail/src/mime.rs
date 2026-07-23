@@ -15,8 +15,9 @@
 //! - [`decode_transfer_encoding`] + [`decode_charset`] → [`decoded_body_text`] — CTE + charset
 //!   decode for display, with the honest `isEncodingProblem` flag for charsets we don't implement.
 
+use dmtap_core::cbor::Cv;
 use dmtap_core::keyname;
-use dmtap_core::mote::Payload;
+use dmtap_core::mote::{Headers, Payload};
 use dmtap_core::TimestampMs;
 
 /// A parsed message: ordered headers, the raw body, and the MIME structure tree.
@@ -277,6 +278,95 @@ pub fn header_and_body(raw: &[u8]) -> (Vec<u8>, Vec<u8>) {
 pub fn headers_only(raw: &[u8]) -> Vec<(String, String)> {
     let s = body_offset(raw);
     parse_header_block(&raw[..s])
+}
+
+// --- Byte-exact header carriage (spec §7.2 / §7.2b / §7.2c) ---------------------------------
+
+/// The `Headers.ext` (§21.20, private-use `x-` namespace: FCFS, no cross-implementation
+/// registration required, not assumed portable) key this crate uses internally to carry a
+/// wrapped message's original RFC 5322 header block **byte-exact**, so [`render_rfc5322`] can
+/// replay it verbatim instead of re-synthesizing headers from the reduced MOTE [`Headers`]
+/// fields (spec §7.2 step 4 / §7.2b: "the RFC 5322 bytes carried byte-exact").
+///
+/// **FLAGGED for `dmtap-core`:** byte-exact header carriage is something every conformant
+/// gateway needs, which argues for a *dedicated*, Specification-Required `Headers`/`Payload`
+/// field (its own wire key) rather than smuggling raw bytes through the generic,
+/// receiver-opaque `ext` map. More importantly, `dmtap-core` does not yet implement
+/// `provenance`/`GatewayAttestation` (spec §18.3.5 key 9, §18.3.11) at all: without it, nothing
+/// in this crate can distinguish a genuinely gateway-wrapped `Payload` (whose raw headers are
+/// safe to replay) from an arbitrary native MOTE whose sender also sets this same `ext` key to
+/// spoof header lines — most notably a fake `From:` — that would otherwise always be
+/// cryptographically derived from `payload.from`. **Caller discipline required until then:** a
+/// caller MUST NOT hand [`render_rfc5322`] (directly or via `store::MemoryStore::deliver_mote`)
+/// a `Payload` carrying this key unless it has independently verified (e.g. a §7.2a attestation
+/// check upstream, outside this crate) that the `Payload` is a genuine gateway wrap.
+pub const RAW_HEADERS_EXT_KEY: &str = "x-dmtap-mail-raw-headers";
+
+/// Header names §7.2c requires a gateway to strip **before** computing `msg_digest` / signing —
+/// trust-boundary verdicts (`Authentication-Results`, RFC 8601) and AR-Chain seals (`ARC-*`,
+/// RFC 8617) are meaningful only relative to the boundary that added them. Carrying them through
+/// byte-exact would let an attacker-forged verdict (e.g. a hand-crafted
+/// `Authentication-Results: ...dkim=pass header.d=paypal.com`) ride into the wrapped bytes, where
+/// the gateway's own genuine signature would then vouch for a verdict it never computed.
+const TRUST_BOUNDARY_HEADERS: &[&str] = &[
+    "authentication-results",
+    "arc-seal",
+    "arc-message-signature",
+    "arc-authentication-results",
+];
+
+/// Strip every occurrence of a §7.2c trust-boundary header — and its folded continuation lines —
+/// from a raw RFC 5322 header block, leaving every other header byte-for-byte untouched: no UTF-8
+/// decode, no re-fold, no re-ordering. This is what makes "strip before you sign" compatible with
+/// "byte-exact carriage governs everything §7.2c does not remove" (§7.2c).
+///
+/// Operates directly on bytes (never through a lossy UTF-8 view) so 8-bit legacy header content
+/// elsewhere in the block survives untouched — matching the byte-exactness discipline the rest of
+/// this module already applies to bodies (§7.2b).
+pub fn strip_trust_boundary_headers(raw_headers: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(raw_headers.len());
+    let mut i = 0;
+    let mut dropping = false;
+    while i < raw_headers.len() {
+        let line_start = i;
+        let mut j = i;
+        while j < raw_headers.len() && raw_headers[j] != b'\n' {
+            j += 1;
+        }
+        let line_end = if j < raw_headers.len() { j + 1 } else { j };
+        let content = &raw_headers[line_start..j];
+        let is_continuation = matches!(content.first(), Some(b' ') | Some(b'\t'));
+        if !is_continuation {
+            dropping = match content.iter().position(|&b| b == b':') {
+                Some(colon) => {
+                    let name = &content[..colon];
+                    TRUST_BOUNDARY_HEADERS.iter().any(|h| name.eq_ignore_ascii_case(h.as_bytes()))
+                }
+                // Not a `name:` line (e.g. the blank separator, or malformed input) — never a
+                // match, and never left "dropping" from a previous field by accident.
+                None => false,
+            };
+        }
+        if !dropping {
+            out.extend_from_slice(&raw_headers[line_start..line_end]);
+        }
+        i = line_end;
+    }
+    out
+}
+
+/// The raw byte-exact header block carried on a [`Headers`] via [`RAW_HEADERS_EXT_KEY`], if
+/// present (and well-typed).
+fn raw_headers_ext(headers: &Headers) -> Option<&[u8]> {
+    headers.ext.iter().find_map(|(k, v)| {
+        if k != RAW_HEADERS_EXT_KEY {
+            return None;
+        }
+        match v {
+            Cv::Bytes(b) => Some(b.as_slice()),
+            _ => None,
+        }
+    })
 }
 
 fn count_lines(body: &[u8]) -> usize {
@@ -651,7 +741,20 @@ fn sanitize_header_value(v: &str) -> String {
 ///
 /// The sender identity key is projected to a stable, human-checkable local-part via the 8-word
 /// **key-name** (spec §3.9.1); this is the address a legacy client sees for a DMTAP peer.
+///
+/// **Byte-exactness (§7.2/§7.2b).** If `payload.headers` carries [`RAW_HEADERS_EXT_KEY`] (set by
+/// [`crate::smtp::build_mote_draft`] on the inbound leg), the original RFC 5322 header block is
+/// replayed **verbatim** — not re-synthesized from `subject`/`mime`/`thread` — so a wrapped
+/// message round-trips header-for-header, byte-for-byte (Reply-To/In-Reply-To/References/X-*
+/// included), exactly as the legacy sender wrote it. Only messages composed natively (no raw
+/// header block) fall through to synthesis below. See [`RAW_HEADERS_EXT_KEY`] for the caller
+/// trust requirement this shortcut relies on.
 pub fn render_rfc5322(payload: &Payload, ts: TimestampMs) -> Vec<u8> {
+    if let Some(raw_headers) = raw_headers_ext(&payload.headers) {
+        let mut bytes = raw_headers.to_vec();
+        bytes.extend_from_slice(&payload.body);
+        return bytes;
+    }
     let from = address_for_key(&payload.from);
     let subject = sanitize_header_value(payload.headers.subject.as_deref().unwrap_or(""));
     let mime = sanitize_header_value(
@@ -852,6 +955,135 @@ mod tests {
         assert_eq!(parsed.header("subject"), Some("Hello"));
         assert!(parsed.header("from").unwrap().ends_with("@dmtap.local"));
         assert!(parsed.header("date").is_some());
+    }
+
+    // --- Byte-exact header carriage (spec §7.2/§7.2b) — RAW_HEADERS_EXT_KEY round trip ---------
+
+    /// §7.2/§7.2b: a legacy message carrying headers well beyond Subject/Content-Type —
+    /// `Reply-To`, `In-Reply-To`, `References`, and an arbitrary `X-Custom` header — must survive
+    /// `build_mote_draft` → `render_rfc5322` **byte-for-byte**, not merely with `Subject` intact.
+    /// This is the direct test of the claim in [`RAW_HEADERS_EXT_KEY`]'s doc comment: the raw block
+    /// is replayed verbatim, never re-synthesized from the reduced MOTE `Headers` fields.
+    #[test]
+    fn byte_exact_header_carriage_round_trips_beyond_subject() {
+        let raw: &[u8] = b"From: alice@example.com\r\n\
+To: bob@example.com\r\n\
+Subject: Re: quarterly numbers\r\n\
+Reply-To: alice+reply@example.com\r\n\
+In-Reply-To: <orig-1@example.com>\r\n\
+References: <orig-0@example.com> <orig-1@example.com>\r\n\
+X-Custom: some-opaque-value; with=params\r\n\
+\r\n\
+Hello Bob,\r\n\
+\r\n\
+See above.\r\n";
+
+        let draft = crate::smtp::build_mote_draft(raw, 1_752_000_000_000);
+
+        // The ext map must carry the exact stripped-of-nothing (no trust-boundary headers present)
+        // original header block under RAW_HEADERS_EXT_KEY.
+        let (orig_headers, orig_body) = header_and_body(raw);
+        let carried = draft
+            .headers
+            .ext
+            .iter()
+            .find(|(k, _)| k == RAW_HEADERS_EXT_KEY)
+            .map(|(_, v)| v.clone());
+        match carried {
+            Some(dmtap_core::cbor::Cv::Bytes(b)) => assert_eq!(b, orig_headers),
+            other => panic!("expected RAW_HEADERS_EXT_KEY to carry the raw header bytes, got {other:?}"),
+        }
+        assert_eq!(draft.body, orig_body);
+
+        // Reassemble a Payload the way the store does and render it back out.
+        let payload = dmtap_core::mote::Payload {
+            from: vec![1, 2, 3],
+            sig: vec![],
+            headers: draft.headers.clone(),
+            body: draft.body.clone(),
+            refs: vec![],
+            attach: vec![],
+            expires: None,
+        };
+        let rendered = render_rfc5322(&payload, 1_752_000_000_000);
+        assert_eq!(
+            rendered, raw,
+            "byte-exact carriage must reproduce the ENTIRE original message, not just Subject"
+        );
+
+        // And every one of the non-core headers is present, verbatim, in the rendered output —
+        // spelled out individually so a regression names exactly which header broke.
+        let rendered_str = String::from_utf8_lossy(&rendered);
+        for line in [
+            "Reply-To: alice+reply@example.com",
+            "In-Reply-To: <orig-1@example.com>",
+            "References: <orig-0@example.com> <orig-1@example.com>",
+            "X-Custom: some-opaque-value; with=params",
+        ] {
+            assert!(rendered_str.contains(line), "missing header line: {line}");
+        }
+    }
+
+    /// The ext-map carriage must survive the REAL wire encoding, not just the in-memory struct —
+    /// round-trip the `Payload` through `det_cbor`/`from_det_cbor` (canonical CBOR, §18.3.5) before
+    /// rendering, which is what actually happens on the wire between a gateway wrap and a client
+    /// fetch.
+    #[test]
+    fn raw_headers_ext_key_round_trips_through_wire_cbor() {
+        let raw: &[u8] = b"From: alice@example.com\r\n\
+Subject: Hi\r\n\
+Reply-To: alice-reply@example.com\r\n\
+X-Custom: v1\r\n\
+\r\n\
+body text\r\n";
+        let draft = crate::smtp::build_mote_draft(raw, 42);
+        let payload = dmtap_core::mote::Payload {
+            from: vec![9u8; 32],
+            sig: vec![],
+            headers: draft.headers.clone(),
+            body: draft.body.clone(),
+            refs: vec![],
+            attach: vec![],
+            expires: None,
+        };
+        let wire = payload.det_cbor();
+        let decoded = dmtap_core::mote::Payload::from_det_cbor(&wire)
+            .expect("a Payload carrying RAW_HEADERS_EXT_KEY must decode");
+        assert_eq!(decoded.headers, payload.headers);
+
+        let rendered = render_rfc5322(&decoded, 42);
+        assert_eq!(rendered, raw, "the ext-map carriage must survive a real CBOR round trip");
+    }
+
+    /// §7.2c: trust-boundary headers (`Authentication-Results`, `ARC-*`) are stripped BEFORE they
+    /// enter the byte-exact carriage — so a forged verdict cannot ride into the wrapped bytes under
+    /// the gateway's own signature. This is the one deliberate way `render_rfc5322`'s output is
+    /// allowed to differ from the original raw bytes: everything else is byte-exact, this is not.
+    #[test]
+    fn byte_exact_carriage_still_strips_trust_boundary_headers() {
+        let raw: &[u8] = b"From: alice@example.com\r\n\
+Authentication-Results: mx.example.com; dkim=pass header.d=paypal.com\r\n\
+Subject: Hi\r\n\
+X-Custom: v1\r\n\
+\r\n\
+body\r\n";
+        let draft = crate::smtp::build_mote_draft(raw, 42);
+        let payload = dmtap_core::mote::Payload {
+            from: vec![7u8; 32],
+            sig: vec![],
+            headers: draft.headers.clone(),
+            body: draft.body.clone(),
+            refs: vec![],
+            attach: vec![],
+            expires: None,
+        };
+        let rendered = render_rfc5322(&payload, 42);
+        let rendered_str = String::from_utf8_lossy(&rendered);
+        assert!(
+            !rendered_str.to_ascii_lowercase().contains("authentication-results"),
+            "a forged Authentication-Results must not survive into the byte-exact carriage"
+        );
+        assert!(rendered_str.contains("X-Custom: v1"), "non-trust-boundary headers still carry through");
     }
 
     #[test]

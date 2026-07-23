@@ -17,6 +17,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// | `0x02`  | Ed25519+ML-DSA-65 | X-Wing (X25519+ML-KEM-768) | ChaCha20-Poly1305 | BLAKE3-256 | **v0 REQUIRED originating suite** |
 /// | `0x03`  | Ed25519+ML-DSA-65 | X-Wing (X25519+ML-KEM-768) | **AES-256-GCM** | BLAKE3-256 | RESERVED (AEAD-diverse emergency target) |
 /// | `0x04`  | Ed25519+SLH-DSA-128s | X-Wing (X25519+ML-KEM-768) | ChaCha20-Poly1305 | BLAKE3-256 | RESERVED (signature-diverse; the anchor profile, §1.2.0) |
+/// | `0x05`  | Ed25519+ML-DSA-65 | X-Wing (X25519+ML-KEM-768) | ChaCha20-Poly1305 | **SHA3-256** | RESERVED (hash-diverse emergency target, §16.7) |
 ///
 /// **Normative status vs implementation status are different axes** (§18.2). The Status column
 /// above is the spec's normative one. What *this crate* implements is narrower and is reported by
@@ -62,6 +63,18 @@ pub enum Suite {
     /// [`from_u8`](Suite::from_u8) recognizes it, so it round-trips the wire decoder, but neither
     /// support predicate returns `true` and any attempt to sign/validate under it **fails closed**.
     ReservedAnchorSlhDsa = 0x04,
+    /// **RESERVED, not yet implemented** (spec §1.1, §16.7): the **hash-diverse** emergency
+    /// target — suite `0x02`'s PQ-hybrid signature/KEM/AEAD stack, but with **SHA3-256** in place
+    /// of BLAKE3-256 wherever this suite selects a hash. It exists so that a break of the
+    /// BLAKE3 monoculture shared by every other registered suite can be answered by migrating to
+    /// a different-hash suite through the ordinary multi-suite mechanism (§1.3), without a flag
+    /// day — the same rationale as `0x03`'s AEAD diversity and `0x04`'s signature diversity, one
+    /// axis over.
+    ///
+    /// Same posture as `0x03`/`0x04`: a **registered-but-unimplemented reserved code point**.
+    /// [`from_u8`](Suite::from_u8) recognizes it, so it round-trips the wire decoder, but neither
+    /// support predicate returns `true` and any attempt to sign/validate under it **fails closed**.
+    ReservedHashSha3 = 0x05,
 }
 
 impl Suite {
@@ -77,13 +90,17 @@ impl Suite {
     /// `suite_reject_0x04` asserted that `0x04` "MUST fail to decode" as *unregistered*, which
     /// stopped being true when §1.1 registered it — while the sibling vector `suite_accept_0x03`
     /// justified acceptance precisely on the grounds that registered-but-reserved ids decode. Both
-    /// could not be right. `suite_reject_0x05` remains as the genuine unregistered case.
+    /// could not be right. The same drift repeated at `0x05` (the hash-diverse SHA3-256 target,
+    /// §16.7) once §1.1 registered it too; `suite_reject_0x06` — the lowest still-unallocated
+    /// Standards-Action point now that `0x01`–`0x05` are registered — is the current genuine
+    /// unregistered case.
     pub fn from_u8(b: u8) -> Option<Self> {
         match b {
             0x01 => Some(Suite::Classical),
             0x02 => Some(Suite::PqHybrid),
             0x03 => Some(Suite::ReservedAeadGcm), // RESERVED, unimplemented — see the variant docs
             0x04 => Some(Suite::ReservedAnchorSlhDsa), // RESERVED, unimplemented — anchor profile
+            0x05 => Some(Suite::ReservedHashSha3), // RESERVED, unimplemented — hash-diverse target
             _ => None,                            // unregistered suite — reject, never guess
         }
     }
@@ -282,8 +299,12 @@ mod tests {
         // move when §1.1 registered it; keeping it in the reject list would have made this test
         // enforce the opposite of the specification.
         assert_eq!(Suite::from_u8(0x04), Some(Suite::ReservedAnchorSlhDsa));
+        // 0x05 likewise: REGISTERED (§1.1, §16.7 — the hash-diverse SHA3-256 target), so it
+        // decodes, but unimplemented. It was previously asserted here as *unregistered* and had to
+        // move when §1.1 registered it — the identical drift `0x04` underwent one variant earlier.
+        assert_eq!(Suite::from_u8(0x05), Some(Suite::ReservedHashSha3));
         // Every *unregistered* byte MUST still be rejected (never guess).
-        for b in [0x00u8, 0x05, 0x7f, 0xff] {
+        for b in [0x00u8, 0x06, 0x7f, 0xff] {
             assert_eq!(Suite::from_u8(b), None, "byte 0x{b:02x} must fail closed");
         }
     }
@@ -317,10 +338,27 @@ mod tests {
     }
 
     #[test]
-    fn cbor_rejects_unknown_suite() {
-        // A CBOR integer 0x05 must not deserialize into a Suite.
+    fn reserved_0x05_is_known_but_unusable() {
+        // `0x05` decodes as a known suite id (like `0x03`/`0x04`) ...
+        let s = Suite::from_u8(0x05).expect("0x05 is a registered reserved code point");
+        assert_eq!(s, Suite::ReservedHashSha3);
+        assert_eq!(s.as_u8(), 0x05);
+        // ... but is NOT implemented at either layer — every attempted use fails closed.
+        assert!(!s.is_supported(), "reserved 0x05 must not be Identity-supported");
+        assert!(!s.mote_supported(), "reserved 0x05 must not be MOTE-supported");
+        // It round-trips through the CBOR suite decoder (a known id), unlike an unregistered byte.
         let mut buf = Vec::new();
         ciborium::into_writer(&5u8, &mut buf).unwrap();
+        let r: Result<Suite, _> = ciborium::from_reader(&buf[..]);
+        assert_eq!(r.ok(), Some(Suite::ReservedHashSha3));
+    }
+
+    #[test]
+    fn cbor_rejects_unknown_suite() {
+        // A CBOR integer 0x06 (the current lowest unallocated point, now that 0x01-0x05 are
+        // registered) must not deserialize into a Suite.
+        let mut buf = Vec::new();
+        ciborium::into_writer(&6u8, &mut buf).unwrap();
         let r: Result<Suite, _> = ciborium::from_reader(&buf[..]);
         assert!(r.is_err(), "unknown suite byte must fail closed on decode");
     }
@@ -331,15 +369,19 @@ mod tests {
         assert!(Suite::Classical.is_supported());
         assert!(!Suite::PqHybrid.is_supported());
         assert!(!Suite::ReservedAeadGcm.is_supported());
+        assert!(!Suite::ReservedAnchorSlhDsa.is_supported());
+        assert!(!Suite::ReservedHashSha3.is_supported());
     }
 
     #[test]
     fn both_suites_are_mote_supported() {
         // The MOTE envelope/payload layer implements both the classical and the PQ-hybrid suite,
-        // but NOT the reserved-unimplemented 0x03.
+        // but NOT any reserved-unimplemented code point (0x03/0x04/0x05).
         assert!(Suite::Classical.mote_supported());
         assert!(Suite::PqHybrid.mote_supported());
         assert!(!Suite::ReservedAeadGcm.mote_supported());
+        assert!(!Suite::ReservedAnchorSlhDsa.mote_supported());
+        assert!(!Suite::ReservedHashSha3.mote_supported());
     }
 
     #[test]

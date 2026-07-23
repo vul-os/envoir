@@ -46,6 +46,20 @@ use dmtap_mail::imap::{Session, State};
 use dmtap_mail::net::read_imap_command;
 use dmtap_mail::store::{Flag, MailStore, MemoryStore};
 
+use crate::net::ConnLimiter;
+
+/// The per-read/write socket idle timeout applied to every IMAP connection (§4 in the security
+/// review — the slowloris finding). Longer than the POP3/submission surfaces'
+/// [`crate::legacy_net`] timeout because IMAP `IDLE` (RFC 2177) is a legitimate long-lived wait for
+/// server-push; RFC 2177 itself expects clients to re-issue `IDLE` roughly every ~29 minutes, so 15
+/// minutes still bounds an actually-idle/attacking connection without cutting off normal `IDLE` use.
+const IMAP_IO_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+/// Default cap on concurrent IMAP connections one [`ImapAccessServer`] serves — the other half of
+/// the slowloris mitigation (bounds how many connections can be open at once, not just how long any
+/// one can idle). Override with [`ImapAccessServer::with_max_connections`].
+const DEFAULT_MAX_CONNECTIONS: usize = 256;
+
 /// How the IMAP access server presents TLS. There is no cleartext option: legacy IMAP auth carries a
 /// reusable app-password, so a confidential channel is mandatory (spec §8.2). Both modes reuse the
 /// gateway's own cert/key ([`crate::PersonalConfig::tls_cert`]/`tls_key`).
@@ -77,16 +91,30 @@ pub struct ImapAccessServer {
     listener: TcpListener,
     tls: Arc<ServerConfig>,
     mode: ImapTls,
+    limiter: ConnLimiter,
 }
 
 impl ImapAccessServer {
-    /// Bind an IMAP access listener with the gateway's TLS config and the chosen TLS mode.
+    /// Bind an IMAP access listener with the gateway's TLS config and the chosen TLS mode. Concurrent
+    /// connections default to [`DEFAULT_MAX_CONNECTIONS`]; override with
+    /// [`Self::with_max_connections`].
     pub fn bind(
         addr: impl std::net::ToSocketAddrs,
         tls: Arc<ServerConfig>,
         mode: ImapTls,
     ) -> io::Result<Self> {
-        Ok(ImapAccessServer { listener: TcpListener::bind(addr)?, tls, mode })
+        Ok(ImapAccessServer {
+            listener: TcpListener::bind(addr)?,
+            tls,
+            mode,
+            limiter: ConnLimiter::new(DEFAULT_MAX_CONNECTIONS),
+        })
+    }
+
+    /// Override the concurrent-connection cap (default [`DEFAULT_MAX_CONNECTIONS`]).
+    pub fn with_max_connections(mut self, max: usize) -> Self {
+        self.limiter = ConnLimiter::new(max);
+        self
     }
 
     /// The address actually bound (useful with an ephemeral `:0` port in tests).
@@ -133,6 +161,15 @@ impl ImapAccessServer {
             }
             match self.listener.accept() {
                 Ok((stream, peer)) => {
+                    // Concurrent-connection cap (§4 in the security review — the other half of the
+                    // slowloris mitigation alongside the idle timeout below): refuse outright rather
+                    // than spawn a thread when already at capacity.
+                    let Some(guard) = self.limiter.try_acquire() else {
+                        eprintln!(
+                            "gateway[imap]: {peer}: at the concurrent-connection limit, refusing"
+                        );
+                        continue;
+                    };
                     if let Err(e) = stream.set_nonblocking(false) {
                         eprintln!("gateway[imap]: {peer}: cannot set blocking: {e}");
                         continue;
@@ -142,6 +179,7 @@ impl ImapAccessServer {
                     let make_store = make_store.clone();
                     let make_auth = make_auth.clone();
                     std::thread::spawn(move || {
+                        let _guard = guard; // held for the session's lifetime, released on drop
                         if let Err(e) =
                             handle_connection(stream, tls, mode, make_store(), make_auth())
                         {
@@ -181,6 +219,11 @@ where
     S: MailStore,
     A: Authenticator,
 {
+    // Slowloris guard (§4 in the security review): bound every read/write BEFORE any TLS wrapping —
+    // the timeout is a socket-level attribute that keeps applying across the STARTTLS boundary too.
+    stream.set_read_timeout(Some(IMAP_IO_TIMEOUT))?;
+    stream.set_write_timeout(Some(IMAP_IO_TIMEOUT))?;
+
     // Build the (possibly already-encrypted) transport. Implicit TLS terminates before the greeting.
     let (imap_stream, mut session, mut secured) = match mode {
         ImapTls::Implicit => {

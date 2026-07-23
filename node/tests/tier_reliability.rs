@@ -202,9 +202,10 @@ fn node_reassembly_times_out_incomplete_and_completes_full() {
     let (mut node, _pub, _seal) = make_node(&net);
 
     // An incomplete multi-cell MOTE: 1 of 4 cells. Held pending.
+    let from = b"exit-relay".to_vec();
     let partial = SphinxFragmentHeader { msg_id: [1; 8], frag_index: 0, frag_count: 4, total_len: 100 };
     assert_eq!(
-        node.accept_fragment(&partial, &vec![0u8; FRAGMENT_DATA_LEN]),
+        node.accept_fragment(&from, &partial, &vec![0u8; FRAGMENT_DATA_LEN]),
         Reassembled::Pending
     );
     assert_eq!(node.reassembly_pending(), 1);
@@ -219,6 +220,6 @@ fn node_reassembly_times_out_incomplete_and_completes_full() {
     let mut data = vec![0u8; FRAGMENT_DATA_LEN];
     data[..3].copy_from_slice(b"abc");
     let full = SphinxFragmentHeader { msg_id: [2; 8], frag_index: 0, frag_count: 1, total_len: 3 };
-    assert_eq!(node.accept_fragment(&full, &data), Reassembled::Complete(b"abc".to_vec()));
+    assert_eq!(node.accept_fragment(&from, &full, &data), Reassembled::Complete(b"abc".to_vec()));
     assert_eq!(node.reassembly_pending(), 0);
 }

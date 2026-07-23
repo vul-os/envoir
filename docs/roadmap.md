@@ -126,6 +126,47 @@ the spec's own roadmap markers, it doesn't belong here.
   explicitly out of scope for the std-only protocol core, deferred to the node binary's transport
   layer.
 
+## Post-perfection wave (2026-07-23) — what's left
+
+A five-agent perfection pass (gateway / node / client / `dmtap-core` / `dmtap-mail`) hardened the impl;
+this records what it fixed and — more importantly — what remains.
+
+**Hardened this wave:** gateway (303 tests — MX thread-per-connection, SPF IPv6/AAAA, and three real
+bugs found & fixed: §7.2c `Authentication-Results` injection into the *signed* attestation digest, §7.11.2
+same-domain impersonation, §7.2a attestation-key ≠ gateway IK); node (per-**connection** reassembly cap
+closing a §4.4.1 flood-DoS); client (8 stored-XSS `toast()` sinks + address-validation hardened);
+`dmtap-core` (`FeedHead.topic` C-01, `SubscriptionRevoke` v/suite/device_cert C-04 — 342 tests).
+
+**What's left, most-impactful first:**
+
+1. **The mixnet workstream (the big one).** `node/src/onion.rs`'s Sphinx is a **structural BLAKE3
+   stand-in, not real crypto** — so metadata privacy is architecture-only. Build it *together* with the
+   **`MixDirectory` rearchitecture** (`dmtap-core/src/mixnet.rs` still implements the superseded
+   single-authority-signed model; §4.2 now requires a KT-quorum-derived view reconstructible from logs).
+   Real X25519/ChaCha20-Poly1305/LIONESS Sphinx + the derived directory are one coherent effort. Until
+   then only the `fast` tier (no metadata privacy) runs.
+2. **Node-side DMTAP-PUBSUB** — `FeedSubscribe`/`FeedUnsubscribe`/`FeedHint` handling + §25.6.4 standing
+   checks. Now *unblocked* (core has the C-01/C-04 wire fields); today these kinds fall through to inbox
+   storage (safe, inert).
+3. **Real send path** — `node/src/jmap_api.rs`'s JMAP `EmailSubmission/set` records intent without
+   sealing/dispatching a MOTE (client works around via `POST /v1/send`). Wire it to the running node.
+4. **Gateway completeness** — §7.11.1 **AR-Chain (RFC 8617) verification** is unimplemented (legit
+   forwarded/mailing-list mail that fails SPF/DKIM but is ARC-valid is wrongly hard-rejected under
+   Enforce); `GatewayAttestation` lacks `suite=`/`AuthResults` (§18.3.11, a core wire change); DANE TLSA
+   unimplemented (MTA-STS only); `personal.rs` regenerates the gateway IK every restart (no persistent-IK
+   config → `_dmtap-gw` DNS needs republishing).
+5. **Eclipse resistance** — §4.2 S/Kademlia disjoint-path lookups + per-bucket IP-diversity caps aren't
+   exposed by libp2p `kad`; defended for now by keeping the DHT last-resort. Custom/upstream work.
+6. **Make the libp2p mesh the node default** — `run`/`serve` still drives delivery over plain TCP
+   (`node/src/transport.rs`), not the proven `dmtap-p2p` mesh; then wire the mixnet transport on top.
+7. **`dmtap-mail` byte-exact headers** — the §7.2b fix carries original RFC 5322 header bytes via an
+   `x-dmtap-mail-raw-headers` ext-map key; decide whether that stays or becomes a first-class
+   `dmtap-core` field.
+8. **The other ~13 crates** (`dmtap-mls`, `dmtap-sync`, `dmtap-naming`, `dmtap-auth`, `dmtap-seam`, …)
+   haven't had a dedicated perfection pass.
+9. **Topic-label NFC normalization** (§25.3.4 rule 1) isn't enforced in core — no Unicode normalization
+   table vendored yet (flagged in code, not silently skipped).
+
 ## The protocol's own roadmap (spec §10.6)
 
 - **v0** — Core + Private (minimal, TOFU-pinned key transparency) + Groups & Files + the legacy

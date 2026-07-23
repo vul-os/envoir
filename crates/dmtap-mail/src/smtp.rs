@@ -6,6 +6,7 @@
 //! Advertised extensions: STARTTLS (RFC 3207), AUTH PLAIN/LOGIN (RFC 4954), PIPELINING (RFC 2920),
 //! 8BITMIME (RFC 6152), SIZE (RFC 1870), SMTPUTF8 (RFC 6531), DSN (RFC 3461), ENHANCEDSTATUSCODES.
 
+use dmtap_core::cbor::Cv;
 use dmtap_core::mote::{Headers, Kind, MoteDraft};
 use dmtap_core::TimestampMs;
 
@@ -378,9 +379,28 @@ fn param_value(rest: &str, key: &str) -> Option<String> {
 
 /// Convert a submitted RFC 5322 message into a native MOTE draft (spec §8.2 outbound path).
 /// The Subject/Content-Type map into MOTE [`Headers`]; the message body becomes the MOTE body.
+///
+/// **Byte-exactness (§7.2 step 4 / §7.2b).** The original header block — every header, not just
+/// Subject/Content-Type (Reply-To, In-Reply-To, References, X-*, …) — is carried byte-exact in
+/// `Headers.ext` under [`crate::mime::RAW_HEADERS_EXT_KEY`], so [`crate::mime::render_rfc5322`]
+/// can replay it verbatim on the way back out instead of re-synthesizing a reduced header set.
+/// `subject`/`mime` are still populated too, for native-side display/search that only wants the
+/// decoded MOTE-native fields.
+///
+/// **Header hygiene (§7.2c).** Before capturing the raw block, every trust-boundary
+/// `Authentication-Results`/`ARC-*` header is stripped — those are meaningful only relative to
+/// the boundary that added them, and carrying an attacker-supplied one byte-exact into the
+/// wrapped (and eventually signed) bytes would let a forged verdict ride along under the
+/// gateway's own vouching signature.
 pub fn build_mote_draft(data: &[u8], ts: TimestampMs) -> MoteDraft {
     let parsed = ParsedMessage::parse(data);
     let mut draft = MoteDraft::new(Kind::Mail, ts, parsed.body.clone());
+    let (raw_headers, _) = crate::mime::header_and_body(data);
+    let raw_headers = crate::mime::strip_trust_boundary_headers(&raw_headers);
+    let mut ext = Vec::new();
+    if !raw_headers.is_empty() {
+        ext.push((crate::mime::RAW_HEADERS_EXT_KEY.to_string(), Cv::Bytes(raw_headers)));
+    }
     draft.headers = Headers {
         thread: None,
         // MOTE headers are native UTF-8 (spec §2.4): lift the subject through RFC 2047 decode so a
@@ -388,9 +408,7 @@ pub fn build_mote_draft(data: &[u8], ts: TimestampMs) -> MoteDraft {
         subject: parsed.header("Subject").map(crate::mime::decode_encoded_words),
         mime: parsed.header("Content-Type").map(str::to_string),
         cc: Vec::new(),
-        // A legacy SMTP message carries no DMTAP extension headers and no `sensitive` flag; both
-        // are DMTAP-native and a gateway must not invent them (§7).
-        ext: Vec::new(),
+        ext,
         sensitive: None,
     };
     draft

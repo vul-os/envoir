@@ -48,6 +48,10 @@
 //! - [`cad`] — the **CAD / Artifact profile** over DMTAP-PUB (§23): `ArtifactMetadata`,
 //!   `ArtifactFormat`, `Units`, `AssemblyStructure` + the BOM DAG walk with cycle rejection. A pure
 //!   application profile — zero new wire mechanisms, zero new crypto.
+//! - [`rtc`] — the **DMTAP-RTC** real-time media profile (§27): `RtcSignal` (kind `0x44`) carrying
+//!   JSEP offer/answer/candidate/rollback/bye signaling for a call scoped to an MLS group, plus
+//!   SDP-native screen-share admission and capacity accounting. The SFrame key derivation itself
+//!   lives in `dmtap-mls::sframe`, where the MLS epoch secret is.
 //!
 //! ## Crypto suite `0x01` (v0 REQUIRED)
 //! Ed25519 signatures, HPKE `DHKEM(X25519)/HKDF-SHA256/ChaCha20-Poly1305`, BLAKE3-256 hashing.
@@ -77,6 +81,7 @@ pub mod profile;
 pub mod pubobj;
 pub mod pubsub;
 pub mod push;
+pub mod rtc;
 pub mod safety;
 pub mod sphinx;
 pub mod suite;

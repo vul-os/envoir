@@ -327,9 +327,12 @@ fn serve_until_shuts_down_gracefully_on_the_flag() {
     let listener = MxListener::bind("127.0.0.1:0", None).expect("bind");
     let addr = listener.local_addr().expect("addr");
     let shutdown = Arc::new(AtomicBool::new(false));
+    let gw = Arc::new(gw);
 
-    // `InboundGateway` is not `Send`, so the daemon loop runs on THIS thread; a helper thread probes
-    // that it is up, then flips the shutdown flag. The helper returns whether the probe saw a 220.
+    // `InboundGateway` is `Send + Sync`, so `serve_until` fans each accepted connection out to its
+    // own spawned thread; the daemon loop itself (the accept/shutdown-poll) still runs on THIS
+    // thread. A helper thread probes that it is up, then flips the shutdown flag. The helper returns
+    // whether the probe saw a 220.
     let shutdown2 = shutdown.clone();
     let control = thread::spawn(move || -> bool {
         // Give serve_until a moment to enter its accept loop.
@@ -353,7 +356,7 @@ fn serve_until_shuts_down_gracefully_on_the_flag() {
     // Blocks until the helper flips the flag; a hang here (never returning) fails the test via the
     // harness timeout — proving the loop actually terminates on the flag rather than running forever.
     let start = Instant::now();
-    listener.serve_until(&gw, &shutdown).expect("serve_until returns cleanly on shutdown");
+    listener.serve_until(gw.clone(), &shutdown).expect("serve_until returns cleanly on shutdown");
     assert!(start.elapsed() < Duration::from_secs(30), "shutdown was prompt, not a timeout");
 
     let greeted = control.join().expect("control thread joined cleanly");

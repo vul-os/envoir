@@ -173,7 +173,12 @@ pub fn verify(message: &[u8], public_key: &[u8]) -> Result<(), DkimError> {
 /// fetch is a documented seam**: a production impl queries `<selector>._domainkey.<domain>` for a
 /// `TYPE_TXT` record (via [`crate::dns`]) and feeds the record's value through
 /// [`parse_public_key_txt`] to get the raw key bytes; [`StaticDkimKeys`] is the in-process double.
-pub trait DkimKeyResolver {
+///
+/// `Send + Sync`: [`crate::inbound::InboundGateway`] is shared (via `Arc`) across the
+/// per-connection threads the real MX listener spawns (§7.2, [`crate::inbound_tcp`]
+/// thread-per-connection) — every trait object it owns must therefore be safely usable from
+/// multiple threads at once.
+pub trait DkimKeyResolver: Send + Sync {
     /// Return the raw Ed25519 public key (32 bytes) published for `domain`/`selector`, or `None`
     /// when the domain publishes no key under that selector (verification then cannot proceed).
     fn resolve_dkim_key(&self, domain: &str, selector: &str) -> Option<Vec<u8>>;

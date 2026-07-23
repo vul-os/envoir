@@ -278,6 +278,36 @@ pub(crate) fn pub_suite(cv: Cv) -> Result<Suite, PubError> {
     Ok(s)
 }
 
+/// Maximum encoded length (bytes) of a DMTAP-PUBSUB topic label (§25.3.4 rule 2).
+pub const TOPIC_LABEL_MAX_BYTES: usize = 128;
+
+/// §25.3.4's topic-label grammar, checked fail-closed on decode. Applies to `Subscription.topic`
+/// (key 5, §25.4.1), `FeedHint.topic` (key 2, §25.6.2), and `FeedHead` key `64` (§25.3.1) alike —
+/// "one label, one feed" needs a single, mechanically checkable spelling everywhere it appears.
+///
+/// **Partial, by disclosed necessity.** This enforces the two rules checkable without a Unicode
+/// normalization-forms table:
+/// - rule 2 — the UTF-8 encoding MUST be ≤ [`TOPIC_LABEL_MAX_BYTES`];
+/// - rule 3 — MUST NOT contain U+0000–U+001F (C0 controls), U+002F (`/`), or U+007F (DEL).
+///
+/// Rule 1 (NFC-only, UAX #15) is **not** verified here: correctly deciding "is this string already
+/// in Normalization Form C" requires Unicode composition/decomposition tables this crate does not
+/// currently vendor (no `unicode-normalization`-equivalent dependency). A producer remains
+/// responsible for emitting NFC-normalized labels; this decoder does not detect a non-NFC label —
+/// flagged as a follow-up dependency need rather than silently skipped (§25.13 C-07 is otherwise
+/// unimplemented here). Rule 4 (byte-equality comparison, no folding) requires no code — callers
+/// already get it by comparing `String`/`&str` values directly. Rule 5 (one locator spelling for
+/// the empty topic) is a serving-layer obligation (§25.3.2), out of scope for a bare label.
+pub(crate) fn validate_topic_label(label: &str) -> Result<(), PubError> {
+    if label.len() > TOPIC_LABEL_MAX_BYTES {
+        return Err(PubError::Cbor(cbor::CborError::TypeMismatch));
+    }
+    if label.chars().any(|c| matches!(c, '\u{0000}'..='\u{001F}' | '/' | '\u{007F}')) {
+        return Err(PubError::Cbor(cbor::CborError::TypeMismatch));
+    }
+    Ok(())
+}
+
 // ── PubManifest (§22.2.1) ────────────────────────────────────────────────────────────────────
 
 /// The plaintext-addressed public-blob manifest (§22.2.1) — the structural twin of the sealed
@@ -680,6 +710,16 @@ pub struct FeedHead {
     pub signer: Vec<u8>,
     /// key 8 — `signer` over `DMTAP-PUB-v0/feed ‖ 0x00 ‖ det_cbor(FeedHead ∖ {8})`.
     pub sig: Vec<u8>,
+    /// key 64 — DMTAP-PUBSUB topic label (§25.3.1, §25.13 C-01). `""` (the default/untopiced
+    /// feed) is encoded by **omitting** this key entirely — there is exactly one encoding of
+    /// every topic, including the empty one (§25.3.1 rule 1); a non-empty value here is inside
+    /// `det_cbor(FeedHead ∖ {8})` and therefore covered by [`FeedHead::sig`] exactly as `pub`,
+    /// `seq` and `tip` are. Strictly additive: absent on every pre-existing default-feed head, so
+    /// no previously-valid object or signature changes (§25.3.3). Serving/reading a non-empty
+    /// topic is a `pubsub-1` capability surface (§25.3.2) — gating peers by capability is a
+    /// serving-layer/policy obligation (§10.2), not something this decoder tracks; this decoder
+    /// only enforces the wire grammar (§25.3.1 rule 1, §25.3.4 rules 2/3).
+    pub topic: String,
 }
 
 impl FeedHead {
@@ -695,6 +735,9 @@ impl FeedHead {
         ];
         if include_sig {
             m.push((8, Cv::Bytes(self.sig.clone())));
+        }
+        if !self.topic.is_empty() {
+            m.push((64, Cv::Text(self.topic.clone())));
         }
         Cv::Map(m)
     }
@@ -747,7 +790,13 @@ impl FeedHead {
         Ok(())
     }
 
-    /// Decode a `FeedHead` (§22.4.1), rejecting unknown `v`/`suite` fail-closed (`0x0901`).
+    /// Decode a `FeedHead` (§22.4.1, extended by §25.3.1), rejecting unknown `v`/`suite`
+    /// fail-closed (`0x0901`).
+    ///
+    /// Key `64` (`topic`) is recognized per §25.3.1: absent ⇒ `topic = ""`; present ⇒ decoded and
+    /// validated against §25.3.4 rules 2/3 ([`validate_topic_label`]). A present-but-empty key
+    /// `64` is malformed and rejected — §25.3.1 rule 1 gives the empty topic exactly one encoding
+    /// (omission), never an explicit empty string.
     pub fn from_det_cbor(bytes: &[u8]) -> Result<Self, PubError> {
         let mut f = Fields::from_cv(cbor::decode(bytes)?)?;
         let v = as_u8(f.req(1)?)?;
@@ -761,8 +810,19 @@ impl FeedHead {
         let ts = as_u64(f.req(6)?)?;
         let signer = as_bytes(f.req(7)?)?;
         let sig = as_bytes(f.req(8)?)?;
+        let topic = match f.take(64) {
+            Some(cv) => {
+                let t = crate::cbor::as_text(cv)?;
+                if t.is_empty() {
+                    return Err(PubError::Cbor(cbor::CborError::TypeMismatch));
+                }
+                validate_topic_label(&t)?;
+                t
+            }
+            None => String::new(),
+        };
         f.deny_unknown()?;
-        Ok(FeedHead { v, suite, publisher, seq, tip, ts, signer, sig })
+        Ok(FeedHead { v, suite, publisher, seq, tip, ts, signer, sig, topic })
     }
 }
 
@@ -978,6 +1038,7 @@ mod tests {
             ts: 1,
             signer: k.public(),
             sig: vec![],
+            topic: String::new(),
         };
         h.sign(&k);
         assert_eq!(FeedHead::from_det_cbor(&h.det_cbor()).unwrap_err(), PubError::UnsupportedVersion);
@@ -1131,6 +1192,7 @@ mod tests {
             ts: 1700000051500,
             signer: pk.clone(),
             sig: Vec::new(),
+            topic: String::new(),
         };
         assert_eq!(
             hexs(&head.signing_preimage()),
@@ -1283,6 +1345,7 @@ mod tests {
             ts: 2000 + last.seq,
             signer: sk.public(),
             sig: Vec::new(),
+            topic: String::new(),
         };
         head.sign(sk);
         (entries, head)
@@ -1417,5 +1480,115 @@ mod tests {
         let (fe, mut fh) = feed_of(&sk, 3, "U");
         fh.sig = other.sign_domain(PUB_FEED_DS, &fh.signing_preimage());
         assert_eq!(f.accept(&fh, &fe), Err(PubError::FeedSigInvalid));
+    }
+
+    // ── §25.3.1 (C-01): FeedHead key 64 `topic` ──────────────────────────────────────────────
+
+    fn topic_head(sk: &IdentityKey, topic: &str) -> FeedHead {
+        let mut h = FeedHead {
+            v: PUB_V0,
+            suite: Suite::Classical,
+            publisher: sk.public(),
+            seq: 0,
+            tip: ContentId::of(b"tip"),
+            ts: 1,
+            signer: sk.public(),
+            sig: Vec::new(),
+            topic: topic.to_string(),
+        };
+        h.sign(sk);
+        h
+    }
+
+    /// §25.3.1 rule 1: the empty topic has exactly one encoding — key `64` omitted. A non-empty
+    /// topic round-trips and re-encodes byte-identically (canonical).
+    #[test]
+    fn feed_head_topic_round_trips_and_default_omits_key_64() {
+        let sk = IdentityKey::from_seed(&[0x88u8; 32]);
+
+        let default = topic_head(&sk, "");
+        let bytes = default.det_cbor();
+        // No byte 0x18 0x40 (key 64, one-byte-arg form) is emitted for the default feed.
+        let decoded = FeedHead::from_det_cbor(&bytes).expect("default head decodes");
+        assert_eq!(decoded, default);
+        assert_eq!(decoded.topic, "");
+        assert_eq!(decoded.det_cbor(), bytes, "canonical re-encode");
+
+        let topical = topic_head(&sk, "security-advisories");
+        let bytes2 = topical.det_cbor();
+        assert_ne!(bytes, bytes2, "a non-empty topic changes the wire bytes");
+        let decoded2 = FeedHead::from_det_cbor(&bytes2).expect("topic-scoped head decodes");
+        assert_eq!(decoded2, topical);
+        assert_eq!(decoded2.topic, "security-advisories");
+        assert_eq!(decoded2.det_cbor(), bytes2, "canonical re-encode");
+        decoded2.verify().expect("topic-scoped head still verifies");
+    }
+
+    /// §25.3.1: the topic is *inside* the signature — `FeedHead.sig` covers key 64 exactly as it
+    /// covers `pub`/`seq`/`tip`. Swapping the topic on an otherwise-identical head, without
+    /// re-signing, must fail verification (this is C-01's whole point: an earlier, rejected
+    /// design left the topic out of every signed byte).
+    #[test]
+    fn feed_head_topic_is_bound_into_the_signature() {
+        let sk = IdentityKey::from_seed(&[0x99u8; 32]);
+        let head = topic_head(&sk, "news");
+        let mut swapped = head.clone();
+        swapped.topic = "security-advisories".into();
+        // Signature was produced over "news"; it must not verify for the swapped topic.
+        assert_eq!(swapped.verify(), Err(PubError::FeedSigInvalid));
+        // The signing preimage itself differs (topic is inside det_cbor(FeedHead ∖ {8})).
+        assert_ne!(head.signing_preimage(), swapped.signing_preimage());
+    }
+
+    /// §25.3.1 rule 1: a `FeedHead` carrying key `64` with an **empty** string is malformed — the
+    /// default topic has exactly one encoding (omission), never an explicit `""`.
+    #[test]
+    fn feed_head_explicit_empty_topic_key_is_rejected() {
+        let sk = IdentityKey::from_seed(&[0xA1u8; 32]);
+        let head = topic_head(&sk, "news");
+        // Take a valid encoding and hand-craft an explicit-empty-topic variant of it.
+        let Cv::Map(mut pairs) = cbor::decode(&head.det_cbor()).unwrap() else { panic!("map") };
+        pairs.retain(|(k, _)| *k != 64);
+        pairs.push((64, Cv::Text(String::new())));
+        let bytes = cbor::encode(&Cv::Map(pairs));
+        assert_eq!(
+            FeedHead::from_det_cbor(&bytes),
+            Err(PubError::Cbor(cbor::CborError::TypeMismatch))
+        );
+    }
+
+    /// §25.3.4 rules 2/3, as applied to `FeedHead` key 64: an oversized or forbidden-code-point
+    /// topic label is rejected on decode, not silently repaired.
+    #[test]
+    fn feed_head_topic_label_grammar_is_enforced() {
+        let sk = IdentityKey::from_seed(&[0xA2u8; 32]);
+
+        // Rule 3: a forbidden code point (path separator) — the classic locator-confusion bug.
+        let with_slash = topic_head(&sk, "a/b");
+        assert!(FeedHead::from_det_cbor(&with_slash.det_cbor()).is_err());
+
+        // Rule 3: a C0 control character.
+        let with_control = topic_head(&sk, "bad\u{0001}topic");
+        assert!(FeedHead::from_det_cbor(&with_control.det_cbor()).is_err());
+
+        // Rule 2: over the 128-byte bound.
+        let too_long = topic_head(&sk, &"x".repeat(TOPIC_LABEL_MAX_BYTES + 1));
+        assert!(FeedHead::from_det_cbor(&too_long.det_cbor()).is_err());
+
+        // Exactly at the bound is fine.
+        let at_bound = topic_head(&sk, &"x".repeat(TOPIC_LABEL_MAX_BYTES));
+        assert!(FeedHead::from_det_cbor(&at_bound.det_cbor()).is_ok());
+    }
+
+    /// Unknown keys ≥ 64 OTHER than 64 itself remain rejected on a signed `FeedHead` — §25.3.1
+    /// widens the schema by exactly one recognized key, not the whole reserved range.
+    #[test]
+    fn feed_head_unrecognized_extension_key_still_rejected() {
+        let sk = IdentityKey::from_seed(&[0xA3u8; 32]);
+        let head = topic_head(&sk, "news");
+        let Cv::Map(mut pairs) = cbor::decode(&head.det_cbor()).unwrap() else { panic!("map") };
+        pairs.push((65, Cv::U64(1)));
+        let bytes = cbor::encode(&Cv::Map(pairs));
+        assert!(FeedHead::from_det_cbor(&bytes).is_err());
     }
 }

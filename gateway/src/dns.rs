@@ -13,13 +13,14 @@
 //! those; the reference gateway does not need them to demonstrate the outbound MX/MTA-STS flow.
 
 use std::io;
-use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 use std::time::Duration;
 
 pub const CLASS_IN: u16 = 1;
 pub const TYPE_A: u16 = 1;
 pub const TYPE_MX: u16 = 15;
 pub const TYPE_TXT: u16 = 16;
+pub const TYPE_AAAA: u16 = 28;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DnsError {
@@ -214,6 +215,17 @@ pub fn parse_a_rdata(rr: &ResourceRecord) -> Option<Ipv4Addr> {
     }
 }
 
+/// Decode an AAAA record's rdata (RFC 3596 §2.2): 16 octets, network byte order.
+pub fn parse_aaaa_rdata(rr: &ResourceRecord) -> Option<Ipv6Addr> {
+    if rr.rdata.len() == 16 {
+        let mut b = [0u8; 16];
+        b.copy_from_slice(&rr.rdata);
+        Some(Ipv6Addr::from(b))
+    } else {
+        None
+    }
+}
+
 /// Decode a TXT record's rdata: one or more length-prefixed character-strings, concatenated (RFC
 /// 1035 §3.3.14; RFC 8461 §3.1 policies are carried as a single concatenated value).
 pub fn parse_txt_rdata(rr: &ResourceRecord) -> String {
@@ -401,6 +413,21 @@ mod tests {
         let packet = build_response("mail.example.org", TYPE_A, &[(TYPE_A, vec![203, 0, 113, 7])]);
         let msg = parse_response(&packet).unwrap();
         assert_eq!(parse_a_rdata(&msg.answers[0]), Some(Ipv4Addr::new(203, 0, 113, 7)));
+    }
+
+    #[test]
+    fn round_trips_aaaa_record() {
+        let addr = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
+        let packet = build_response("mail.example.org", TYPE_AAAA, &[(TYPE_AAAA, addr.octets().to_vec())]);
+        let msg = parse_response(&packet).unwrap();
+        assert_eq!(parse_aaaa_rdata(&msg.answers[0]), Some(addr));
+    }
+
+    #[test]
+    fn aaaa_rdata_of_wrong_length_is_none_not_a_panic() {
+        let packet = build_response("mail.example.org", TYPE_AAAA, &[(TYPE_AAAA, vec![1, 2, 3])]);
+        let msg = parse_response(&packet).unwrap();
+        assert_eq!(parse_aaaa_rdata(&msg.answers[0]), None);
     }
 
     #[test]

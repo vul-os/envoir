@@ -278,10 +278,10 @@
       "note": "an unregistered suite byte MUST fail to decode (never guess; fail closed)"
     },
     {
-      "name": "suite_reject_0x05",
+      "name": "suite_reject_0x06",
       "operation": "suite_decode",
       "input": {
-        "cbor_hex": "05"
+        "cbor_hex": "06"
       },
       "expected": {
         "accepted": false
@@ -319,7 +319,7 @@
       "expected": {
         "accepted": true
       },
-      "note": "0x01 (legacy), 0x02 (the v0 REQUIRED originating suite), 0x03 (reserved AEAD-diverse) and 0x04 (reserved signature-diverse, the SLH-DSA anchor profile) are all REGISTERED code points and decode. Registered and implemented are different questions: decoding says the registry knows the byte; the support predicates say whether anything may be done under it. 0x04 was previously asserted here as unregistered-and-rejected, which stopped being true when §1.1 registered it and contradicted this very vector's own rationale."
+      "note": "0x01 (legacy), 0x02 (the v0 REQUIRED originating suite), 0x03 (reserved AEAD-diverse), 0x04 (reserved signature-diverse, the SLH-DSA anchor profile) and 0x05 (reserved hash-diverse, the SHA3-256 target) are all REGISTERED code points and decode. Registered and implemented are different questions: decoding says the registry knows the byte; the support predicates say whether anything may be done under it. 0x04 (then 0x05) was previously asserted here as unregistered-and-rejected, which stopped being true when §1.1 registered it and contradicted this very vector's own rationale."
     },
     {
       "name": "suite_accept_0x02",
@@ -330,7 +330,7 @@
       "expected": {
         "accepted": true
       },
-      "note": "0x01 (legacy), 0x02 (the v0 REQUIRED originating suite), 0x03 (reserved AEAD-diverse) and 0x04 (reserved signature-diverse, the SLH-DSA anchor profile) are all REGISTERED code points and decode. Registered and implemented are different questions: decoding says the registry knows the byte; the support predicates say whether anything may be done under it. 0x04 was previously asserted here as unregistered-and-rejected, which stopped being true when §1.1 registered it and contradicted this very vector's own rationale."
+      "note": "0x01 (legacy), 0x02 (the v0 REQUIRED originating suite), 0x03 (reserved AEAD-diverse), 0x04 (reserved signature-diverse, the SLH-DSA anchor profile) and 0x05 (reserved hash-diverse, the SHA3-256 target) are all REGISTERED code points and decode. Registered and implemented are different questions: decoding says the registry knows the byte; the support predicates say whether anything may be done under it. 0x04 (then 0x05) was previously asserted here as unregistered-and-rejected, which stopped being true when §1.1 registered it and contradicted this very vector's own rationale."
     },
     {
       "name": "suite_accept_0x03",
@@ -341,7 +341,7 @@
       "expected": {
         "accepted": true
       },
-      "note": "0x01 (legacy), 0x02 (the v0 REQUIRED originating suite), 0x03 (reserved AEAD-diverse) and 0x04 (reserved signature-diverse, the SLH-DSA anchor profile) are all REGISTERED code points and decode. Registered and implemented are different questions: decoding says the registry knows the byte; the support predicates say whether anything may be done under it. 0x04 was previously asserted here as unregistered-and-rejected, which stopped being true when §1.1 registered it and contradicted this very vector's own rationale."
+      "note": "0x01 (legacy), 0x02 (the v0 REQUIRED originating suite), 0x03 (reserved AEAD-diverse), 0x04 (reserved signature-diverse, the SLH-DSA anchor profile) and 0x05 (reserved hash-diverse, the SHA3-256 target) are all REGISTERED code points and decode. Registered and implemented are different questions: decoding says the registry knows the byte; the support predicates say whether anything may be done under it. 0x04 (then 0x05) was previously asserted here as unregistered-and-rejected, which stopped being true when §1.1 registered it and contradicted this very vector's own rationale."
     },
     {
       "name": "suite_accept_0x04",
@@ -352,7 +352,18 @@
       "expected": {
         "accepted": true
       },
-      "note": "0x01 (legacy), 0x02 (the v0 REQUIRED originating suite), 0x03 (reserved AEAD-diverse) and 0x04 (reserved signature-diverse, the SLH-DSA anchor profile) are all REGISTERED code points and decode. Registered and implemented are different questions: decoding says the registry knows the byte; the support predicates say whether anything may be done under it. 0x04 was previously asserted here as unregistered-and-rejected, which stopped being true when §1.1 registered it and contradicted this very vector's own rationale."
+      "note": "0x01 (legacy), 0x02 (the v0 REQUIRED originating suite), 0x03 (reserved AEAD-diverse), 0x04 (reserved signature-diverse, the SLH-DSA anchor profile) and 0x05 (reserved hash-diverse, the SHA3-256 target) are all REGISTERED code points and decode. Registered and implemented are different questions: decoding says the registry knows the byte; the support predicates say whether anything may be done under it. 0x04 (then 0x05) was previously asserted here as unregistered-and-rejected, which stopped being true when §1.1 registered it and contradicted this very vector's own rationale."
+    },
+    {
+      "name": "suite_accept_0x05",
+      "operation": "suite_decode",
+      "input": {
+        "cbor_hex": "05"
+      },
+      "expected": {
+        "accepted": true
+      },
+      "note": "0x01 (legacy), 0x02 (the v0 REQUIRED originating suite), 0x03 (reserved AEAD-diverse), 0x04 (reserved signature-diverse, the SLH-DSA anchor profile) and 0x05 (reserved hash-diverse, the SHA3-256 target) are all REGISTERED code points and decode. Registered and implemented are different questions: decoding says the registry knows the byte; the support predicates say whether anything may be done under it. 0x04 (then 0x05) was previously asserted here as unregistered-and-rejected, which stopped being true when §1.1 registered it and contradicted this very vector's own rationale."
     },
     {
       "name": "mote_content_address_ok",

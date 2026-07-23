@@ -114,7 +114,12 @@ pub enum DmarcVerdict {
 
 /// Resolves `_dmarc` TXT records. Abstract so DMARC evaluation is testable in-process;
 /// [`DnsDmarcResolver`] is the real DNS-backed implementation.
-pub trait DmarcTxtResolver {
+///
+/// `Send + Sync`: [`crate::inbound::InboundGateway`] is shared (via `Arc`) across the
+/// per-connection threads the real MX listener spawns (§7.2, [`crate::inbound_tcp`]
+/// thread-per-connection) — every trait object it owns must therefore be safely usable from
+/// multiple threads at once.
+pub trait DmarcTxtResolver: Send + Sync {
     fn lookup_txt(&self, name: &str) -> Vec<String>;
 }
 

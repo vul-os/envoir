@@ -16,9 +16,67 @@ use dmtap_mail::mime::{encode_display_name, encode_header_value, format_rfc5322_
 use crate::b64;
 use crate::dkim::{self, DkimKey};
 use crate::idn;
+use crate::inbound::KeyDirectory;
 use crate::mta_sts::any_pattern_matches;
 use crate::mx::{InMemoryMxResolver, MxHost, MxResolver};
 use crate::outbound_guard::{OutboundSenderGuard, SenderVerdict};
+
+/// Whether an authenticated outbound submitter may claim `from_addr` as the RFC 5322 `From:` (and
+/// envelope `MAIL FROM`) address it is about to be DKIM-signed and sent as (spec §7.11.2 step 2).
+/// This is a **different fact** from two others this module already checks:
+///
+/// - **§7.11.2 step 1** ("is this sender authenticated to this gateway at all, and within its
+///   rate/volume budget") — [`OutboundSenderGuard`].
+/// - **§7.3 / §19.7.2 precondition 2** ("does the GATEWAY hold a DKIM delegation for this
+///   domain") — [`OutboundGateway::dkim_key_for`].
+///
+/// The spec is explicit that neither of those implies this one: *"A delegated DKIM selector
+/// (§7.3) authorizes the gateway to sign for a domain; it never authorizes any submitter to claim
+/// any address within that domain."* Without this check, any sender the gateway has admitted for
+/// **any** domain-delegated address could submit a MOTE with `From:` set to any OTHER address on
+/// that same domain (e.g. a colleague's, or the domain's postmaster) and have the gateway sign and
+/// relay it as fully DMARC-aligned mail — this trait is what closes that gap.
+///
+/// `submitter_ik` is the authenticated submitter's own DMTAP identity key: on the outbound path
+/// this is the decrypted MOTE's `Payload.from` (§18.3.5 key 1), which the mesh-ingest caller has
+/// already verified `Payload.sig` (key 2) binds before ever handing the payload to the gateway —
+/// so by the time `submitter_ik` reaches this trait it is a proven, not merely claimed, identity.
+pub trait AddressClaimAuthz: Send + Sync {
+    /// `true` iff `submitter_ik` is authorized to send as `from_addr`.
+    fn may_claim(&self, submitter_ik: &[u8], from_addr: &str) -> bool;
+}
+
+/// The **ordinary case** of §7.11.2 step 2's two bullets: resolve `from_addr` (§3.3) via the SAME
+/// [`KeyDirectory`] the inbound leg already trusts for `RCPT TO` resolution, and require the
+/// resolved key to equal the submitter's own — i.e. a submitter may claim exactly the
+/// `name@domain` binding it already holds, precisely mirroring the inbound direction's authority
+/// for "who owns this address" rather than inventing a second, separate answer to that question.
+/// The spec's second bullet (an explicit **per-address grant** naming an address for a *different*
+/// key than the one the address's own directory entry names) is deliberately left to a
+/// bespoke [`AddressClaimAuthz`] impl — the spec itself leaves that grant type's shape to a
+/// follow-up (§7.11.2 step 2 note), so this type does not invent one.
+pub struct DirectoryClaimAuthz {
+    directory: Box<dyn KeyDirectory>,
+}
+
+impl DirectoryClaimAuthz {
+    /// Authorize claims against `directory` (typically the same directory instance backing the
+    /// inbound gateway's `RCPT TO` resolution).
+    pub fn new(directory: Box<dyn KeyDirectory>) -> Self {
+        DirectoryClaimAuthz { directory }
+    }
+}
+
+impl AddressClaimAuthz for DirectoryClaimAuthz {
+    fn may_claim(&self, submitter_ik: &[u8], from_addr: &str) -> bool {
+        match self.directory.resolve(from_addr) {
+            Some(recipient) => recipient.ik == submitter_ik,
+            // An address the gateway's own directory does not resolve at all can never be claimed
+            // — there is no binding for anyone to hold (fail closed, never guess).
+            None => false,
+        }
+    }
+}
 
 /// TLS requirement for a destination, from an MTA-STS/DANE policy lookup (§7.3 step 4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +151,12 @@ pub struct OutboundGateway {
     /// [`Self::send_authenticated`] **fails closed** (refuses) rather than relaying ungoverned — so
     /// the gateway can never become an open outbound relay by forgetting to attach a guard.
     sender_guard: Option<OutboundSenderGuard>,
+    /// Optional per-address claim authorizer (§7.11.2 step 2). When `None`, the governed egress
+    /// entry point [`Self::send_authenticated`] **fails closed** (refuses) exactly as an unset
+    /// `sender_guard` does — being authenticated to this gateway (step 1) and the gateway holding a
+    /// DKIM delegation for a domain (§7.3) are BOTH insufficient on their own to let a submitter
+    /// claim an arbitrary address on that domain; see [`AddressClaimAuthz`].
+    address_authz: Option<Box<dyn AddressClaimAuthz>>,
 }
 
 /// The result of a governed outbound send ([`OutboundGateway::send_authenticated`]): either the send
@@ -168,6 +232,7 @@ impl OutboundGateway {
             transport,
             mx_resolver: Box::new(InMemoryMxResolver::new()),
             sender_guard: None,
+            address_authz: None,
         }
     }
 
@@ -176,6 +241,15 @@ impl OutboundGateway {
     /// so the gateway cannot be turned into a spam relay. See [`OutboundSenderGuard`].
     pub fn with_sender_guard(mut self, guard: OutboundSenderGuard) -> Self {
         self.sender_guard = Some(guard);
+        self
+    }
+
+    /// Attach the per-address claim authorizer (§7.11.2 step 2). With it set,
+    /// [`Self::send_authenticated`] additionally enforces that the authenticated submitter is
+    /// actually authorized to claim the `From:` address it is sending as — not merely that it is
+    /// *some* authenticated sender of *some* domain-delegated address. See [`AddressClaimAuthz`].
+    pub fn with_address_claim_authz(mut self, authz: Box<dyn AddressClaimAuthz>) -> Self {
+        self.address_authz = Some(authz);
         self
     }
 
@@ -314,6 +388,12 @@ impl OutboundGateway {
     /// attach a guard does not silently run an open outbound relay. (The raw, ungoverned
     /// [`Self::send`] remains available for callers that governed the sender upstream and opt in
     /// explicitly.)
+    ///
+    /// Also enforces the **per-address claim** authorization of §7.11.2 step 2 via
+    /// [`AddressClaimAuthz`] — a *second*, independent gate from the sender-authentication check
+    /// above: being an authenticated sender of *some* domain-delegated address does not authorize
+    /// claiming *any* address on that domain. With **no** claim authorizer configured this ALSO
+    /// fails closed, for the identical reason an unset `sender_guard` does.
     pub fn send_authenticated(
         &self,
         payload: &Payload,
@@ -331,6 +411,27 @@ impl OutboundGateway {
         match guard.authorize_send(account) {
             SenderVerdict::Allow => {}
             blocked => return GovernedSend::Blocked(blocked),
+        }
+        // §7.11.2 step 2: authentication (above) proves WHO is sending; this proves they may send
+        // AS `from_addr` specifically. Neither implies the other (see `AddressClaimAuthz` docs).
+        match &self.address_authz {
+            Some(authz) if authz.may_claim(&payload.from, from_addr) => {}
+            Some(_) => {
+                return GovernedSend::Blocked(SenderVerdict::Refuse {
+                    reason: format!(
+                        "5.7.1 outbound relay denied: sender is not authorized to claim the \
+                         address {from_addr} (ERR_GATEWAY_SENDER_ADDRESS_UNAUTHORIZED, §7.11.2 \
+                         step 2)"
+                    ),
+                });
+            }
+            None => {
+                return GovernedSend::Blocked(SenderVerdict::Refuse {
+                    reason: "5.7.1 outbound relay denied: no address-claim authorizer configured \
+                             (fail-closed, §7.11.2 step 2)"
+                        .into(),
+                });
+            }
         }
         let report = self.send(payload, from_addr, to_addr, now);
         {

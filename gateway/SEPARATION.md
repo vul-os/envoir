@@ -6,8 +6,13 @@ release tags. In practice `dmtap-core`'s API is still moving fast, and every cor
 touched the gateway became the cross-repo dance predicted below (edit core → tag → bump the pin →
 fix the gateway). So the gateway was subtree-merged back into this monorepo — history preserved —
 as the `gateway/` workspace member with plain path deps, building its own `envoir-gateway` binary
-alongside `envoir-node`. The standalone repo was retired. The boundary discipline below still
-applies verbatim, so a future re-split (post-1.0, per the triggers below) stays a clean lift.
+alongside `envoir-node`. The standalone repo was retired.
+
+**Update 2026-07-23 — the split is SCRAPPED.** The gateway stays in this monorepo **permanently**,
+not merely until post-1.0. The boundary discipline below is kept regardless — because it is good
+architecture that keeps the gateway a *deprecatable bridge* depending only on `dmtap-core`/`dmtap-mail`'s
+public API — **no longer to preserve a re-split option**. The "When to actually split it out" section
+is retained only as historical rationale; the `isango` remote is abandoned.
 
 The notes below are kept as the record of why the gateway is the natural component to separate and
 the discipline that keeps that option open.
@@ -47,8 +52,14 @@ Keep the gateway loosely coupled so extracting it is a `git filter-repo` plus a 
 - **No dependency on `node` / `dmtap-p2p`.** Mesh delivery is behind the `MeshDelivery` trait
   (`src/mesh.rs`) — the `dmtap-p2p`/node swarm is the drop-in *above* the gateway, never a build
   dependency of it (this also avoids the `dmtap-p2p → node` cycle).
-- **Own wire objects via `dmtap-core`.** `GatewayAttestation` / `ProvenanceRecord` come from
-  `dmtap-core`; the gateway consumes, it does not redefine.
+- **Own wire objects, built ON `dmtap-core` primitives — not imported FROM it.**
+  `GatewayAttestation` (§18.3.11, the normative wire form of the §7.2a domain-anchored gateway
+  attestation) and `ProvenanceRecord` (§18.8.1, the client-facing transport-path record) are
+  defined **here**, in `src/provenance.rs` — `dmtap-core` defines neither type. What they DO take
+  from `dmtap-core` is its canonical §18 CBOR codec, `ContentId`, and `identity::verify_domain` —
+  the same "depend only on the public API" discipline as everything else in this list. Extracting
+  the gateway carries both types with it; there is nothing to "redefine" because `dmtap-core` never
+  defined them in the first place.
 - **Config/authz/quota/usage-tracking are self-contained** (`GatewayAuthz`, `GatewayMeter`); billing
   is an external concern — an operator's own tooling reads the meter (see `crates/dmtap-seam`'s
   `BillingSink` boundary and the reference machinery in `crates/dmtap-operator`) — never a build

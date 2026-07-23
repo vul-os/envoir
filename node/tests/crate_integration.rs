@@ -18,6 +18,7 @@ use dmtap::auth::{
     SessionKey, SystemClock, TrustedClientStub,
 };
 use dmtap::dmtap_core::deniable::DeniablePayload;
+use dmtap::dmtap_core::pubsub::FeedHint;
 use dmtap::identity::{DeviceCert, Identity, IdentityKey};
 use dmtap::inbound::InboundOutcome;
 use dmtap::mote::{Headers, Kind, MoteDraft, SealKeypair};
@@ -801,5 +802,78 @@ fn a_sensitive_message_is_delivered_and_acked_but_never_stored() {
         bob_node.inbox().exists(),
         1,
         "the inbox must still hold only the ordinary message — the sensitive one was never stored"
+    );
+}
+
+/// DMTAP-PUBSUB-07 (spec §25.6.4, §2.7, §9.2): an unsolicited `FeedHint` (kind `0x41`) — one from a
+/// publisher the recipient's node has never pinned as a contact — is not a wire fault. It decodes as
+/// an ordinary MOTE and receives exactly the ordinary §2.7a cold-sender disposition: held in the
+/// requests area, unacked, never filed to the inbox as a delivered notification.
+///
+/// Before this session's `Kind` fix, `0x41` had no `Kind::from_u8` mapping at all, so
+/// `Envelope::from_det_cbor` rejected it outright (`CborError::UnknownDiscriminant`) and
+/// `Node::receive_mote` mapped that straight to `Dropped(DropReason::Malformed)` — indistinguishable
+/// from a forged/garbage MOTE, and silently discarded rather than held for review. A `FeedHint` is
+/// documented (§25, `dmtap-core::pubsub`) to ride the ordinary Envelope/Payload path completely
+/// unchanged, with **no** kind-specific dispatch at this layer — so the fix is exactly the `Kind`
+/// registration, not any new branch in `Node::receive_mote`/`inbound.rs`.
+///
+/// The known-contact half is the positive control: it proves the SAME kind of MOTE, from a sender
+/// the node already knows, is a perfectly good, storable object — so the cold-sender assertion below
+/// is really exercising the §2.7a disposition, not some unrelated defect in `FeedHint`'s own wire
+/// format.
+#[test]
+fn an_unsolicited_feed_hint_gets_the_cold_sender_disposition_not_a_wire_fault() {
+    let net = InMemoryNetwork::new();
+    let bob_ik = IdentityKey::generate();
+    let bob_seal = SealKeypair::generate();
+    let bob_ik_pub = bob_ik.public();
+    let bob_seal_pub = *bob_seal.public();
+    let mut bob_node = Node::with_identity(bob_ik, bob_seal, net.endpoint(bob_ik_pub.clone()));
+
+    let hint = FeedHint { feed: vec![7u8; 32], topic: "news".into(), seq: 42, tip: None, announce: None };
+
+    // Positive control: a publisher Bob already knows sends the SAME kind of hint — accepted and
+    // filed, proving kind 0x41 is an ordinary, well-formed, storable MOTE at this node.
+    let known_ik = IdentityKey::generate();
+    let known_seal = SealKeypair::generate();
+    let known_ik_pub = known_ik.public();
+    let mut known_pub = Node::with_identity(known_ik, known_seal, net.endpoint(known_ik_pub.clone()));
+    bob_node.add_contact(&known_ik_pub, known_pub.seal_public());
+    known_pub.add_contact(&bob_ik_pub, bob_seal_pub);
+    let draft = MoteDraft::new(Kind::FeedHint, NOW, hint.det_cbor());
+    known_pub.send_with_draft(&bob_ik_pub, draft).expect("send known-contact hint");
+    let out = bob_node.poll();
+    assert!(
+        matches!(out[0], InboundOutcome::Stored { .. }),
+        "a FeedHint from an established contact must be stored (not a wire fault), got {:?}",
+        out[0]
+    );
+    assert_eq!(bob_node.inbox().exists(), 1);
+
+    // The actual case: a publisher Bob has NEVER pinned sends the identical shape of hint. Bob has
+    // no `Subscription` to it and no standing (§25.6.4) — cold-sender territory.
+    let cold_ik = IdentityKey::generate();
+    let cold_seal = SealKeypair::generate();
+    let cold_ik_pub = cold_ik.public();
+    let mut cold_pub = Node::with_identity(cold_ik, cold_seal, net.endpoint(cold_ik_pub.clone()));
+    // Only the SENDER learns Bob's sealing key (so she can address him at all) — Bob never learns
+    // hers, which is what keeps her cold from his side (§2.7 step 5/6).
+    cold_pub.add_contact(&bob_ik_pub, bob_seal_pub);
+    let draft = MoteDraft::new(Kind::FeedHint, NOW, hint.det_cbor());
+    cold_pub.send_with_draft(&bob_ik_pub, draft).expect("send cold-sender hint");
+    let out = bob_node.poll();
+    assert!(
+        matches!(out[0], InboundOutcome::Deferred { .. }),
+        "an unsolicited FeedHint must take the ordinary §2.7a cold-sender disposition, not be \
+         dropped as malformed and not be treated as an established contact, got {:?}",
+        out[0]
+    );
+    assert!(!out[0].acked(), "a deferred cold-sender MOTE is never acked (§2.7a, §19.3.1 step 9)");
+    assert_eq!(bob_node.inbox().exists(), 1, "the unsolicited hint must NOT reach the inbox");
+    assert_eq!(
+        bob_node.requests().exists(),
+        1,
+        "it must be held in the requests area, not simply discarded"
     );
 }

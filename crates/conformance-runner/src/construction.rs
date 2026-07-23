@@ -118,11 +118,13 @@ pub fn run_construction_case(case: &SuiteCase) -> CaseOutcome {
         "DMTAP-WIRE-03" => Some(recovery_policy_required_fields_and_ordering()),
         "DMTAP-ABUSE-06" => Some(vouch_subject_binding_rejects_a_lifted_vouch()),
         "DMTAP-PUBSUB-01" => Some(pubsub_subscription_signing_preimage()),
+        "DMTAP-PUBSUB-16" => Some(pubsub_subscription_id_dedup_and_revoke_reach_both_encodings()),
         "DMTAP-PUBSUB-02" => Some(pubsub_subscription_signer_authorization()),
         "DMTAP-PUBSUB-03" | "DMTAP-PUBSUB-14" => Some(pubsub_subscription_required_fields()),
         "DMTAP-PUBSUB-04" => Some(pubsub_subscription_expiry()),
         "DMTAP-PUBSUB-05" => Some(pubsub_revoke_same_author()),
         "DMTAP-PUBSUB-06" => Some(pubsub_revoke_effect()),
+        "DMTAP-PUBSUB-07" => Some(pubsub_unsolicited_hint_is_cold_sender_disposition()),
         "DMTAP-PUBSUB-09" => Some(pubsub_hint_is_advisory_only()),
         "DMTAP-PUBSUB-11" => Some(pubsub_subscribe_quota()),
         "DMTAP-PUBSUB-12" => Some(pubsub_hint_rate_limit()),
@@ -693,16 +695,29 @@ fn pubsub_fixture(ik: &IdentityKey, feed: &[u8], expires: u64) -> Subscription {
     s
 }
 
-/// DMTAP-PUBSUB-01 (§25.4.1): `subscription_id` and the signing preimage follow the stated
-/// formulas, and a flipped signature bit is rejected (`0x090E`).
+/// DMTAP-PUBSUB-01 (§25.4.1, §25.13 C-03): `subscription_id` is derived from the **body only**
+/// (`sig`, key 10, excluded) under the `DMTAP-PUB-v0/subscription-id` hash DS-tag, and a flipped
+/// signature bit is rejected by `verify()` (`0x090E`) while leaving `subscription_id` unchanged.
+///
+/// This case used to assert the OPPOSITE property — that `subscription_id` covered the complete
+/// signed object and that tampering `sig` MUST change it — which was the pre-C-03 defect itself,
+/// re-encoded as a passing test: a vector that agrees with a buggy implementation proves only that
+/// the two agree with each other, never that either matches the spec. §25.13 C-03 states plainly
+/// why the old formula is wrong: no identifier may be derived from a signature (§1.3), because a
+/// valid `sig` can be maulable into a different valid signature over the same body, and an id that
+/// moved with `sig` let a mauled copy escape a revoke naming the original.
 fn pubsub_subscription_signing_preimage() -> Result<(), String> {
     let ik = IdentityKey::generate();
     let s = pubsub_fixture(&ik, &[9u8; 32], 9_000);
 
-    // `subscription_id` is over the COMPLETE, SIGNED object (§18.9.4 derived-anchor rule), so it is
-    // reproducible by anyone holding the wire bytes and nothing else.
-    if s.subscription_id() != ContentId::of(&s.det_cbor()) {
-        return Err("subscription_id must equal 0x1e‖BLAKE3-256(det_cbor(Subscription))".into());
+    // `subscription_id` is over the BODY only — `det_cbor(Subscription ∖ {10})` under the
+    // `DMTAP-PUB-v0/subscription-id` DS-tag — never the complete signed object.
+    if s.subscription_id() == ContentId::of(&s.det_cbor()) {
+        return Err(
+            "subscription_id must NOT equal 0x1e‖BLAKE3-256(det_cbor(Subscription)) (the pre-C-03 \
+             formula, which hashes the signature too)"
+                .into(),
+        );
     }
     // The preimage EXCLUDES key 10, or the signature would have to cover itself.
     if s.signing_preimage() == s.det_cbor() {
@@ -716,11 +731,75 @@ fn pubsub_subscription_signing_preimage() -> Result<(), String> {
         Err(PubError::SubscriptionSigInvalid) => {}
         other => return Err(format!("a flipped sig bit must be rejected 0x090E, got {other:?}")),
     }
-    // The address is over the signed bytes, so tampering also moves the address — a tampered object
-    // is not merely invalid, it is a different object.
-    if tampered.subscription_id() == s.subscription_id() {
-        return Err("tampering `sig` must change subscription_id".into());
+    // The body is untouched, so the identifier MUST NOT move — a mauled/invalid `sig` is still a
+    // sig-only change, and §25.13 C-03 requires exactly this to leave subscription_id fixed (it is
+    // what keeps a revoke naming the original id able to reach a mauled copy too).
+    if tampered.subscription_id() != s.subscription_id() {
+        return Err("tampering ONLY `sig` must NOT change subscription_id (§25.13 C-03)".into());
     }
+    Ok(())
+}
+
+/// DMTAP-PUBSUB-16 (§25.4.1, §25.7.1, §25.5.1, §25.13 C-03): the security consequence of the
+/// body-only `subscription_id`, stated as the three things it buys — two differently-encoded
+/// copies of one `Subscription` body (different `sig` bytes, one honestly re-signed and one
+/// outright mauled) MUST: (a) identify the same, (b) occupy exactly ONE aggregate-quota slot when a
+/// holder dedupes by id, and (c) both be reachable by a single `SubscriptionRevoke` naming that id.
+fn pubsub_subscription_id_dedup_and_revoke_reach_both_encodings() -> Result<(), String> {
+    let ik = IdentityKey::generate();
+    let a = pubsub_fixture(&ik, &[9u8; 32], 9_000);
+    // A second, honestly re-derived signing of the IDENTICAL body — `IdentityKey::sign_domain` is
+    // deterministic, so re-signing alone would reproduce the SAME bytes; to obtain a genuinely
+    // different (still `sig`-only) encoding of one Subscription without depending on Ed25519
+    // malleability (which `verify_domain`'s `verify_strict` closes for suite 0x01 — see note in
+    // SUITE.md/report), this copy simply carries a mauled `sig`. That is sufficient to prove the
+    // property that matters: `subscription_id` does not depend on `sig`'s bytes AT ALL, so it holds
+    // whether the second encoding is a legitimate re-signing (a real possibility for a composite
+    // suite's AND-composed sig-val, not modeled by this classical-suite reference) or outright
+    // tampering — the id is the same either way, which is the whole point of excluding key 10.
+    let mut b = a.clone();
+    b.sig = vec![0xEE; a.sig.len()];
+    if a.sig == b.sig {
+        return Err("test bug: the two encodings must carry different sig bytes".into());
+    }
+
+    // (a) same id.
+    if a.subscription_id() != b.subscription_id() {
+        return Err("two sig-only-different encodings of one Subscription body must share one \
+                     subscription_id (§25.13 C-03)"
+            .into());
+    }
+
+    // (b) one aggregate-quota slot: a holder dedupes its "currently active" set by subscription_id
+    // (§25.7.1), so inserting both encodings into that set must leave it at size 1, not 2.
+    let mut active: std::collections::HashSet<ContentId> = std::collections::HashSet::new();
+    active.insert(a.subscription_id());
+    active.insert(b.subscription_id());
+    if active.len() != 1 {
+        return Err(format!(
+            "two encodings of one Subscription must occupy ONE aggregate quota slot, got {}",
+            active.len()
+        ));
+    }
+
+    // (c) a single revoke naming that id reaches BOTH encodings, independent of which one's `sig`
+    // bytes it was minted against.
+    let mut revoke = SubscriptionRevoke {
+        subscription: a.subscription_id(),
+        ts: 2_000,
+        signer: ik.public(),
+        sig: vec![],
+        v: 0,
+        suite: Suite::Classical,
+        device_cert: None,
+    };
+    revoke.sign(&ik);
+    revoke
+        .verify_for(&a, None)
+        .map_err(|e| format!("revoke must match encoding A by id, got {e:?}"))?;
+    revoke
+        .verify_for(&b, None)
+        .map_err(|e| format!("revoke must ALSO match encoding B — same body, same id, got {e:?}"))?;
     Ok(())
 }
 
@@ -816,6 +895,9 @@ fn pubsub_revoke_same_author() -> Result<(), String> {
         ts: 2_000,
         signer: ik.public(),
         sig: vec![],
+        v: 0,
+        suite: Suite::Classical,
+        device_cert: None,
     };
     good.sign(&ik);
     good.verify_for(&s, None)
@@ -830,6 +912,9 @@ fn pubsub_revoke_same_author() -> Result<(), String> {
         ts: 2_000,
         signer: attacker.public(),
         sig: vec![],
+        v: 0,
+        suite: Suite::Classical,
+        device_cert: None,
     };
     cross.sign(&attacker);
     match cross.verify_for(&s, None) {
@@ -848,6 +933,9 @@ fn pubsub_revoke_effect() -> Result<(), String> {
         ts: 2_000,
         signer: ik.public(),
         sig: vec![],
+        v: 0,
+        suite: Suite::Classical,
+        device_cert: None,
     };
     revoke.sign(&ik);
     revoke.verify_for(&s, None).map_err(|e| format!("the revoke must verify, got {e:?}"))?;
@@ -890,6 +978,7 @@ fn pubsub_hint_is_advisory_only() -> Result<(), String> {
         ts: 1_000,
         signer: publisher.public(),
         sig: vec![],
+        topic: String::new(),
     };
     head.sign(&publisher);
     head.verify().map_err(|e| format!("the real head must verify, got {e:?}"))?;
@@ -927,6 +1016,66 @@ fn pubsub_hint_is_advisory_only() -> Result<(), String> {
         return Err("the verified head's seq must remain 3".into());
     }
     Ok(())
+}
+
+/// DMTAP-PUBSUB-07 (§25.6.4, §2.7, §9.2): an unsolicited `FeedHint` — no matching active
+/// `Subscription`, from a signer the recipient has never pinned as a contact — MUST receive the
+/// ordinary §2.7a cold-sender disposition, not a wire fault.
+///
+/// Before this session's `Kind` fix, `Kind::from_u8` returned `None` for `0x41`, so
+/// `Envelope::from_det_cbor` rejected EVERY `feed_hint` MOTE outright (`CborError::
+/// UnknownDiscriminant`) regardless of who sent it — indistinguishable from forged/garbage input.
+/// `dmtap-core::pubsub`'s own module doc states the fix precisely: `FeedHint` rides the existing
+/// `Envelope`/`Payload` deliver/ack/retry path completely unchanged, with **no** kind-specific
+/// dispatch introduced anywhere — so proving this case is proving the `Kind` registration alone is
+/// sufficient, not that `mote::validate` grew some new FeedHint-aware branch (it has none, by
+/// design).
+///
+/// The known-sender half is the control: it proves the identical hint bytes are a perfectly good
+/// `Accepted` MOTE whose body decodes back to the exact `FeedHint` sent — so the cold-sender
+/// assertion below is really exercising §2.7a, not an unrelated defect in `FeedHint`'s wire format.
+fn pubsub_unsolicited_hint_is_cold_sender_disposition() -> Result<(), String> {
+    let publisher = IdentityKey::generate();
+    let hint = FeedHint { feed: publisher.public(), topic: "news".into(), seq: 1, tip: None, announce: None };
+
+    let sender = IdentityKey::generate();
+    let ephemeral = IdentityKey::generate();
+    let recipient = IdentityKey::generate();
+    let seal = SealKeypair::generate();
+    let draft = MoteDraft::new(Kind::FeedHint, 1_700_000_000_000, hint.det_cbor());
+    let env = build_mote(&Hpke, &sender, &ephemeral, &recipient.public(), seal.public(), draft)
+        .map_err(|e| format!("build_mote with a FeedHint kind must succeed: {e:?}"))?;
+
+    // Control: from an established contact, the identical hint is Accepted and its body round-trips
+    // — proving 0x41 is an ordinary, well-formed, deliverable MOTE kind, not a wire fault.
+    let our_ik = recipient.public();
+    let known_ctx = RecipientCtx { our_ik: &our_ik, seal_secret: seal.secret(), sender_is_known: true };
+    match mote::validate(&Hpke, &env, &known_ctx) {
+        Ok(Outcome::Accepted(payload)) => {
+            let decoded = FeedHint::from_det_cbor(&payload.body)
+                .map_err(|e| format!("a delivered FeedHint's body must decode, got {e:?}"))?;
+            if decoded != hint {
+                return Err("the delivered FeedHint must be byte-identical to the one sent".into());
+            }
+        }
+        other => {
+            return Err(format!(
+                "a FeedHint from an established contact must be Accepted (not a wire fault), got {other:?}"
+            ))
+        }
+    }
+
+    // The actual case: the same MOTE, but the sender is NOT a pinned contact and carries no
+    // challenge — exactly the §2.7a "absent proof" cold-sender path (§9.2), regardless of kind.
+    let cold_ctx = RecipientCtx { our_ik: &our_ik, seal_secret: seal.secret(), sender_is_known: false };
+    match mote::validate(&Hpke, &env, &cold_ctx) {
+        Ok(Outcome::Deferred) => Ok(()),
+        other => Err(format!(
+            "an unsolicited FeedHint must take the ordinary §2.7a cold-sender disposition \
+             (Ok(Outcome::Deferred): held for review, not acked, not dropped, not surfaced as a \
+             normal notification), got {other:?}"
+        )),
+    }
 }
 
 /// DMTAP-PUBSUB-11 (§25.7.1): a holder applies an AGGREGATE subscriber-admission bound
@@ -1031,11 +1180,13 @@ fn pubsub_inlined_announce_is_verified() -> Result<(), String> {
 /// DMTAP-PUBSUB-10 (§25.3.3): a publisher's pre-existing (pre-topic) feed remains, byte-for-byte,
 /// the `topic = ""` feed. `feed_head(pub)` and `feed_head(pub, "")` resolve identically.
 ///
-/// This holds structurally rather than by convention: §25.3.1 makes `topic` a **locator** dimension,
-/// not a wire field, so `FeedHead` has no topic to carry and adopting topics cannot renumber or
-/// re-sign an existing feed. The case asserts that structural fact, because the alternative design
-/// — a topic field inside the signed head — would have silently invalidated every feed in existence
-/// on the day topics shipped.
+/// C-01 reversed the original §25.3.1 design: `topic` IS a signed wire field now (`FeedHead` key
+/// `64`), not a bare locator dimension. What still holds — and is exactly what this case asserts —
+/// is the encoding discipline that makes the claim above true anyway: the empty/default topic has
+/// exactly one encoding, **omitting** key 64 entirely, so a pre-existing default-feed head and a
+/// freshly-minted `topic = ""` head are byte-identical and neither renumbers nor re-signs the other.
+/// A non-empty topic, by contrast, IS carried inside `det_cbor(FeedHead ∖ {sig})` and is therefore
+/// covered by `FeedHead.sig` exactly as `pub`/`seq`/`tip` are (see [`FeedHead::topic`]).
 fn pubsub_default_topic_is_the_pretopic_feed() -> Result<(), String> {
     let publisher = IdentityKey::generate();
     let mut head = FeedHead {
@@ -1047,12 +1198,13 @@ fn pubsub_default_topic_is_the_pretopic_feed() -> Result<(), String> {
         ts: 1_000,
         signer: publisher.public(),
         sig: vec![],
+        topic: String::new(),
     };
     head.sign(&publisher);
     head.verify().map_err(|e| format!("the pre-topic head must verify, got {e:?}"))?;
 
     // A topic-unaware peer and a topic-aware peer requesting the default topic obtain the same
-    // object: there is no topic field to differ on, so the bytes cannot diverge.
+    // object: the empty topic has exactly one encoding (key 64 omitted), so the bytes cannot diverge.
     let by_topic_unaware = head.det_cbor();
     let by_topic_aware_default = FeedHead::from_det_cbor(&by_topic_unaware)
         .map_err(|e| format!("the head must decode for a topic-aware peer, got {e:?}"))?
@@ -1061,7 +1213,8 @@ fn pubsub_default_topic_is_the_pretopic_feed() -> Result<(), String> {
         return Err("feed_head(pub) and feed_head(pub, \"\") must be byte-identical".into());
     }
 
-    // And the head carries no topic key at all — the claim above is structural, not incidental.
+    // And the empty-topic head carries no key 64 at all — the claim above is structural, not
+    // incidental: only a NON-empty topic occupies a wire key.
     let Cv::Map(pairs) = cbor::decode(&by_topic_unaware).map_err(|e| format!("decode: {e}"))? else {
         return Err("FeedHead must encode as an integer-keyed map".into());
     };
@@ -2129,6 +2282,7 @@ fn pub_feed_head_bad_sig_rejected() -> Result<(), String> {
         ts: 1_700_000_000_000,
         signer: pk,
         sig: Vec::new(),
+        topic: String::new(),
     };
     head.sign(&sk);
     head.verify().map_err(|e| format!("sanity: a valid FeedHead must verify: {e}"))?;
@@ -2693,6 +2847,18 @@ fn val_bad_payload_sig() -> Result<(), String> {
 /// envelope's CBOR with key 7 (kind) set to an unknown byte and confirm `Envelope::from_det_cbor`
 /// fails closed (rather than silently defaulting) — the earliest point such a MOTE can be
 /// rejected.
+///
+/// **Byte substituted, 2026-07 (§22/§25 DMTAP-PUBSUB landing).** suite.json's own construction
+/// text names `0x40` specifically, but `0x40` stopped being "reserved, unimplemented" the moment
+/// `dmtap_core::mote::Kind::PubAnnounce` claimed it (§22, §21.16) — `Kind::from_u8(0x40)` now
+/// returns `Some(PubAnnounce)`, so an envelope spliced with `kind = 0x40` decodes successfully
+/// instead of failing `UnknownDiscriminant`, which would make this case assert the opposite of
+/// what it means to test. The underlying MUST (§2.3/§10.1: an unvalidatable kind is ignored,
+/// never acked) is unaffected by which byte demonstrates it, so `0x0c` — the first byte past the
+/// last assigned core kind (`Deniable = 0x0b`) and still unassigned in `Kind::from_u8` — stands in
+/// for suite.json's stale `0x40`. Flagged here rather than silently reusing a byte that no longer
+/// means what the spec's own case text says it means; the spec repo's suite.json wording is a
+/// separate-project artifact this crate does not own and does not edit.
 /// DMTAP-FWDCOMPAT-01 (§21.25, §10.1, §21.20): three unknown values, three DIFFERENT dispositions.
 /// An unknown suite is rejected fail-closed (no processing); an unknown kind is not acknowledged
 /// but MAY be ignored rather than rejected; an unknown `Headers.ext` key is ignored and MUST NOT
@@ -2723,13 +2889,19 @@ fn forward_compat_three_dispositions() -> Result<(), String> {
     //     recognized-shape envelope whose `kind` this node does not implement. The reference
     //     surfaces it as `UnknownDiscriminant` at decode, which the node maps to IGNORE_NO_ACK
     //     (0x020A) — distinct from the suite case, which never reaches processing at all.
+    //
+    //     `0x20` stands in for suite.json's unspecific "an unassigned kind in the extension
+    //     range" (no literal byte is pinned there, unlike DMTAP-VAL-13). `0x41` was the original
+    //     choice here but §22/§25 DMTAP-PUBSUB has since claimed it for `Kind::FeedHint`
+    //     (dmtap_core::mote), so it now decodes successfully instead of failing closed — `0x20`
+    //     remains genuinely unassigned in `Kind::from_u8`.
     let env2 = sample_envelope();
     let Cv::Map(mut p2) = cbor::decode(&env2.det_cbor()).map_err(|e| format!("decode: {e}"))? else {
         return Err("envelope is not a map".into());
     };
     for (k, v) in p2.iter_mut() {
         if *k == 7 {
-            *v = Cv::U64(0x41); // an unassigned kind in the extension range
+            *v = Cv::U64(0x20); // an unassigned kind in the extension range
         }
     }
     match Envelope::from_det_cbor(&cbor::encode(&Cv::Map(p2))) {
@@ -2829,7 +3001,8 @@ fn val_kind_unknown_rejected() -> Result<(), String> {
     let mut found = false;
     for (k, v) in pairs.iter_mut() {
         if *k == 7 {
-            *v = Cv::U64(0x40); // reserved/unimplemented kind byte.
+            // 0x0c: still genuinely unassigned (0x40 is PubAnnounce now, see the fn doc comment).
+            *v = Cv::U64(0x0c);
             found = true;
         }
     }
@@ -2839,7 +3012,7 @@ fn val_kind_unknown_rejected() -> Result<(), String> {
     let spliced = cbor::encode(&Cv::Map(pairs));
     match Envelope::from_det_cbor(&spliced) {
         Err(CborError::UnknownDiscriminant(_)) => Ok(()),
-        other => Err(format!("expected Err(UnknownDiscriminant) decoding kind=0x40, got {other:?}")),
+        other => Err(format!("expected Err(UnknownDiscriminant) decoding kind=0x0c, got {other:?}")),
     }
 }
 

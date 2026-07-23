@@ -172,6 +172,7 @@ impl PubStore {
             ts: now,
             signer: signer_key.public(),
             sig: Vec::new(),
+            topic: String::new(),
         };
         head.sign(signer_key);
 

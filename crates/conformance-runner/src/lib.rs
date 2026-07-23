@@ -69,6 +69,7 @@ use dmtap_core::pubobj::{
     check_anti_rollback, check_supersede, pub_manifest_root, sealed_style_root, verify_feed_chain,
     FeedEntry, PubAnnounce, PubError, PubManifest, RollbackDecision,
 };
+use dmtap_core::pubsub::Subscription;
 use dmtap_core::sphinx::{RoutingCommand, SphinxCell, SphinxFragmentHeader, Surb};
 use dmtap_core::suite::Suite;
 
@@ -374,6 +375,8 @@ fn check_vector_inner(v: &Vector) -> Result<Verdict, String> {
         "pub_supersede_check" => check_pub_supersede(v),
         "pub_feed_entry_root" => check_pub_feed_entry_root(v),
         "pub_feed_anti_rollback" => check_pub_anti_rollback(v),
+        // ── DMTAP-PUBSUB (§25) operations ───────────────────────────────────────────────────
+        "pubsub_subscription_id" => check_pubsub_subscription_id(v),
         other => Err(format!("conformance-runner does not know operation `{other}` (extend check_vector_inner)")),
     }
 }
@@ -458,6 +461,38 @@ fn check_pub_manifest_type_mismatch(v: &Vector) -> Result<Verdict, String> {
         return Err("vector claims roots_differ=false, but §22.2.3 requires they differ".into());
     }
     Ok(Verdict::Pass)
+}
+
+/// §25.4.1 / §25.13 C-03 — `Subscription.subscription_id()` MUST be computed over the body only
+/// (`sig`, key 10, excluded). The vector supplies a complete `Subscription` (including a `sig_hex`
+/// that need not itself verify — the property under test does not depend on it) and the
+/// independently-computed `subscription_id_hex`; this builds the real `dmtap_core::pubsub::
+/// Subscription` from those fields and asserts `.subscription_id()` reproduces the committed value.
+/// Two vectors sharing an identical body but different `sig_hex` (see `pubsub_subscription_id_sig_a`
+/// / `_sig_b` in `pubsub_vectors.json`) therefore assert the SAME `expected.subscription_id_hex`,
+/// which is the byte-level proof that the id does not move with `sig`.
+fn check_pubsub_subscription_id(v: &Vector) -> Result<Verdict, String> {
+    let suite_byte = v.input.get("suite").and_then(Value::as_u64).ok_or("missing input.suite")? as u8;
+    let suite = Suite::from_u8(suite_byte).ok_or_else(|| format!("unknown suite byte {suite_byte:#04x}"))?;
+    let s = Subscription {
+        v: v.input.get("v").and_then(Value::as_u64).ok_or("missing input.v")? as u8,
+        suite,
+        subscriber: unhex(as_hex_str(&v.input, "subscriber_hex")?)?,
+        feed: unhex(as_hex_str(&v.input, "feed_hex")?)?,
+        topic: v.input.get("topic").and_then(Value::as_str).ok_or("missing input.topic")?.to_string(),
+        issued: v.input.get("issued").and_then(Value::as_u64).ok_or("missing input.issued")?,
+        expires: v.input.get("expires").and_then(Value::as_u64).ok_or("missing input.expires")?,
+        nonce: unhex(as_hex_str(&v.input, "nonce_hex")?)?,
+        signer: unhex(as_hex_str(&v.input, "signer_hex")?)?,
+        sig: unhex(as_hex_str(&v.input, "sig_hex")?)?,
+    };
+    let want = as_hex_str(&v.expected, "subscription_id_hex")?;
+    let got = hex(s.subscription_id().as_bytes());
+    if got == want {
+        Ok(Verdict::Pass)
+    } else {
+        Err(format!("subscription_id mismatch: got {got}, want {want}"))
+    }
 }
 
 /// A `reject`-outcome decode vector: the reference decoder MUST fail (fail-closed), and — when the

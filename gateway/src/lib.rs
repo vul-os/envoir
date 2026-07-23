@@ -134,8 +134,9 @@ pub use multidomain::{
 };
 pub use mx::{DnsMxResolver, InMemoryMxResolver, MxHost, MxResolver};
 pub use outbound::{
-    AlwaysRequireTls, GovernedSend, OutboundError, OutboundGateway, OutboundReport,
-    OutboundTransport, TlsPolicy, TlsRequirement, TransportResult,
+    AddressClaimAuthz, AlwaysRequireTls, DirectoryClaimAuthz, GovernedSend, OutboundError,
+    OutboundGateway, OutboundReport, OutboundTransport, TlsPolicy, TlsRequirement,
+    TransportResult,
 };
 pub use outbound_guard::{OutboundSenderGuard, SenderVerdict};
 pub use outbound_tcp::SmtpTcpTransport;

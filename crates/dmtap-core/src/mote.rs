@@ -70,7 +70,8 @@ pub enum MoteError {
     /// the bare envelope `sender_sig` (§18.9.1) is minted by an anyone-can-mint ephemeral key, a
     /// re-emitter of the sealed `ciphertext` could otherwise re-mint it over an altered
     /// `kind`/`ts`/`to` — rewriting the displayed timestamp/causal order, or relabeling `kind`
-    /// (chat↔mail render/tier change, or → `0x0b` to force a silent decrypt-fail). The identity
+    /// (chat↔mail render/tier change, or → `0x0c`, still Unassigned per §21.16, to force a silent
+    /// decode-fail). The identity
     /// signature now binds them, so at §2.7 step 8 the recipient recomputes `payload_hash` over the
     /// **received** envelope's `kind`/`ts`/`to`; a `Payload.sig` that authenticates the payload but
     /// is **not bound to this envelope's context** is rejected here rather than accepted
@@ -186,7 +187,21 @@ impl ValidateError {
 
 // --- Message kinds (§2.3) ------------------------------------------------------------------
 
-/// Message kinds (spec §2.3). `mail` defaults to the private tier; `chat` may use fast.
+/// Message kinds (spec §2.3, §21.16). `mail` defaults to the private tier; `chat` may use fast.
+///
+/// `0x00`–`0x0B` are the core, assigned kinds (Standards Action range). `0x0C`–`0x3F` are
+/// Unassigned. `0x40`–`0x7F` is the Specification Required **extension range** (§2.3/§21.16):
+/// `Deniable` (`0x0b`) is the last core kind, and `PubAnnounce`/`FeedHint`/`FeedSubscribe`/
+/// `FeedUnsubscribe`/`RtcSignal` (`0x40`-`0x44`) are the DMTAP-PUB/DMTAP-PUBSUB/DMTAP-RTC
+/// extension kinds (§22, §25, §27, §21.24b/§21.24d/§21.24f). Note `PubAnnounce` (`0x40`) is a
+/// **bare signed object**, never carried inside an `Envelope` (§22.3.2) — it is enumerated here
+/// only because it shares the `kind` byte space, not because a MOTE ever actually carries it.
+/// `FeedHint`/`FeedSubscribe`/`FeedUnsubscribe`/`RtcSignal` (`0x41`-`0x44`) ARE ordinary
+/// sealed-MOTE kinds and ride the existing `Envelope`/`Payload` deliver/ack/retry path unchanged
+/// (§25.6.2, §25.8, §27.4.1) — no kind-specific dispatch is introduced at this layer; a decoder
+/// that cannot represent these values at all (as opposed to one that recognizes and rejects them)
+/// breaks that promise before it can even begin, which is exactly the gap this enum previously
+/// had.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Kind {
@@ -201,6 +216,26 @@ pub enum Kind {
     Presence = 0x08,
     Identity = 0x09,
     System = 0x0a,
+    /// Deniable 1:1 transport frame carrying a `DeniableFrame` (§5.2.1); the real content kind
+    /// rides inside the `DeniablePayload` (§18.3.10). Last of the core (Standards Action) kinds.
+    Deniable = 0x0b,
+    /// A public signed announcement (§22, §21.24b). **Never actually carried as an `Envelope.kind`
+    /// in practice** — `PubAnnounce` is a bare signed object, not a MOTE (§22.3.2) — but the byte
+    /// is reserved in this space (§21.16) so it cannot collide with a future core/extension kind.
+    PubAnnounce = 0x40,
+    /// Advisory "check now" nudge for a subscribed feed (§25.6.2). Ordinary sealed-MOTE kind,
+    /// `Payload`-wrapped.
+    FeedHint = 0x41,
+    /// Carries a `Subscription` as `Payload.body` (§25.4, §25.8). Ordinary sealed-MOTE kind.
+    FeedSubscribe = 0x42,
+    /// Carries a `SubscriptionRevoke` as `Payload.body` (§25.5, §25.8). Ordinary sealed-MOTE kind.
+    FeedUnsubscribe = 0x43,
+    /// Carries an `RtcSignal` as `Payload.body` (§27.4.1). Ordinary sealed-MOTE kind, default
+    /// tier `fast` (§27.4.6, §27.8) — the next point after `0x43` (§21.24f). One kind covers every
+    /// DMTAP-RTC signal type (offer/pranswer/answer/rollback/candidate/end_of_candidates/bye,
+    /// §27.4.2); the discriminator lives inside the sealed payload, not in `Envelope.kind`, so a
+    /// relay on the path never learns a call's state (§27.3.2).
+    RtcSignal = 0x44,
 }
 
 impl Kind {
@@ -218,7 +253,13 @@ impl Kind {
             0x08 => Presence,
             0x09 => Identity,
             0x0a => System,
-            _ => return None, // reserved/unknown — do not guess
+            0x0b => Deniable,
+            0x40 => PubAnnounce,
+            0x41 => FeedHint,
+            0x42 => FeedSubscribe,
+            0x43 => FeedUnsubscribe,
+            0x44 => RtcSignal,
+            _ => return None, // reserved/unassigned/unimplemented-extension — do not guess
         })
     }
     pub fn as_u8(self) -> u8 {
@@ -1577,15 +1618,16 @@ fn verify_sig_for_suite(
         Suite::PqHybrid => {
             verify_hybrid_domain(pk, domain, msg, sig).map_err(|_| MoteError::BadSignature)
         }
-        // `0x03` (AEAD-diverse) and `0x04` (signature-diverse / anchor) are RESERVED, unimplemented
-        // code points (§1.1, §1.2.0, §21.15): no verifier exists for either, so fail closed.
-        // `validate` rejects them earlier at §2.7 step 1 (`!mote_supported()`), so these are
-        // unreachable defensive arms — never accept an object under an unimplemented suite.
+        // `0x03` (AEAD-diverse), `0x04` (signature-diverse / anchor), and `0x05` (hash-diverse) are
+        // RESERVED, unimplemented code points (§1.1, §1.2.0, §16.7, §21.15): no verifier exists for
+        // any of them, so fail closed. `validate` rejects them earlier at §2.7 step 1
+        // (`!mote_supported()`), so these are unreachable defensive arms — never accept an object
+        // under an unimplemented suite.
         //
         // Deliberately NOT a `_ =>` catch-all: exhaustive matching is what forces every new suite
         // to be considered at this site rather than silently inheriting a default. Adding `0x04`
-        // broke this match, which is exactly the intended behaviour.
-        Suite::ReservedAeadGcm | Suite::ReservedAnchorSlhDsa => {
+        // (and, since, `0x05`) broke this match, which is exactly the intended behaviour.
+        Suite::ReservedAeadGcm | Suite::ReservedAnchorSlhDsa | Suite::ReservedHashSha3 => {
             Err(MoteError::UnsupportedSuite(suite.as_u8()))
         }
     }

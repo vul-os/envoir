@@ -19,8 +19,8 @@ use envoir_gateway::inbound::{
 use envoir_gateway::mta_sts::{InMemoryPolicyFetcher, InMemoryTxtResolver, MtaStsTlsPolicy};
 use envoir_gateway::mx::{InMemoryMxResolver, MxHost};
 use envoir_gateway::outbound::{
-    GovernedSend, OutboundError, OutboundGateway, OutboundReport, OutboundTransport, TlsPolicy,
-    TlsRequirement, TransportResult,
+    AddressClaimAuthz, DirectoryClaimAuthz, GovernedSend, OutboundError, OutboundGateway,
+    OutboundReport, OutboundTransport, TlsPolicy, TlsRequirement, TransportResult,
 };
 use envoir_gateway::outbound_guard::{OutboundSenderGuard, SenderVerdict};
 use envoir_gateway::provenance::{
@@ -65,6 +65,25 @@ impl KeyDirectory for OneUser {
     fn resolve(&self, rcpt: &str) -> Option<RecipientKey> {
         if rcpt.eq_ignore_ascii_case(&self.email) {
             Some(self.key.clone())
+        } else {
+            None
+        }
+    }
+}
+
+/// A two-entry directory spanning two different domains (for a multi-domain gateway).
+struct TwoUsers {
+    a_email: String,
+    a_key: RecipientKey,
+    b_email: String,
+    b_key: RecipientKey,
+}
+impl KeyDirectory for TwoUsers {
+    fn resolve(&self, rcpt: &str) -> Option<RecipientKey> {
+        if rcpt.eq_ignore_ascii_case(&self.a_email) {
+            Some(self.a_key.clone())
+        } else if rcpt.eq_ignore_ascii_case(&self.b_email) {
+            Some(self.b_key.clone())
         } else {
             None
         }
@@ -186,6 +205,83 @@ fn inbound_wraps_into_attested_encrypted_mote_for_the_right_key() {
     assert_eq!(attestation.gateway_key, att_pub);
 }
 
+/// §7.2a's normative key-binding: "the attestation key IS the gateway's own IK... not a second
+/// signing key invented only for attestation" — `Payload.from` and the attestation's signing key
+/// MUST be the same key. `InboundGateway::for_own_domains` is the constructor that satisfies this
+/// (unlike raw `new()` + an independently `generate()`d `AttestationKey`, exercised above).
+#[test]
+fn for_own_domains_shares_the_gateway_ik_as_the_attestation_key_spec_7_2a() {
+    let gw_seed = [11u8; 32];
+    let expected_pub = IdentityKey::from_seed(&gw_seed).public();
+    let recip = TestRecipient::new("dana@example.org");
+    let directory = Box::new(OneUser { email: recip.email.clone(), key: recip.recipient_key() });
+    let gw = InboundGateway::for_own_domains(
+        IdentityKey::from_seed(&gw_seed),
+        [(DOMAIN, GW_SELECTOR)],
+        directory,
+        Box::new(envoir_gateway::NullMesh),
+        Box::new(AllowAll),
+    );
+
+    let (env, attestation) = gw
+        .wrap_and_attest("sender@gmail.com", &recip.email, &sample_message(&recip.email), NOW)
+        .expect("wrap");
+
+    let ctx = RecipientCtx {
+        our_ik: &recip.ik.public(),
+        seal_secret: recip.seal.secret(),
+        sender_is_known: true,
+    };
+    let payload = match validate(&Hpke, &env, &ctx).expect("validate") {
+        Outcome::Accepted(p) => *p,
+        Outcome::Deferred => panic!("known-contact MOTE must be accepted"),
+    };
+
+    // The core invariant: Payload.from and the attestation's signing key are the SAME key — and
+    // both equal the gateway's own IK, never an independently generated attestation-only key.
+    assert_eq!(payload.from, expected_pub, "Payload.from is the gateway's own IK");
+    assert_eq!(
+        attestation.gateway_key, expected_pub,
+        "the attestation key is the SAME IK, not a second key invented for attestation"
+    );
+    assert_eq!(payload.from, attestation.gateway_key, "Payload.from == attestation key (§7.2a)");
+}
+
+/// The same sharing holds across MULTIPLE domains one gateway serves: each domain's
+/// `_dmtap-gw` record would publish the SAME key (the operator's one `IK`), not a
+/// per-domain-distinct one.
+#[test]
+fn for_own_domains_shares_one_ik_across_multiple_served_domains() {
+    let gw_seed = [22u8; 32];
+    let expected_pub = IdentityKey::from_seed(&gw_seed).public();
+    let recip_a = TestRecipient::new("a@alpha.example");
+    let recip_b = TestRecipient::new("b@beta.example");
+    let directory = Box::new(TwoUsers {
+        a_email: recip_a.email.clone(),
+        a_key: recip_a.recipient_key(),
+        b_email: recip_b.email.clone(),
+        b_key: recip_b.recipient_key(),
+    });
+    let gw = InboundGateway::for_own_domains(
+        IdentityKey::from_seed(&gw_seed),
+        [("alpha.example", "gw1"), ("beta.example", "gw1")],
+        directory,
+        Box::new(envoir_gateway::NullMesh),
+        Box::new(AllowAll),
+    );
+
+    let (_env_a, att_a) = gw
+        .wrap_and_attest("sender@gmail.com", &recip_a.email, &sample_message(&recip_a.email), NOW)
+        .expect("wrap alpha");
+    let (_env_b, att_b) = gw
+        .wrap_and_attest("sender@gmail.com", &recip_b.email, &sample_message(&recip_b.email), NOW)
+        .expect("wrap beta");
+
+    assert_eq!(att_a.gateway_key, expected_pub);
+    assert_eq!(att_b.gateway_key, expected_pub);
+    assert_eq!(att_a.gateway_key, att_b.gateway_key, "both domains publish the SAME gateway IK");
+}
+
 #[test]
 fn inbound_returns_250_only_on_durable_ack() {
     let recip = TestRecipient::new("alice@example.org");
@@ -280,6 +376,50 @@ fn mx_session_full_transaction_reaches_250() {
     let final_reply = s.feed_line(".");
     assert_eq!(final_reply.code, 250, "durable-ack path returns 250 at end of DATA");
     assert!(delivery.captured.lock().unwrap().is_some(), "a MOTE was delivered");
+}
+
+#[test]
+fn mx_session_rejects_a_data_body_over_the_configured_size_cap() {
+    // §3 in the security review: an aggregate DATA size cap. A tiny cap (200 bytes) makes an
+    // ordinary multi-line body exceed it deterministically without needing a huge test fixture.
+    let recip = TestRecipient::new("alice@example.org");
+    let att_key = AttestationKey::generate(DOMAIN, GW_SELECTOR);
+    let (gw, delivery) = build_inbound(
+        IdentityKey::generate(),
+        att_key,
+        &recip,
+        DeliveryOutcome::Acked,
+        Box::new(AllowAll),
+    );
+    let gw = gw.with_max_message_bytes(200);
+    let mut s = MxSession::new(&gw, "203.0.113.9", NOW);
+    assert_eq!(s.feed_line("EHLO gmail.com").code, 250);
+    assert_eq!(s.feed_line("MAIL FROM:<sender@gmail.com>").code, 250);
+    assert_eq!(s.feed_line(&format!("RCPT TO:<{}>", recip.email)).code, 250);
+    assert_eq!(s.feed_line("DATA").code, 354);
+    assert_eq!(s.feed_line("From: sender@gmail.com").code, 0);
+    assert_eq!(s.feed_line("Subject: hi").code, 0);
+    assert_eq!(s.feed_line("").code, 0);
+    // Push well past the 200-byte cap with oversized body lines.
+    for _ in 0..10 {
+        assert_eq!(s.feed_line(&"x".repeat(60)).code, 0, "still no reply mid-DATA once over cap");
+    }
+    let final_reply = s.feed_line(".");
+    assert_eq!(final_reply.code, 552, "over-cap body is refused at the terminator");
+    assert!(
+        delivery.captured.lock().unwrap().is_none(),
+        "an over-cap message must never be wrapped/attested/delivered"
+    );
+
+    // The session is usable for a fresh, UNDER-cap transaction afterwards (the cap is per-message,
+    // not a session-poisoning failure).
+    assert_eq!(s.feed_line("MAIL FROM:<sender@gmail.com>").code, 250);
+    assert_eq!(s.feed_line(&format!("RCPT TO:<{}>", recip.email)).code, 250);
+    assert_eq!(s.feed_line("DATA").code, 354);
+    assert_eq!(s.feed_line("From: sender@gmail.com").code, 0);
+    assert_eq!(s.feed_line("").code, 0);
+    assert_eq!(s.feed_line("small body").code, 0);
+    assert_eq!(s.feed_line(".").code, 250, "a subsequent under-cap message still delivers normally");
 }
 
 #[test]
@@ -414,6 +554,16 @@ struct FixedTls(TlsRequirement);
 impl TlsPolicy for FixedTls {
     fn requirement_for(&self, _dest: &str) -> TlsRequirement {
         self.0
+    }
+}
+
+/// A permissive [`AddressClaimAuthz`] double for tests exercising [`OutboundSenderGuard`]
+/// behavior (rate limiting, authentication) where the specific §7.11.2-step-2 address-claim
+/// semantics are not the thing under test — see `address_claim_authz_*` tests below for those.
+struct AllowAnyClaim;
+impl AddressClaimAuthz for AllowAnyClaim {
+    fn may_claim(&self, _submitter_ik: &[u8], _from_addr: &str) -> bool {
+        true
     }
 }
 
@@ -987,6 +1137,61 @@ fn inbound_stamps_a_verifiable_gateway_provenance_record() {
     assert_eq!(decoded, bridged.provenance);
 }
 
+#[test]
+fn inbound_strips_forged_authentication_results_before_attesting_spec_7_2c() {
+    // §7.2c "Strip before you sign": a legacy sender (or a hop before the gateway) cannot inject a
+    // fake `Authentication-Results`/`ARC-*` verdict and have the gateway's own genuine attestation
+    // signature launder it — those trust-boundary headers must be gone from what is actually
+    // digested/wrapped, never merely "not acted upon".
+    let recip = TestRecipient::new("carol@example.org");
+    let att_key = AttestationKey::generate(DOMAIN, GW_SELECTOR);
+    let published = StaticGwKeys::new().publish(DOMAIN, GW_SELECTOR, att_key.public());
+    let (gw, _d) = build_inbound(
+        IdentityKey::generate(),
+        att_key,
+        &recip,
+        DeliveryOutcome::Acked,
+        Box::new(AllowAll),
+    );
+
+    let forged = format!(
+        "Authentication-Results: dmtap.gw; dkim=pass header.d=paypal.com\r\n\
+         ARC-Seal: i=1; a=rsa-sha256; d=evil.example; s=x; t=1; cv=none; b=xxx\r\n\
+         From: attacker@evil.example\r\n\
+         To: {}\r\n\
+         Subject: hi\r\n\r\n\
+         body\r\n",
+        recip.email
+    )
+    .into_bytes();
+
+    let bridged = gw
+        .wrap_attest_and_stamp("attacker@evil.example", &recip.email, &forged, NOW)
+        .expect("bridge + stamp");
+
+    let key = published.resolve_gw_key(DOMAIN, GW_SELECTOR);
+
+    // The attestation must NOT verify against the original, forged-header-carrying bytes: the
+    // signed digest is over the HYGIENIC bytes, so presenting the raw legacy bytes (including the
+    // forged headers) is exactly the "lifted onto different bytes" case and must fail closed.
+    assert_eq!(
+        bridged.gateway_attestation.verify(DOMAIN, key.as_deref(), &forged),
+        Err(ProvenanceError::Invalid),
+        "an attestation over the stripped bytes must not verify the un-stripped originals"
+    );
+
+    // It DOES verify against the same bytes with the trust-boundary headers removed — proving the
+    // gateway actually stripped them (not merely that verification is broken generally). This is
+    // exactly `forged` with its first two (forged) lines removed.
+    let hygienic =
+        format!("From: attacker@evil.example\r\nTo: {}\r\nSubject: hi\r\n\r\nbody\r\n", recip.email)
+            .into_bytes();
+    bridged
+        .gateway_attestation
+        .verify(DOMAIN, key.as_deref(), &hygienic)
+        .expect("attestation verifies over the header-stripped bytes");
+}
+
 // ---------------------------------------------------------------------------------------------
 // SPF (RFC 7208, spec item 1) + DMARC (RFC 7489, spec item 2) — end to end through MxSession.
 // ---------------------------------------------------------------------------------------------
@@ -1461,7 +1666,8 @@ fn governed_send_delivers_for_an_authenticated_sender() {
         Box::new(FixedTls(TlsRequirement::Opportunistic)),
         Box::new(ArcTransport(transport.clone())),
     )
-    .with_sender_guard(guard);
+    .with_sender_guard(guard)
+    .with_address_claim_authz(Box::new(AllowAnyClaim));
 
     let out = gw.send_authenticated(
         &sample_payload(),
@@ -1528,7 +1734,8 @@ fn governed_send_throttles_a_flood_and_never_dials_the_throttled_message() {
         Box::new(FixedTls(TlsRequirement::Opportunistic)),
         Box::new(ArcTransport(transport.clone())),
     )
-    .with_sender_guard(guard);
+    .with_sender_guard(guard)
+    .with_address_claim_authz(Box::new(AllowAnyClaim));
 
     let send = |from: &str| {
         gw.send_authenticated(&sample_payload(), from, "bob@gmail.com", "flooder", NOW)
@@ -1574,6 +1781,161 @@ fn governed_send_fails_closed_with_no_guard_configured() {
         "no guard ⇒ fail-closed refusal, got {out:?}",
     );
     assert!(transport.dialed_hosts().is_empty(), "nothing was relayed without a guard");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Per-address claim authorization (§7.11.2 step 2): authenticated ≠ authorized-for-this-address.
+// ---------------------------------------------------------------------------------------------
+
+fn claim_test_gw(
+    directory: envoir_gateway::InMemoryDirectory,
+    transport: std::sync::Arc<RecordingTransport>,
+    registered: &'static str,
+) -> OutboundGateway {
+    struct ArcTransport(std::sync::Arc<RecordingTransport>);
+    impl OutboundTransport for ArcTransport {
+        fn deliver(&self, dest: &str, message: &[u8], require_tls: bool) -> TransportResult {
+            self.0.deliver(dest, message, require_tls)
+        }
+    }
+    let guard = OutboundSenderGuard::new().require_registered([registered]);
+    OutboundGateway::new(
+        vec![dkim_key("alice-domain.com", "dmtap1")],
+        Box::new(FixedTls(TlsRequirement::Opportunistic)),
+        Box::new(ArcTransport(transport)),
+    )
+    .with_sender_guard(guard)
+    .with_address_claim_authz(Box::new(DirectoryClaimAuthz::new(Box::new(directory))))
+}
+
+/// The vulnerability this closes: a delegated DKIM selector authorizes the GATEWAY to sign for a
+/// domain, but must never let any authenticated sender on that domain claim ANY address within
+/// it. Alice (registered, authenticated) tries to send AS `ceo@alice-domain.com` — an address the
+/// directory resolves to a DIFFERENT key (the CEO's) — and must be refused, never signed/relayed.
+#[test]
+fn address_claim_authz_refuses_a_sender_claiming_someone_elses_address_on_the_same_domain() {
+    let alice_ik = dmtap_core::identity::IdentityKey::generate();
+    let ceo_ik = dmtap_core::identity::IdentityKey::generate();
+    let directory = envoir_gateway::InMemoryDirectory::new()
+        .with_recipient(
+            "alice@alice-domain.com",
+            RecipientKey { ik: alice_ik.public(), seal_pub: vec![0u8; 32] },
+        )
+        .with_recipient(
+            "ceo@alice-domain.com",
+            RecipientKey { ik: ceo_ik.public(), seal_pub: vec![0u8; 32] },
+        );
+    let transport =
+        std::sync::Arc::new(RecordingTransport::new(true, TransportResult::Delivered { code: 250 }));
+    let gw = claim_test_gw(directory, transport.clone(), "acct-alice");
+
+    // A payload genuinely from Alice's own key, submitted for authentication as "acct-alice" — but
+    // claiming the CEO's address in `From:`.
+    let mut payload = sample_payload();
+    payload.from = alice_ik.public();
+
+    let out = gw.send_authenticated(
+        &payload,
+        "ceo@alice-domain.com",
+        "bob@gmail.com",
+        "acct-alice",
+        NOW,
+    );
+    assert!(
+        matches!(out, GovernedSend::Blocked(SenderVerdict::Refuse { .. })),
+        "an authenticated sender must not be able to claim a DIFFERENT registered address on the \
+         same delegated domain, got {out:?}"
+    );
+    assert!(transport.dialed_hosts().is_empty(), "never reached the destination MX");
+}
+
+/// The positive case: Alice claiming HER OWN address (the one her key resolves to in the
+/// directory) is authorized and the send proceeds.
+#[test]
+fn address_claim_authz_allows_a_sender_claiming_their_own_address() {
+    let alice_ik = dmtap_core::identity::IdentityKey::generate();
+    let directory = envoir_gateway::InMemoryDirectory::new().with_recipient(
+        "alice@alice-domain.com",
+        RecipientKey { ik: alice_ik.public(), seal_pub: vec![0u8; 32] },
+    );
+    let transport =
+        std::sync::Arc::new(RecordingTransport::new(true, TransportResult::Delivered { code: 250 }));
+    let gw = claim_test_gw(directory, transport.clone(), "acct-alice");
+
+    let mut payload = sample_payload();
+    payload.from = alice_ik.public();
+
+    let out = gw.send_authenticated(
+        &payload,
+        "alice@alice-domain.com",
+        "bob@gmail.com",
+        "acct-alice",
+        NOW,
+    );
+    assert_eq!(out, GovernedSend::Sent(OutboundReport::Delivered));
+    assert_eq!(transport.dialed_hosts().len(), 1);
+}
+
+/// An address the directory has never heard of resolves to nobody, so nobody can claim it —
+/// fail-closed, never a guess.
+#[test]
+fn address_claim_authz_refuses_an_address_absent_from_the_directory() {
+    let alice_ik = dmtap_core::identity::IdentityKey::generate();
+    let directory = envoir_gateway::InMemoryDirectory::new().with_recipient(
+        "alice@alice-domain.com",
+        RecipientKey { ik: alice_ik.public(), seal_pub: vec![0u8; 32] },
+    );
+    let transport =
+        std::sync::Arc::new(RecordingTransport::new(true, TransportResult::Delivered { code: 250 }));
+    let gw = claim_test_gw(directory, transport.clone(), "acct-alice");
+
+    let mut payload = sample_payload();
+    payload.from = alice_ik.public();
+
+    let out = gw.send_authenticated(
+        &payload,
+        "nobody@alice-domain.com",
+        "bob@gmail.com",
+        "acct-alice",
+        NOW,
+    );
+    assert!(matches!(out, GovernedSend::Blocked(SenderVerdict::Refuse { .. })));
+    assert!(transport.dialed_hosts().is_empty());
+}
+
+/// With NO address-claim authorizer attached (but a sender guard that DOES authenticate the
+/// account), the governed path must still fail closed — mirroring the existing "no sender guard"
+/// fail-closed test, but for the independent §7.11.2-step-2 gate.
+#[test]
+fn governed_send_fails_closed_with_no_address_claim_authz_configured() {
+    struct ArcTransport(std::sync::Arc<RecordingTransport>);
+    impl OutboundTransport for ArcTransport {
+        fn deliver(&self, dest: &str, message: &[u8], require_tls: bool) -> TransportResult {
+            self.0.deliver(dest, message, require_tls)
+        }
+    }
+    let transport =
+        std::sync::Arc::new(RecordingTransport::new(true, TransportResult::Delivered { code: 250 }));
+    let guard = OutboundSenderGuard::new().require_registered(["acct-alice"]);
+    let gw = OutboundGateway::new(
+        vec![dkim_key("alice-domain.com", "dmtap1")],
+        Box::new(FixedTls(TlsRequirement::Opportunistic)),
+        Box::new(ArcTransport(transport.clone())),
+    )
+    .with_sender_guard(guard); // NOTE: no `.with_address_claim_authz(...)`
+
+    let out = gw.send_authenticated(
+        &sample_payload(),
+        "alice@alice-domain.com",
+        "bob@gmail.com",
+        "acct-alice",
+        NOW,
+    );
+    assert!(
+        matches!(out, GovernedSend::Blocked(SenderVerdict::Refuse { .. })),
+        "no address-claim authorizer ⇒ fail-closed refusal, got {out:?}",
+    );
+    assert!(transport.dialed_hosts().is_empty());
 }
 
 // ---------------------------------------------------------------------------------------------

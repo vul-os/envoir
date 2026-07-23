@@ -240,28 +240,35 @@ export function emptyState(iconName, title, sub) {
 // through a strict allow-list sanitizer — no remote content is ever fetched (no <img src>, no
 // scripts, no event handlers), which also closes the tracking-pixel/read-confirmation leak the
 // parity audit (§17#8) calls out. Plaintext bodies keep their pre-wrap rendering.
-const ALLOWED_TAGS = new Set(['B','STRONG','I','EM','U','A','UL','OL','LI','BR','P','DIV','SPAN','BLOCKQUOTE','CODE','PRE','H1','H2','H3']);
+export const SANITIZE_ALLOWED_TAGS = new Set(['B','STRONG','I','EM','U','A','UL','OL','LI','BR','P','DIV','SPAN','BLOCKQUOTE','CODE','PRE','H1','H2','H3']);
+
+// The allow-list walk, factored out from DOM construction/serialization so it's independently
+// unit-testable (client/test/sanitize.test.mjs) against a plain object tree — Node's headless test
+// runner has no `document`, so this can't parse HTML itself, but the DECISION logic (which tags
+// survive, which attributes survive, the href-scheme check, the forced rel/target on <a>) is the
+// part most at risk of a hand-written mistake, and that's exactly what this makes testable without
+// a browser. `mkText` defaults to a real DOM text node; tests inject a plain stand-in instead.
+export function sanitizeNode(node, mkText = (s) => document.createTextNode(s)) {
+  [...node.childNodes].forEach(child => {
+    if (child.nodeType === 1) {
+      if (!SANITIZE_ALLOWED_TAGS.has(child.tagName)) { // unwrap disallowed element, keep text
+        child.replaceWith(mkText(child.textContent || ''));
+        return;
+      }
+      [...child.attributes].forEach(attr => {
+        const n = attr.name.toLowerCase();
+        const okHref = child.tagName === 'A' && n === 'href' && /^(https?:|mailto:)/i.test(attr.value);
+        if (!okHref) child.removeAttribute(attr.name);
+      });
+      if (child.tagName === 'A') { child.setAttribute('target', '_blank'); child.setAttribute('rel', 'noopener noreferrer nofollow'); }
+      sanitizeNode(child, mkText);
+    }
+  });
+}
 export function sanitizeHtml(html) {
   const tmp = document.createElement('div');
   tmp.innerHTML = String(html || '');
-  const walk = (node) => {
-    [...node.childNodes].forEach(child => {
-      if (child.nodeType === 1) {
-        if (!ALLOWED_TAGS.has(child.tagName)) { // unwrap disallowed element, keep text
-          const text = document.createTextNode(child.textContent || '');
-          child.replaceWith(text); return;
-        }
-        [...child.attributes].forEach(attr => {
-          const n = attr.name.toLowerCase();
-          const okHref = child.tagName === 'A' && n === 'href' && /^(https?:|mailto:)/i.test(attr.value);
-          if (!okHref) child.removeAttribute(attr.name);
-        });
-        if (child.tagName === 'A') { child.setAttribute('target', '_blank'); child.setAttribute('rel', 'noopener noreferrer nofollow'); }
-        walk(child);
-      }
-    });
-  };
-  walk(tmp);
+  sanitizeNode(tmp);
   return tmp.innerHTML;
 }
 export function renderBody(m) {

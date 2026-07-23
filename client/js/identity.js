@@ -150,6 +150,25 @@ export function selfPerson() {
 export function currentIdentity() { return _identity; }
 export function logout() { localStorage.removeItem(LS_KEY); _identity = null; }
 
+// Characters that are never legitimate in an address/handle but ARE HTML-meaningful. A handful
+// of UI surfaces (toasts) render an address's raw text without re-escaping it at the call site —
+// esc() at those sinks is the other half of this defense (belt-and-braces); this is the source-side
+// half, so a stored address can never carry markup in the first place. Whitespace is excluded too
+// (email locals/domains never contain it).
+const UNSAFE_ADDR_RE = /[<>"'`\s]/;
+
+// A bare name@domain shape (no whitespace, no HTML-dangerous characters). Exported so its rule is
+// independently unit-testable without needing a live identity (client/test/*.test.mjs — DOM-free).
+export function isDnsShapedAddress(a) {
+  return /^[^@]+@[^@]+\.[^@]+$/.test(a) && !UNSAFE_ADDR_RE.test(a);
+}
+
+// Strip HTML-dangerous characters from free-typed address input (onboarding's "your own domain"
+// field has no other character filter before the string becomes the identity's PRIMARY address).
+export function sanitizeAddressInput(s) {
+  return (s || '').replace(/[<>"'`]/g, '');
+}
+
 // --- Aliases (spec §3.9.4): one identity, many name@domain addresses, all → same key. ---
 // Also accepts the `name-chain` resolver form (§3.12.4/§3.12.5, e.g. `alice.eth`/`alice.sol`) —
 // bare, no "@", the everyday ENS/SNS-style spelling — auto-classified to kind 'namechain' so the
@@ -158,9 +177,9 @@ export function addAlias(address, kind = 'alias') {
   if (!_identity) return { ok: false, reason: 'No identity.' };
   const a = (address || '').trim().toLowerCase();
   if (!a) return { ok: false, reason: 'Enter an address.' };
-  const isHandle = a.startsWith('@');
-  const isNameChain = !isHandle && !a.includes('@') && /\.(eth|sol)$/.test(a);
-  const isDnsShaped = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a);
+  const isHandle = a.startsWith('@') && !UNSAFE_ADDR_RE.test(a);
+  const isNameChain = !isHandle && !a.includes('@') && /\.(eth|sol)$/.test(a) && !UNSAFE_ADDR_RE.test(a);
+  const isDnsShaped = isDnsShapedAddress(a);
   if (!isHandle && !isNameChain && !isDnsShaped) return { ok: false, reason: 'Use name@domain, alice.eth/.sol, or @handle.' };
   if (_identity.addresses.some(x => x.address === a)) return { ok: false, reason: 'Already an address on this identity.' };
   const finalKind = isHandle ? 'handle' : isNameChain ? 'namechain' : kind;

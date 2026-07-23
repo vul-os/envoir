@@ -38,13 +38,19 @@
 use crate::cbor::{self, as_bytes, as_text, as_u64, as_u8, Cv, Fields};
 use crate::id::ContentId;
 use crate::identity::{verify_domain, DeviceCert, IdentityKey};
-use crate::pubobj::{pub_suite, PubError, PUB_V0};
+use crate::pubobj::{pub_suite, validate_topic_label, PubError, PUB_V0};
 use crate::suite::Suite;
 
 /// `DMTAP-PUB-v0/subscription\x00` — the [`Subscription`] signing-preimage prefix (§25.4.1).
 pub const PUB_SUBSCRIPTION_DS: &[u8] = b"DMTAP-PUB-v0/subscription\x00";
 /// `DMTAP-PUB-v0/subscription-revoke\x00` — the [`SubscriptionRevoke`] prefix (§25.5.1).
 pub const PUB_SUBSCRIPTION_REVOKE_DS: &[u8] = b"DMTAP-PUB-v0/subscription-revoke\x00";
+/// `DMTAP-PUB-v0/subscription-id\x00` — the [`Subscription::subscription_id`] HASH
+/// domain-separation tag (§25.4.1, §25.13 C-03). This is a **hash** DS-tag (§18.1.6's separation
+/// rule applied to a hash rather than a signature), distinct from every signature DS-tag above and
+/// from `DMTAP-PUB-v0/feed`'s hash domain, so `subscription_id` cannot collide with an
+/// `announce_id`, a `PubManifest.id`, a `FeedEntry` address, or a signature preimage.
+pub const PUB_SUBSCRIPTION_ID_DS: &[u8] = b"DMTAP-PUB-v0/subscription-id\x00";
 
 /// §25.4.1: `nonce` MUST be at least 16 bytes. It is the uniqueness source that keeps two
 /// subscriptions issued by the same subscriber, for the same `(feed, topic)`, in the same
@@ -113,10 +119,26 @@ impl Subscription {
         cbor::encode(&self.to_cv(true))
     }
 
-    /// `subscription_id = 0x1e ‖ BLAKE3-256(det_cbor(Subscription))` over the **complete, signed**
-    /// object — the derived-anchor rule (§18.9.4): a field cannot contain its own hash.
+    /// `subscription_id = 0x1e ‖ BLAKE3-256("DMTAP-PUB-v0/subscription-id" ‖ 0x00 ‖
+    /// det_cbor(Subscription ∖ {10}))` — the **body only**, DS-tagged, `sig` (key 10) excluded
+    /// (§25.4.1, §25.13 C-03).
+    ///
+    /// **Not** `ContentId::of(&self.det_cbor())`. An earlier revision of this function hashed the
+    /// *complete signed object* (by analogy to `announce_id`), which §1.3 forbids by name: no
+    /// identifier may be derived from a signature, because hybrid AND-composition gives EUF-CMA,
+    /// not SUF-CMA, so a valid `sig` can be maulable into a different valid signature over the same
+    /// body. Deriving the id from the signed bytes let a mauled (or merely differently-encoded)
+    /// copy of one `Subscription` identify *differently* from the original — so a
+    /// [`SubscriptionRevoke`] naming the original's id would not match the copy, and hint service
+    /// would continue on it past a valid revoke: a revocation bypass, and a double-count against
+    /// §25.7.1's aggregate admission bound. `nonce` (key 8) is the sole source of `subscription_id`
+    /// distinctness now that `sig` is excluded, which is exactly why it MUST be CSPRNG-drawn and
+    /// MUST NOT be reused (§25.4.1).
     pub fn subscription_id(&self) -> ContentId {
-        ContentId::of(&self.det_cbor())
+        let mut m = Vec::with_capacity(PUB_SUBSCRIPTION_ID_DS.len() + 128);
+        m.extend_from_slice(PUB_SUBSCRIPTION_ID_DS);
+        m.extend_from_slice(&self.signing_preimage()); // det_cbor(Subscription ∖ {10})
+        ContentId::of(&m)
     }
 
     /// Sign with `signer_key`, which the caller is responsible for matching to `self.signer`.
@@ -191,6 +213,7 @@ impl Subscription {
         let subscriber = as_bytes(f.req(3)?)?;
         let feed = as_bytes(f.req(4)?)?;
         let topic = as_text(f.req(5)?)?;
+        validate_topic_label(&topic)?; // §25.3.4 rules 2/3 (§25.13 C-07's grammar, partial)
         let issued = as_u64(f.req(6)?)?;
         let expires = as_u64(f.req(7)?)?;
         let nonce = as_bytes(f.req(8)?)?;
@@ -232,6 +255,16 @@ pub struct SubscriptionRevoke {
     pub signer: Vec<u8>,
     /// key 4 — `signer` over `DMTAP-PUB-v0/subscription-revoke ‖ 0x00 ‖ det_cbor(∖ {4})`.
     pub sig: Vec<u8>,
+    /// key 5 — PUBSUB object version of **this revoke**, independent of the target
+    /// `Subscription`'s `v`; MUST be [`PUB_V0`] in v0 (§25.5.1, §25.13 C-04).
+    pub v: u8,
+    /// key 6 — algorithm suite for **this revoke's** `sig` only (§18.1.4); need not equal the
+    /// target `Subscription.suite` (§25.5.1, §25.13 C-04).
+    pub suite: Suite,
+    /// key 7 — OPTIONAL inline `DeviceCert` chaining `signer` to the target's `subscriber`, so an
+    /// offline holder can complete the §1.2 chain check without directory access (§25.5.1). Its
+    /// presence is never itself authorization — see [`SubscriptionRevoke::verify_for`].
+    pub device_cert: Option<DeviceCert>,
 }
 
 impl SubscriptionRevoke {
@@ -243,6 +276,11 @@ impl SubscriptionRevoke {
         ];
         if include_sig {
             m.push((4, Cv::Bytes(self.sig.clone())));
+        }
+        m.push((5, Cv::U64(self.v as u64)));
+        m.push((6, Cv::U64(self.suite.as_u8() as u64)));
+        if let Some(cert) = &self.device_cert {
+            m.push((7, cert.to_cv(true)));
         }
         Cv::Map(m)
     }
@@ -264,17 +302,25 @@ impl SubscriptionRevoke {
 
     /// Verify this revoke **against the subscription it names** (§25.5.1).
     ///
-    /// Both halves matter and neither is sufficient alone: the signature must verify, AND `signer`
-    /// must be the target's `subscriber` (or a certified device of it), AND the named
-    /// `subscription_id` must actually be this subscription's. Only the subscriber who granted a
-    /// subscription may withdraw it — a cross-subscriber revoke would otherwise let anyone
-    /// unsubscribe anyone, which is why the target is a parameter rather than something the caller
-    /// is trusted to have matched up beforehand.
+    /// Checks, in order: this revoke's **own** `v`/`suite` (keys 5/6, independent of the target's,
+    /// §25.13 C-04) are supported (`0x0901`); the named `subscription_id` matches `target`
+    /// (`0x0911`); `sig` verifies under `signer` at this revoke's own suite (`0x0911`); and
+    /// `signer` is the target's `subscriber`, or a certified device of it (`0x0911`) — only the
+    /// subscriber who granted a subscription may withdraw it, which is why the target is a
+    /// parameter rather than something the caller is trusted to have matched up beforehand.
+    ///
+    /// `cert` is tried first if supplied; otherwise this revoke's own inline `device_cert` (key 7)
+    /// is used if present, so an offline holder can complete the chain check without directory
+    /// access (§25.5.1). Either way the cert is fully re-verified here — its mere presence, inline
+    /// or supplied, is never itself authorization.
     pub fn verify_for(
         &self,
         target: &Subscription,
         cert: Option<&DeviceCert>,
     ) -> Result<(), PubError> {
+        if self.v != PUB_V0 || !self.suite.is_supported() {
+            return Err(PubError::UnsupportedVersion);
+        }
         if self.subscription != target.subscription_id() {
             return Err(PubError::SubscriptionRevokeInvalid);
         }
@@ -285,7 +331,9 @@ impl SubscriptionRevoke {
         }
         // An operational device may revoke, but only on a chain to the SUBSCRIBER — not to the
         // feed, and not to whoever happens to be holding the record.
-        let cert = cert.ok_or(PubError::SubscriptionRevokeInvalid)?;
+        let cert = cert
+            .or(self.device_cert.as_ref())
+            .ok_or(PubError::SubscriptionRevokeInvalid)?;
         cert.verify().map_err(|_| PubError::SubscriptionRevokeInvalid)?;
         if cert.ik != target.subscriber || cert.device_key != self.signer {
             return Err(PubError::SubscriptionRevokeInvalid);
@@ -293,15 +341,23 @@ impl SubscriptionRevoke {
         Ok(())
     }
 
-    /// Decode a `SubscriptionRevoke` (§25.5.1), fail-closed on every violation.
+    /// Decode a `SubscriptionRevoke` (§25.5.1), fail-closed on every violation. This revoke's own
+    /// `v`/`suite` (keys 5/6, REQUIRED, §25.13 C-04) are rejected fail-closed here — before
+    /// signature verification — exactly as every other object in this family (§22.3.1, §25.4.1).
     pub fn from_det_cbor(bytes: &[u8]) -> Result<Self, PubError> {
         let mut f = Fields::from_cv(cbor::decode(bytes)?)?;
         let subscription = ContentId(as_bytes(f.req(1)?)?);
         let ts = as_u64(f.req(2)?)?;
         let signer = as_bytes(f.req(3)?)?;
         let sig = as_bytes(f.req(4)?)?;
+        let v = as_u8(f.req(5)?)?;
+        if v != PUB_V0 {
+            return Err(PubError::UnsupportedVersion);
+        }
+        let suite = pub_suite(f.req(6)?)?;
+        let device_cert = f.take(7).map(DeviceCert::from_cv).transpose()?;
         f.deny_unknown()?;
-        Ok(SubscriptionRevoke { subscription, ts, signer, sig })
+        Ok(SubscriptionRevoke { subscription, ts, signer, sig, v, suite, device_cert })
     }
 }
 
@@ -360,6 +416,7 @@ impl FeedHint {
         let mut f = Fields::from_cv(cbor::decode(bytes)?)?;
         let feed = as_bytes(f.req(1)?)?;
         let topic = as_text(f.req(2)?)?;
+        validate_topic_label(&topic)?; // §25.3.4 rules 2/3 (§25.13 C-07's grammar, partial)
         let seq = as_u64(f.req(3)?)?;
         let tip = f.take(4).map(as_bytes).transpose()?.map(ContentId);
         let announce = f.take(5).map(as_bytes).transpose()?;
@@ -503,6 +560,22 @@ mod tests {
         assert_eq!(err, PubError::Cbor(cbor::CborError::MissingKey(7)));
     }
 
+    /// §25.3.4 rule 3, as applied to `Subscription.topic` (key 5): a forbidden code point
+    /// (path separator) is rejected fail-closed on decode.
+    #[test]
+    fn subscription_topic_label_grammar_is_enforced() {
+        let ik = IdentityKey::generate();
+        let mut s = sub(&ik, &[9u8; 32], 9_000);
+        s.topic = "a/b".into();
+        s.sign(&ik);
+        assert!(Subscription::from_det_cbor(&s.det_cbor()).is_err());
+
+        let mut too_long = sub(&ik, &[9u8; 32], 9_000);
+        too_long.topic = "x".repeat(crate::pubobj::TOPIC_LABEL_MAX_BYTES + 1);
+        too_long.sign(&ik);
+        assert!(Subscription::from_det_cbor(&too_long.det_cbor()).is_err());
+    }
+
     #[test]
     fn short_nonce_is_rejected() {
         let ik = IdentityKey::generate();
@@ -565,17 +638,27 @@ mod tests {
         assert_eq!(s.verify_with_cert(&wrong).unwrap_err(), PubError::SubscriptionSigInvalid);
     }
 
+    /// Build a bare (uncertified) revoke naming `target`, signed by `signer_key`. The caller sets
+    /// `v`/`suite`/`device_cert` afterward when a test needs to vary them.
+    fn revoke(target: &ContentId, signer_key: &IdentityKey) -> SubscriptionRevoke {
+        let mut r = SubscriptionRevoke {
+            subscription: target.clone(),
+            ts: 2_000,
+            signer: signer_key.public(),
+            sig: vec![],
+            v: PUB_V0,
+            suite: Suite::Classical,
+            device_cert: None,
+        };
+        r.sign(signer_key);
+        r
+    }
+
     #[test]
     fn revoke_round_trips_and_verifies_against_its_target() {
         let ik = IdentityKey::generate();
         let s = sub(&ik, &[9u8; 32], 9_000);
-        let mut r = SubscriptionRevoke {
-            subscription: s.subscription_id(),
-            ts: 2_000,
-            signer: ik.public(),
-            sig: vec![],
-        };
-        r.sign(&ik);
+        let r = revoke(&s.subscription_id(), &ik);
         assert_eq!(SubscriptionRevoke::from_det_cbor(&r.det_cbor()).unwrap(), r);
         r.verify_for(&s, None).unwrap();
     }
@@ -588,13 +671,7 @@ mod tests {
         let ik = IdentityKey::generate();
         let attacker = IdentityKey::generate();
         let s = sub(&ik, &[9u8; 32], 9_000);
-        let mut r = SubscriptionRevoke {
-            subscription: s.subscription_id(),
-            ts: 2_000,
-            signer: attacker.public(),
-            sig: vec![],
-        };
-        r.sign(&attacker);
+        let r = revoke(&s.subscription_id(), &attacker);
         let err = r.verify_for(&s, None).unwrap_err();
         assert_eq!(err, PubError::SubscriptionRevokeInvalid);
         assert_eq!(err.code(), 0x0911);
@@ -612,15 +689,124 @@ mod tests {
         s2.sign(&ik);
         assert_ne!(s1.subscription_id(), s2.subscription_id());
 
-        let mut r = SubscriptionRevoke {
-            subscription: s1.subscription_id(),
-            ts: 2_000,
-            signer: ik.public(),
-            sig: vec![],
-        };
-        r.sign(&ik);
+        let r = revoke(&s1.subscription_id(), &ik);
         r.verify_for(&s1, None).unwrap();
         assert_eq!(r.verify_for(&s2, None).unwrap_err(), PubError::SubscriptionRevokeInvalid);
+    }
+
+    // ── §25.5.1 (C-04): SubscriptionRevoke's own v/suite/device_cert ────────────────────────
+
+    /// §25.13 C-04's motivating scenario: the device that signs the revoke need not be the one
+    /// that signed the target `Subscription`, and a revoke's `suite` is independent of the
+    /// target's. Here the revoke carries an inline `device_cert` (key 7) and is verified with NO
+    /// externally-supplied cert — the offline-holder path §25.5.1 describes.
+    #[test]
+    fn revoke_by_a_different_device_with_inline_device_cert_verifies_offline() {
+        let subscriber = IdentityKey::generate();
+        let s = sub(&subscriber, &[9u8; 32], 9_000);
+        let device = IdentityKey::generate();
+        let cert = DeviceCert::issue(&subscriber, device.public(), "phone", 0, None, vec![Cap::Send]);
+
+        let mut r = SubscriptionRevoke {
+            subscription: s.subscription_id(),
+            ts: 2_000,
+            signer: device.public(),
+            sig: vec![],
+            v: PUB_V0,
+            suite: Suite::Classical,
+            device_cert: Some(cert),
+        };
+        r.sign(&device);
+
+        // Round-trips the inline cert byte-for-byte.
+        let decoded = SubscriptionRevoke::from_det_cbor(&r.det_cbor()).unwrap();
+        assert_eq!(decoded, r);
+        assert!(decoded.device_cert.is_some());
+
+        // Verifies with NO cert argument — the inline one alone suffices (offline holder).
+        decoded.verify_for(&s, None).unwrap();
+    }
+
+    /// The inline `device_cert`'s mere presence is never authorization: a cert for a DIFFERENT
+    /// identity must not authorize this revoke's `signer`.
+    #[test]
+    fn revoke_inline_device_cert_for_a_different_identity_is_rejected() {
+        let subscriber = IdentityKey::generate();
+        let s = sub(&subscriber, &[9u8; 32], 9_000);
+        let device = IdentityKey::generate();
+        let attacker = IdentityKey::generate();
+        // A cert issued by someone else entirely, naming this same device key.
+        let wrong_cert = DeviceCert::issue(&attacker, device.public(), "phone", 0, None, vec![Cap::Send]);
+
+        let mut r = SubscriptionRevoke {
+            subscription: s.subscription_id(),
+            ts: 2_000,
+            signer: device.public(),
+            sig: vec![],
+            v: PUB_V0,
+            suite: Suite::Classical,
+            device_cert: Some(wrong_cert),
+        };
+        r.sign(&device);
+        assert_eq!(r.verify_for(&s, None).unwrap_err(), PubError::SubscriptionRevokeInvalid);
+    }
+
+    /// §25.13 C-04: a revoke's `suite` governs only its own `sig` and need not equal the target
+    /// `Subscription.suite` — here the target is signed under one suite value and the revoke under
+    /// another, and the revoke still verifies (both classical in this build, since PqHybrid is
+    /// unverifiable, but the fields are independently carried and independently checked).
+    #[test]
+    fn revoke_suite_is_independent_of_the_targets_suite() {
+        let ik = IdentityKey::generate();
+        let mut s = sub(&ik, &[9u8; 32], 9_000);
+        s.suite = Suite::Classical; // the target's own suite selection
+        s.sign(&ik);
+        let r = revoke(&s.subscription_id(), &ik); // revoke.suite set independently, above
+        assert_eq!(r.suite, Suite::Classical);
+        r.verify_for(&s, None).unwrap();
+    }
+
+    /// §25.13 C-04 / §25.5.1: an unrecognized `v` OR an unsupported `suite` **on the revoke
+    /// itself** is rejected fail-closed at decode — `ERR_PUB_UNSUPPORTED_VERSION` (`0x0901`) —
+    /// mirroring the identical rule already enforced on `Subscription`.
+    #[test]
+    fn revoke_unknown_version_and_unsupported_suite_fail_closed() {
+        let ik = IdentityKey::generate();
+        let s = sub(&ik, &[9u8; 32], 9_000);
+
+        let mut bad_v = revoke(&s.subscription_id(), &ik);
+        bad_v.v = 1;
+        bad_v.sign(&ik);
+        assert_eq!(
+            SubscriptionRevoke::from_det_cbor(&bad_v.det_cbor()).unwrap_err(),
+            PubError::UnsupportedVersion
+        );
+        assert_eq!(bad_v.verify_for(&s, None).unwrap_err(), PubError::UnsupportedVersion);
+
+        let mut bad_suite = revoke(&s.subscription_id(), &ik);
+        bad_suite.suite = Suite::PqHybrid; // a KNOWN code point this build does not support
+        bad_suite.sign(&ik);
+        assert!(!Suite::PqHybrid.is_supported(), "premise: this build cannot verify PqHybrid");
+        assert_eq!(
+            SubscriptionRevoke::from_det_cbor(&bad_suite.det_cbor()).unwrap_err(),
+            PubError::UnsupportedVersion,
+            "a known-but-unsupported suite on the REVOKE itself must be refused at decode"
+        );
+    }
+
+    /// The revoke's `v`/`suite` are inside its own signing preimage: mutating either without
+    /// re-signing must invalidate `sig` (they are not a decorative label alongside the signature).
+    #[test]
+    fn revoke_v_and_suite_are_bound_into_its_own_signature() {
+        let ik = IdentityKey::generate();
+        let s = sub(&ik, &[9u8; 32], 9_000);
+        let base = revoke(&s.subscription_id(), &ik);
+
+        let mut tampered_suite = base.clone();
+        tampered_suite.suite = Suite::PqHybrid;
+        // Decode-time fail-closed on the unsupported suite fires first either way; construct a
+        // supported-but-different discriminator instead by comparing signing preimages directly.
+        assert_ne!(base.signing_preimage(), tampered_suite.signing_preimage());
     }
 
     #[test]
@@ -642,6 +828,20 @@ mod tests {
             announce: Some(vec![0xA1, 0x01, 0x02]),
         };
         assert_eq!(FeedHint::from_det_cbor(&full.det_cbor()).unwrap(), full);
+    }
+
+    /// §25.3.4 rule 3, as applied to `FeedHint.topic` (key 2): a forbidden code point is rejected
+    /// fail-closed on decode.
+    #[test]
+    fn feed_hint_topic_label_grammar_is_enforced() {
+        let bad = FeedHint {
+            feed: vec![3u8; 32],
+            topic: "a/b".into(),
+            seq: 1,
+            tip: None,
+            announce: None,
+        };
+        assert!(FeedHint::from_det_cbor(&bad.det_cbor()).is_err());
     }
 
     #[test]

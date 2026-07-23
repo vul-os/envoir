@@ -35,6 +35,13 @@ fn sync_vectors_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../dmtap/conformance/vectors/sync_vectors.json")
 }
 
+/// The sibling spec repo's **DMTAP-PUBSUB** (§25) known-answer vectors — a SEPARATE file from
+/// `vectors.json`, recomputed here via `dmtap_core::pubsub`. Merged into the run when present so
+/// the PUBSUB suite cases resolve their `pubsub_*` vectors, exactly like `pub_vectors_path`.
+fn pubsub_vectors_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../dmtap/conformance/vectors/pubsub_vectors.json")
+}
+
 /// The sibling spec repo's conformance-suite catalog. Optional: this harness's mandatory proof
 /// (vectors.json) does not depend on it, but when present we cross-reference it for extra
 /// coverage reporting.
@@ -66,6 +73,20 @@ fn main() {
         }
     }
 
+    // Merge the sibling spec repo's DMTAP-PUBSUB (§25) known-answer vectors when present, so
+    // PUBSUB cases are checked and cross-referenced exactly like the core/pub ones.
+    let pbp = pubsub_vectors_path();
+    let mut pubsub_count = 0usize;
+    if pbp.exists() {
+        match load_vectors(&pbp) {
+            Ok(pbf) => {
+                pubsub_count = pbf.vectors.len();
+                vf.vectors.extend(pbf.vectors);
+            }
+            Err(e) => eprintln!("WARN: could not load {}: {e}", pbp.display()),
+        }
+    }
+
     // The Sync-substrate vectors are kept in their OWN report section rather than merged, because
     // one of them carries an expectation that contradicts SYNC.md's own text (see
     // SYNC_KNOWN_DISCREPANCIES): it is reported as a named discrepancy, not silently failed and not
@@ -87,6 +108,9 @@ fn main() {
     println!("vectors file : {}", vectors_path.display());
     if pub_count > 0 {
         println!("pub vectors  : {} (from {})", pub_count, pvp.display());
+    }
+    if pubsub_count > 0 {
+        println!("pubsub vectors: {} (from {})", pubsub_count, pbp.display());
     }
     if let Some(svf) = &sync_vf {
         println!("sync vectors : {} (from {})", svf.vectors.len(), svp.display());

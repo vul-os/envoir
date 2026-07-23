@@ -223,8 +223,10 @@ pub struct DeviceCert {
 
 impl DeviceCert {
     /// Integer-keyed canonical map (§18.4.2). `include_sig=false` omits key 8 for the §18.9.3
-    /// signing body.
-    fn to_cv(&self, include_sig: bool) -> Cv {
+    /// signing body. `pub(crate)`: [`crate::pubsub::SubscriptionRevoke`] (§25.5.1 key 7) embeds a
+    /// complete `DeviceCert` inline and needs the exact nested-map encoding, not a byte-string
+    /// wrapper.
+    pub(crate) fn to_cv(&self, include_sig: bool) -> Cv {
         let mut m = vec![
             (1u64, Cv::U64(self.suite.as_u8() as u64)),
             (2, Cv::Bytes(self.ik.clone())),
@@ -257,7 +259,8 @@ impl DeviceCert {
         Ok(Self::from_cv(cbor::decode(bytes)?)?)
     }
 
-    fn from_cv(cv: Cv) -> Result<Self, CborError> {
+    /// `pub(crate)`: the inline-embedding counterpart of [`DeviceCert::to_cv`] (§25.5.1 key 7).
+    pub(crate) fn from_cv(cv: Cv) -> Result<Self, CborError> {
         let mut f = Fields::from_cv(cv)?;
         let suite = suite_from_cv(f.req(1)?)?;
         let ik = as_bytes(f.req(2)?)?;

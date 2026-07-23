@@ -29,6 +29,12 @@ use dmtap_mail::pop3::Pop3Session;
 use dmtap_mail::store::MailStore;
 
 use crate::legacy_net::{serve_line_session, verb_of, LegacyTls, LineProtocol};
+use crate::net::ConnLimiter;
+
+/// Default cap on concurrent POP3 connections one [`Pop3AccessServer`] serves (§4 in the security
+/// review — the slowloris mitigation's other half, alongside [`crate::legacy_net`]'s idle timeout).
+/// Override with [`Pop3AccessServer::with_max_connections`].
+const DEFAULT_MAX_CONNECTIONS: usize = 256;
 
 /// A bound POP3 access listener. Serves one [`Pop3Session`] per accepted connection on its own thread.
 /// The store and authenticator are (re)built per connection via factories, so each session owns its
@@ -37,16 +43,30 @@ pub struct Pop3AccessServer {
     listener: TcpListener,
     tls: Arc<ServerConfig>,
     mode: LegacyTls,
+    limiter: ConnLimiter,
 }
 
 impl Pop3AccessServer {
-    /// Bind a POP3 access listener with the gateway's TLS config and the chosen TLS mode.
+    /// Bind a POP3 access listener with the gateway's TLS config and the chosen TLS mode. Concurrent
+    /// connections default to [`DEFAULT_MAX_CONNECTIONS`]; override with
+    /// [`Self::with_max_connections`].
     pub fn bind(
         addr: impl std::net::ToSocketAddrs,
         tls: Arc<ServerConfig>,
         mode: LegacyTls,
     ) -> io::Result<Self> {
-        Ok(Pop3AccessServer { listener: TcpListener::bind(addr)?, tls, mode })
+        Ok(Pop3AccessServer {
+            listener: TcpListener::bind(addr)?,
+            tls,
+            mode,
+            limiter: ConnLimiter::new(DEFAULT_MAX_CONNECTIONS),
+        })
+    }
+
+    /// Override the concurrent-connection cap (default [`DEFAULT_MAX_CONNECTIONS`]).
+    pub fn with_max_connections(mut self, max: usize) -> Self {
+        self.limiter = ConnLimiter::new(max);
+        self
     }
 
     /// The address actually bound (useful with an ephemeral `:0` port in tests).
@@ -92,6 +112,13 @@ impl Pop3AccessServer {
             }
             match self.listener.accept() {
                 Ok((stream, peer)) => {
+                    // Concurrent-connection cap (§4 — the other half of the slowloris mitigation).
+                    let Some(guard) = self.limiter.try_acquire() else {
+                        eprintln!(
+                            "gateway[pop3]: {peer}: at the concurrent-connection limit, refusing"
+                        );
+                        continue;
+                    };
                     if let Err(e) = stream.set_nonblocking(false) {
                         eprintln!("gateway[pop3]: {peer}: cannot set blocking: {e}");
                         continue;
@@ -101,6 +128,7 @@ impl Pop3AccessServer {
                     let make_store = make_store.clone();
                     let make_auth = make_auth.clone();
                     std::thread::spawn(move || {
+                        let _guard = guard; // held for the session's lifetime, released on drop
                         if let Err(e) =
                             handle_connection(stream, tls, mode, make_store(), make_auth())
                         {

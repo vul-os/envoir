@@ -27,8 +27,8 @@ import { bus } from './bus.js';
     const { thread, organizer } = simulateIncomingInvite();
     bus.refreshChrome();
     if (state.view === 'mail' || state.view === 'calendar') bus.rerender();
-    import('./ui.js').then(({ toast, icon }) => toast(
-      `${icon('bell')} Wake ping — new invite from ${organizer.name} synced over the mesh`,
+    import('./ui.js').then(({ toast, icon, esc }) => toast(
+      `${icon('bell')} Wake ping — new invite from ${esc(organizer.name)} synced over the mesh`,
       { ms: 5200, action: 'View', onAction: () => {
         state.ui.mailFolder = 'inbox'; state.ui.mailLabel = null;
         bus.setView('mail');

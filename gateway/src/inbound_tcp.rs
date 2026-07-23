@@ -10,7 +10,7 @@ use std::io::{self, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
@@ -18,7 +18,25 @@ use rustls::{ServerConfig, ServerConnection, StreamOwned};
 use dmtap_core::TimestampMs;
 
 use crate::inbound::{InboundGateway, MxSession, SmtpReply};
-use crate::net::{crypto_provider, read_line, write_all};
+use crate::net::{crypto_provider, read_line, write_all, ConnLimiter};
+
+/// The per-I/O-operation socket timeout applied to every accepted MX connection (§2 in the security
+/// review — the "MX listener DoS" finding): a single idle or trickle-fed peer must never be able to
+/// block a `read`/`write` forever and, with it, the thread serving it. Each connection now runs on
+/// its own spawned thread (see [`MxListener`] docs), so this bound no longer protects every OTHER
+/// inbound sender from one stalled peer directly — that is [`DEFAULT_MAX_CONNECTIONS`]'s job — but it
+/// still bounds how long any single stalled syscall can hang a thread, and how long that thread's
+/// [`ConnLimiter`] slot stays held. 120 s comfortably covers a legitimate legacy MTA's think-time
+/// between SMTP command/reply round-trips.
+const MX_IO_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// A hard ceiling on how long any ONE inbound MX transaction (greeting through `QUIT`/disconnect) may
+/// run, even if the peer keeps sending just often enough to dodge [`MX_IO_TIMEOUT`] on every
+/// individual read (a classic slow-trickle/slowloris pattern the per-op timeout alone does not stop).
+/// 10 minutes is generous for a legitimate transaction (SMTP command timeouts are typically minutes,
+/// not tens of minutes) and short enough that one abusive connection cannot hold its
+/// [`ConnLimiter`] slot indefinitely.
+const MX_MAX_TRANSACTION: Duration = Duration::from_secs(600);
 
 /// Build a rustls [`ServerConfig`] from a certificate chain + private key (both DER). Used to offer
 /// STARTTLS on the inbound listener. In production the operator supplies real cert/key material
@@ -46,20 +64,68 @@ pub fn load_private_key(pem: &mut dyn io::BufRead) -> io::Result<PrivateKeyDer<'
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no private key in PEM"))
 }
 
-/// A listening MX socket. Stateless (§7.4): each accepted connection is an independent transaction.
+/// The concurrent-connection cap applied by [`MxListener::serve_forever`]/[`MxListener::serve_until`]
+/// (mirroring `AdminServer`/`ImapAccessServer`/`Pop3AccessServer`/`SubmissionServer`'s
+/// [`ConnLimiter`]s): the per-op [`MX_IO_TIMEOUT`]/[`MX_MAX_TRANSACTION`] bounds cap how long any ONE
+/// connection can occupy a thread, but say nothing about how MANY may be open at once — without a
+/// cap an attacker could open thousands of idling connections and exhaust the process's thread/fd
+/// budget one thread-spawn at a time. Override via [`MxListener::with_max_connections`].
+const DEFAULT_MAX_CONNECTIONS: usize = 256;
+
+/// A listening MX socket. Stateless (§7.4): each accepted connection is an independent transaction,
+/// and — since `InboundGateway` is `Send + Sync` (§7.2, [`crate::inbound::KeyDirectory`] et al.) —
+/// [`Self::serve_forever`]/[`Self::serve_until`] hand each accepted connection to its own spawned
+/// thread rather than serving one at a time. This is the thread-per-connection model
+/// `AdminServer`/`ImapAccessServer`/`Pop3AccessServer`/`SubmissionServer` already use: a single
+/// slow-but-not-timed-out peer (bounded by [`MX_IO_TIMEOUT`]/[`MX_MAX_TRANSACTION`] regardless) no
+/// longer delays every OTHER inbound sender behind it in the accept loop.
 pub struct MxListener {
     listener: TcpListener,
     tls: Option<Arc<ServerConfig>>,
+    io_timeout: Duration,
+    max_transaction: Duration,
+    limiter: ConnLimiter,
 }
 
 impl MxListener {
     /// Bind an MX listener. `tls = Some(cfg)` advertises and terminates STARTTLS; `None` is a
-    /// plaintext dev listener (no STARTTLS offered).
+    /// plaintext dev listener (no STARTTLS offered). Uses the production
+    /// [`MX_IO_TIMEOUT`]/[`MX_MAX_TRANSACTION`] slowloris bounds and [`DEFAULT_MAX_CONNECTIONS`];
+    /// override with [`Self::with_io_timeout`]/[`Self::with_max_transaction`]/
+    /// [`Self::with_max_connections`] (tests use a short timeout so the idle-connection regression
+    /// test does not have to wait minutes).
     pub fn bind(
         addr: impl std::net::ToSocketAddrs,
         tls: Option<Arc<ServerConfig>>,
     ) -> io::Result<Self> {
-        Ok(MxListener { listener: TcpListener::bind(addr)?, tls })
+        Ok(MxListener {
+            listener: TcpListener::bind(addr)?,
+            tls,
+            io_timeout: MX_IO_TIMEOUT,
+            max_transaction: MX_MAX_TRANSACTION,
+            limiter: ConnLimiter::new(DEFAULT_MAX_CONNECTIONS),
+        })
+    }
+
+    /// Override the per-read/write socket timeout applied to every accepted connection (production
+    /// default [`MX_IO_TIMEOUT`]).
+    pub fn with_io_timeout(mut self, t: Duration) -> Self {
+        self.io_timeout = t;
+        self
+    }
+
+    /// Override the max-transaction-duration ceiling (production default [`MX_MAX_TRANSACTION`]).
+    pub fn with_max_transaction(mut self, t: Duration) -> Self {
+        self.max_transaction = t;
+        self
+    }
+
+    /// Override the concurrent-connection cap applied by [`Self::serve_forever`]/[`Self::serve_until`]
+    /// (production default [`DEFAULT_MAX_CONNECTIONS`]). Has no effect on [`Self::serve_once`], which
+    /// never consults the limiter.
+    pub fn with_max_connections(mut self, max: usize) -> Self {
+        self.limiter = ConnLimiter::new(max);
+        self
     }
 
     /// The address actually bound (useful with an ephemeral `:0` port in tests).
@@ -67,19 +133,30 @@ impl MxListener {
         self.listener.local_addr()
     }
 
-    /// Accept exactly one connection and drive its SMTP transaction against `gw`, stamping messages
-    /// with `now`. Returns after the peer `QUIT`s or disconnects.
+    /// Accept exactly one connection and drive its SMTP transaction against `gw` **on this thread**,
+    /// stamping messages with `now`. Returns after the peer `QUIT`s or disconnects (or the connection
+    /// is cut off by the idle/max-transaction guard). For tests and single-shot use; the daemon uses
+    /// [`Self::serve_until`], which handles each connection on its own spawned thread.
     pub fn serve_once(&self, gw: &InboundGateway, now: TimestampMs) -> io::Result<()> {
         let (stream, peer) = self.listener.accept()?;
         let peer_ip = peer.ip().to_string();
-        handle_connection(stream, gw, &peer_ip, now, self.tls.clone())
+        handle_connection(
+            stream,
+            gw,
+            &peer_ip,
+            now,
+            self.tls.clone(),
+            self.io_timeout,
+            self.max_transaction,
+        )
     }
 
-    /// Serve connections forever, one at a time, stamping each with the current wall-clock time. A
-    /// per-connection error is logged to stderr and does not stop the listener (statelessness means
-    /// a dropped connection loses nothing — the legacy sender retries). This variant never returns;
-    /// prefer [`Self::serve_until`] for a daemon that must shut down gracefully.
-    pub fn serve_forever(&self, gw: &InboundGateway) -> io::Result<()> {
+    /// Serve connections forever, each on its own spawned thread, stamping each with the current
+    /// wall-clock time. A per-connection error is logged to stderr and does not stop the listener
+    /// (statelessness means a dropped connection loses nothing — the legacy sender retries). This
+    /// variant never returns; prefer [`Self::serve_until`] for a daemon that must shut down
+    /// gracefully.
+    pub fn serve_forever(&self, gw: Arc<InboundGateway>) -> io::Result<()> {
         for stream in self.listener.incoming() {
             let stream = match stream {
                 Ok(s) => s,
@@ -92,21 +169,49 @@ impl MxListener {
                 .peer_addr()
                 .map(|a| a.ip().to_string())
                 .unwrap_or_else(|_| "unknown".to_string());
-            if let Err(e) = handle_connection(stream, gw, &peer_ip, now_ms(), self.tls.clone()) {
-                eprintln!("gateway: session with {peer_ip} ended: {e}");
-            }
+            // Concurrent-connection cap (mirrors the other three access servers): refuse outright
+            // (drop the just-accepted socket with no reply) rather than spawn a thread when already
+            // at capacity — a legitimate retrying MTA treats a refused connection like any other
+            // transient failure and requeues.
+            let Some(guard) = self.limiter.try_acquire() else {
+                eprintln!("gateway: {peer_ip}: at the concurrent-connection limit, refusing");
+                continue;
+            };
+            let gw = gw.clone();
+            let tls = self.tls.clone();
+            let io_timeout = self.io_timeout;
+            let max_transaction = self.max_transaction;
+            std::thread::spawn(move || {
+                let _guard = guard; // held for the connection's lifetime, released on drop
+                if let Err(e) = handle_connection(
+                    stream,
+                    &gw,
+                    &peer_ip,
+                    now_ms(),
+                    tls,
+                    io_timeout,
+                    max_transaction,
+                ) {
+                    eprintln!("gateway: session with {peer_ip} ended: {e}");
+                }
+            });
         }
         Ok(())
     }
 
-    /// Serve connections one at a time until `shutdown` flips to `true`, then return cleanly — the
-    /// long-running daemon loop with **graceful shutdown**. The listener is switched to non-blocking
-    /// and the accept loop polls `shutdown` between connections (and while idle), so a `SIGINT`/
-    /// `SIGTERM` handler that sets the flag makes the daemon stop accepting and return without
-    /// aborting mid-transaction. Each accepted connection is handled in blocking mode exactly as
-    /// [`Self::serve_forever`] does (statelessness: an interrupted connection loses nothing — the
-    /// legacy sender retries). A per-connection error is logged and does not stop the loop.
-    pub fn serve_until(&self, gw: &InboundGateway, shutdown: &AtomicBool) -> io::Result<()> {
+    /// Serve connections — each on its own spawned thread — until `shutdown` flips to `true`, then
+    /// return cleanly — the long-running daemon loop with **graceful shutdown**. The listener is
+    /// switched to non-blocking and the accept loop polls `shutdown` between connections (and while
+    /// idle), so a `SIGINT`/`SIGTERM` handler that sets the flag makes the daemon stop accepting and
+    /// return without aborting any in-flight transaction. `gw` is `Arc`'d once by the caller and
+    /// cloned (cheaply — an `Arc` bump) into each spawned thread; every accepted connection runs
+    /// concurrently, bounded by the [`ConnLimiter`] concurrent-connection cap and each individually
+    /// bounded by [`MX_IO_TIMEOUT`]/[`MX_MAX_TRANSACTION`] (statelessness: an interrupted connection
+    /// loses nothing — the legacy sender retries). A per-connection error is logged and does not stop
+    /// the loop. Detached session threads may still be finishing their current transaction when this
+    /// returns (bounded by [`MX_MAX_TRANSACTION`]); the caller does not block on them, exactly as
+    /// `ImapAccessServer`/`Pop3AccessServer`/`SubmissionServer` already behave.
+    pub fn serve_until(&self, gw: Arc<InboundGateway>, shutdown: &AtomicBool) -> io::Result<()> {
         self.listener.set_nonblocking(true)?;
         // Idle poll cadence: small enough that shutdown is near-instant, large enough not to spin.
         let idle = Duration::from_millis(100);
@@ -123,11 +228,30 @@ impl MxListener {
                         continue;
                     }
                     let peer_ip = peer.ip().to_string();
-                    if let Err(e) =
-                        handle_connection(stream, gw, &peer_ip, now_ms(), self.tls.clone())
-                    {
-                        eprintln!("gateway: session with {peer_ip} ended: {e}");
-                    }
+                    let Some(guard) = self.limiter.try_acquire() else {
+                        eprintln!(
+                            "gateway: {peer_ip}: at the concurrent-connection limit, refusing"
+                        );
+                        continue;
+                    };
+                    let gw = gw.clone();
+                    let tls = self.tls.clone();
+                    let io_timeout = self.io_timeout;
+                    let max_transaction = self.max_transaction;
+                    std::thread::spawn(move || {
+                        let _guard = guard; // held for the connection's lifetime, released on drop
+                        if let Err(e) = handle_connection(
+                            stream,
+                            &gw,
+                            &peer_ip,
+                            now_ms(),
+                            tls,
+                            io_timeout,
+                            max_transaction,
+                        ) {
+                            eprintln!("gateway: session with {peer_ip} ended: {e}");
+                        }
+                    });
                 }
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                     std::thread::sleep(idle);
@@ -158,7 +282,18 @@ fn handle_connection(
     peer_ip: &str,
     now: TimestampMs,
     tls: Option<Arc<ServerConfig>>,
+    io_timeout: Duration,
+    max_transaction: Duration,
 ) -> io::Result<()> {
+    // Slowloris / MX-DoS guard (§2 in the security review): bound every read/write on this socket,
+    // and cap the transaction's total wall-clock duration so a peer trickling bytes just inside the
+    // per-op timeout still gets cut off. Set on the raw `TcpStream` BEFORE any TLS wrapping — the
+    // timeout is a socket-level attribute that keeps applying to every read/write the TLS stream
+    // performs on the same underlying fd, so STARTTLS does not reset or bypass it.
+    tcp.set_read_timeout(Some(io_timeout))?;
+    tcp.set_write_timeout(Some(io_timeout))?;
+    let deadline = Instant::now() + max_transaction;
+
     let mut conn = ServerStream::Plain(tcp);
     let mut session = MxSession::new(gw, peer_ip, now);
     write_all(&mut conn, &session.greeting().wire())?;
@@ -168,6 +303,19 @@ fn handle_connection(
 
     // `read_line` yields raw line bytes (`None` on peer disconnect, which ends the session).
     while let Some(line) = read_line(&mut conn)? {
+        if Instant::now() >= deadline {
+            // Best-effort courtesy reply (ignored if the write itself times out / fails) before
+            // dropping the connection — a legitimate retrying MTA treats this exactly like any other
+            // 421 and requeues.
+            let _ = write_all(
+                &mut conn,
+                &SmtpReply::new(421, "4.4.2 transaction timed out, closing connection").wire(),
+            );
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "inbound MX transaction exceeded the max transaction duration",
+            ));
+        }
         if in_data {
             // Everything is message content until the terminating '.'; feed the RAW bytes straight
             // through — a DATA line is arbitrary 8-bit content (ISO-8859-x, GB18030, …) and must

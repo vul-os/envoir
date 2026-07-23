@@ -37,6 +37,12 @@ use dmtap_mail::auth::Authenticator;
 use dmtap_mail::smtp::{build_mote_draft, SmtpSession, Submission};
 
 use crate::legacy_net::{serve_line_session, verb_of, LegacyTls, LineProtocol};
+use crate::net::ConnLimiter;
+
+/// Default cap on concurrent submission connections one [`SubmissionServer`] serves (§4 in the
+/// security review — the slowloris mitigation's other half, alongside [`crate::legacy_net`]'s idle
+/// timeout). Override with [`SubmissionServer::with_max_connections`].
+const DEFAULT_MAX_CONNECTIONS: usize = 256;
 
 /// Whether a submitted recipient is a **native** DMTAP destination (delivered as a MOTE over the mesh)
 /// or a **legacy** email destination (bridged out via the §7.3 SMTP relay).
@@ -82,12 +88,14 @@ pub struct SubmissionServer {
     tls: Arc<ServerConfig>,
     mode: LegacyTls,
     native_domains: Arc<Vec<String>>,
+    limiter: ConnLimiter,
 }
 
 impl SubmissionServer {
     /// Bind a submission access listener with the gateway's TLS config, TLS mode, and the operator's
     /// native domains (recipients on these are classified [`Destination::Native`]). Native domains are
-    /// lowercased for a case-insensitive match.
+    /// lowercased for a case-insensitive match. Concurrent connections default to
+    /// [`DEFAULT_MAX_CONNECTIONS`]; override with [`Self::with_max_connections`].
     pub fn bind(
         addr: impl std::net::ToSocketAddrs,
         tls: Arc<ServerConfig>,
@@ -101,7 +109,14 @@ impl SubmissionServer {
             tls,
             mode,
             native_domains: Arc::new(native_domains),
+            limiter: ConnLimiter::new(DEFAULT_MAX_CONNECTIONS),
         })
+    }
+
+    /// Override the concurrent-connection cap (default [`DEFAULT_MAX_CONNECTIONS`]).
+    pub fn with_max_connections(mut self, max: usize) -> Self {
+        self.limiter = ConnLimiter::new(max);
+        self
     }
 
     /// The address actually bound (useful with an ephemeral `:0` port in tests).
@@ -151,6 +166,13 @@ impl SubmissionServer {
             }
             match self.listener.accept() {
                 Ok((stream, peer)) => {
+                    // Concurrent-connection cap (§4 — the other half of the slowloris mitigation).
+                    let Some(guard) = self.limiter.try_acquire() else {
+                        eprintln!(
+                            "gateway[submission]: {peer}: at the concurrent-connection limit, refusing"
+                        );
+                        continue;
+                    };
                     if let Err(e) = stream.set_nonblocking(false) {
                         eprintln!("gateway[submission]: {peer}: cannot set blocking: {e}");
                         continue;
@@ -161,6 +183,7 @@ impl SubmissionServer {
                     let sink = sink.clone();
                     let native = self.native_domains.clone();
                     std::thread::spawn(move || {
+                        let _guard = guard; // held for the session's lifetime, released on drop
                         if let Err(e) =
                             handle_connection(stream, tls, mode, make_auth(), sink, native)
                         {

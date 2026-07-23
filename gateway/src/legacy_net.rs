@@ -22,6 +22,7 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
 
@@ -29,6 +30,15 @@ use rustls::{ServerConfig, ServerConnection, StreamOwned};
 /// line flood driving the server to OOM). Matches the IMAP transport's 64 MiB literal ceiling, which
 /// also bounds a submission `DATA` line that is one long base64 blob.
 const MAX_LINE: usize = 64 * 1024 * 1024;
+
+/// The per-read/write socket idle timeout applied to every POP3 / SMTP-submission connection (§4 in
+/// the security review — the slowloris finding): both protocols here are short command/response
+/// exchanges (no long-lived server-push wait analogous to IMAP `IDLE`), so a single conservative
+/// bound covers legitimate use while stopping a peer that opens a connection and then trickles bytes
+/// (or sends nothing) from occupying a server thread indefinitely. Paired with a per-listener
+/// [`crate::net::ConnLimiter`] concurrent-connection cap (the other half of the mitigation) in each
+/// server's accept loop.
+const LEGACY_IO_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// How a line-based legacy access server presents TLS. There is no cleartext-auth option: the
 /// app-password must never travel in the clear (§7.15.1). Both modes reuse the gateway's own cert/key.
@@ -87,8 +97,27 @@ pub fn serve_line_session<P: LineProtocol>(
     stream: TcpStream,
     tls: Arc<ServerConfig>,
     mode: LegacyTls,
-    mut proto: P,
+    proto: P,
 ) -> io::Result<()> {
+    serve_line_session_with_timeout(stream, tls, mode, proto, LEGACY_IO_TIMEOUT)
+}
+
+/// As [`serve_line_session`], but with an explicit idle timeout — split out so the regression test
+/// can use a short timeout instead of waiting out [`LEGACY_IO_TIMEOUT`] for real.
+fn serve_line_session_with_timeout<P: LineProtocol>(
+    stream: TcpStream,
+    tls: Arc<ServerConfig>,
+    mode: LegacyTls,
+    mut proto: P,
+    io_timeout: Duration,
+) -> io::Result<()> {
+    // Slowloris guard (§4 in the security review): bound every read/write on the raw socket BEFORE
+    // any TLS wrapping — the timeout is a socket-level attribute that keeps applying to every
+    // read/write the TLS stream performs on the same underlying fd, so STARTTLS/STLS does not reset
+    // or bypass it.
+    stream.set_read_timeout(Some(io_timeout))?;
+    stream.set_write_timeout(Some(io_timeout))?;
+
     // Build the (possibly already-encrypted) transport. Implicit TLS terminates before the greeting.
     let (transport, mut secured) = match mode {
         LegacyTls::Implicit => {
@@ -272,6 +301,75 @@ pub(crate) fn verb_of(line: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::TcpListener;
+
+    /// A minimal [`LineProtocol`] double for the idle-timeout regression test — never actually
+    /// exercised since the test connection sends nothing before the timeout fires.
+    struct MuteProtocol;
+    impl LineProtocol for MuteProtocol {
+        fn greeting(&mut self) -> String {
+            "220 mute ready\r\n".to_string()
+        }
+        fn feed_line_bytes(&mut self, _line: &[u8]) -> String {
+            String::new()
+        }
+        fn is_starttls(&self, _line: &str) -> bool {
+            false
+        }
+        fn accepts_upgrade(&self, _reply: &str) -> bool {
+            false
+        }
+        fn is_quit(&self, _line: &str) -> bool {
+            false
+        }
+    }
+
+    /// A throwaway rustls `ServerConfig` — required by [`serve_line_session_with_timeout`]'s
+    /// signature even in `LegacyTls::StartTls` mode, where it is never actually used unless the
+    /// client sends `STARTTLS`/`STLS` (which this test's idle client never does).
+    fn unused_tls_config() -> Arc<ServerConfig> {
+        let rcgen::CertifiedKey { cert, key_pair } =
+            rcgen::generate_simple_self_signed(vec!["legacy-net-test".to_string()])
+                .expect("self-signed cert");
+        let key = rustls::pki_types::PrivatePkcs8KeyDer::from(key_pair.serialize_der());
+        crate::inbound_tcp::server_config(vec![cert.der().clone()], key.into())
+            .expect("server config")
+    }
+
+    #[test]
+    fn idle_connection_is_cut_off_by_the_read_timeout() {
+        // §4 in the security review: a peer that connects and never sends a line must not pin the
+        // session thread open forever.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+
+        let client = std::thread::spawn(move || {
+            let stream = TcpStream::connect(addr).expect("connect");
+            std::thread::sleep(Duration::from_millis(600));
+            drop(stream);
+        });
+
+        let (stream, _peer) = listener.accept().expect("accept");
+        let started = std::time::Instant::now();
+        let result = serve_line_session_with_timeout(
+            stream,
+            unused_tls_config(),
+            LegacyTls::StartTls,
+            MuteProtocol,
+            Duration::from_millis(200),
+        );
+        let elapsed = started.elapsed();
+
+        assert!(result.is_err(), "an idle peer must not hang the session forever");
+        let kind = result.unwrap_err().kind();
+        assert!(
+            kind == io::ErrorKind::WouldBlock || kind == io::ErrorKind::TimedOut,
+            "expected a timeout-flavored error, got {kind:?}"
+        );
+        assert!(elapsed < Duration::from_secs(5), "took {elapsed:?}, expected a prompt cutoff");
+
+        let _ = client.join();
+    }
 
     #[test]
     fn parses_tls_mode_spellings() {

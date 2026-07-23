@@ -120,8 +120,8 @@ function roleMenu(anchor, g, m) {
   document.body.appendChild(pop);
   items.forEach(([, action], i) => pop.querySelector(`[data-i="${i}"]`).onclick = () => {
     pop.remove();
-    if (action === 'remove') { g.members = g.members.filter(x => x.address !== m.address); toast(`${person(m.address).name} removed · file-keys rotated (spec §6.7)`); }
-    else { m.role = action; toast(`${person(m.address).name} → ${action} (signed Commit)`); }
+    if (action === 'remove') { g.members = g.members.filter(x => x.address !== m.address); toast(`${esc(person(m.address).name)} removed · file-keys rotated (spec §6.7)`); }
+    else { m.role = action; toast(`${esc(person(m.address).name)} → ${esc(action)} (signed Commit)`); }
     bus.rerender();
   });
   setTimeout(() => document.addEventListener('click', function h(e) { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', h); } }), 0);
@@ -138,7 +138,7 @@ function addMemberModal(g) {
   card.querySelector('#ax').onclick = closeModal;
   card.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
     g.members.push({ address: b.dataset.a, role: 'member' }); closeModal(); bus.rerender();
-    toast(`${icon('check')} ${person(b.dataset.a).name} added — Welcome sealed to their key`);
+    toast(`${icon('check')} ${esc(person(b.dataset.a).name)} added — Welcome sealed to their key`);
   });
 }
 

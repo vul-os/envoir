@@ -159,12 +159,12 @@ async function drawDetail(root) {
     if (!c) { c = { id: uid('dm'), type: 'dm', with: p.id, presence: null, typing: false, unread: 0, msgs: [] }; state.chats.push(c); }
     state.ui.selChat = c.id; state.ui.chatThread = null; state.ui.mobileDetail = true;
     bus.setView('chat');
-    toast(`${icon('chat')} Chat opened with ${p.name}`);
+    toast(`${icon('chat')} Chat opened with ${esc(p.name)}`);
   };
   wrap.querySelector('#ct-invite').onclick = () => newEventModal(null, null, [p.address]);
   wrap.querySelector('#ct-edit').onclick = () => contactEditor(p);
   const vb = wrap.querySelector('#verify');
-  if (vb) vb.onclick = () => { p.trust = 'verified'; toast(`${icon('verified')} Safety number matched — ${p.name} is now verified`); bus.rerender(); };
+  if (vb) vb.onclick = () => { p.trust = 'verified'; toast(`${icon('verified')} Safety number matched — ${esc(p.name)} is now verified`); bus.rerender(); };
 }
 
 function splitName(name) {
@@ -275,7 +275,7 @@ function contactEditor(existing) {
     if (!existing) { addPerson(p); selId = p.id; }
     else { const wrap = document.querySelector('#ctdetail'); if (wrap) wrap.dataset.for = ''; } // force re-render of hero
     closeModal(); bus.rerender();
-    toast(`${icon('check')} ${existing ? 'Contact updated' : name + ' added'} — pinned to their key (TOFU)`);
+    toast(`${icon('check')} ${existing ? 'Contact updated' : esc(name) + ' added'} — pinned to their key (TOFU)`);
   };
   if (existing) card.querySelector('#pdel').onclick = () => {
     if (!confirm(`Delete ${p.name} from Contacts? This can't be undone here.`)) return;

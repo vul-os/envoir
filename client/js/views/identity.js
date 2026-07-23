@@ -211,7 +211,7 @@ export function render(root) {
   </div></div>`;
 
   // ---- wire ----
-  root.querySelector('#copyaddr').onclick = () => { navigator.clipboard?.writeText(displayAddress(id)); toast(`${icon('check')} Copied ${displayAddress(id)}`); };
+  root.querySelector('#copyaddr').onclick = () => { navigator.clipboard?.writeText(displayAddress(id)); toast(`${icon('check')} Copied ${esc(displayAddress(id))}`); };
   root.querySelector('#editprofile').onclick = () => openEditProfile();
   root.querySelector('#copykeyname').onclick = () => { navigator.clipboard?.writeText(id.keyName || ''); toast(`${icon('check')} Copied key-name`); };
   root.querySelector('#managealiases').onclick = () => bus.setView('settings');

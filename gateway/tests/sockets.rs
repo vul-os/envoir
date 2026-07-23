@@ -126,7 +126,8 @@ fn loopback_starttls_delivers_and_produces_attested_mote() {
     let listener = MxListener::bind("127.0.0.1:0", Some(server_cfg)).expect("bind");
     let addr = listener.local_addr().expect("addr");
 
-    // Client runs in a thread (gateway stays in the main thread — it is not Send).
+    // Client runs in a thread; `serve_once` blocks the calling thread for exactly one connection,
+    // so the gateway's own accept/serve loop stays on the main thread here regardless.
     let msg = sample_message(&recip.email);
     let client = thread::spawn(move || {
         let transport = SmtpTcpTransport::with_test_root("gateway.test", cert_der)
@@ -335,6 +336,60 @@ fn starttls_handshake_failure_after_220_is_aborted_not_downgraded_even_when_oppo
         "must never have sent MAIL/DATA in cleartext after STARTTLS failed"
     );
     let _ = handle.join();
+}
+
+// ---------------------------------------------------------------------------------------------
+// 5. MX listener DoS guard: an idle connection that never sends a line is cut off by the socket
+//    read timeout — never hangs the listener indefinitely (security review §2).
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn idle_connection_is_cut_off_by_the_read_timeout() {
+    let recip = TestRecipient::new("alice@example.org");
+    let att_key = AttestationKey::generate(DOMAIN, GW_SELECTOR);
+    let delivery =
+        Arc::new(CapturingDelivery { outcome: DeliveryOutcome::Acked, captured: Mutex::new(None) });
+    let gw = InboundGateway::new(
+        IdentityKey::generate(),
+        vec![att_key],
+        Box::new(OneUser { email: recip.email.clone(), key: recip.recipient_key() }),
+        Box::new(ArcDelivery(delivery.clone())),
+        Box::new(AllowAll),
+    );
+
+    // A short read timeout (and a longer max-transaction ceiling, so it's the per-op timeout under
+    // test here, not the overall duration cap) — see `MxListener::with_io_timeout`.
+    let listener = MxListener::bind("127.0.0.1:0", None)
+        .expect("bind")
+        .with_io_timeout(Duration::from_millis(200))
+        .with_max_transaction(Duration::from_secs(30));
+    let addr = listener.local_addr().expect("addr");
+
+    // A "client" that connects and then sends nothing at all — the slowloris / idle-MX-DoS pattern.
+    let client = thread::spawn(move || {
+        let stream = TcpStream::connect(addr).expect("connect");
+        // Hold the socket open well past the server's read timeout, then let it drop.
+        thread::sleep(Duration::from_millis(600));
+        drop(stream);
+    });
+
+    let started = std::time::Instant::now();
+    let result = listener.serve_once(&gw, NOW);
+    let elapsed = started.elapsed();
+
+    assert!(result.is_err(), "an idle peer that never sends a line must not hang serve_once forever");
+    let kind = result.unwrap_err().kind();
+    assert!(
+        kind == std::io::ErrorKind::WouldBlock || kind == std::io::ErrorKind::TimedOut,
+        "expected a timeout-flavored error, got {kind:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "the read timeout must cut the idle connection off promptly, took {elapsed:?}"
+    );
+    assert!(delivery.captured.lock().unwrap().is_none(), "no MOTE was ever built for an idle peer");
+
+    let _ = client.join();
 }
 
 // --- a tiny in-test SMTP server -------------------------------------------------------------

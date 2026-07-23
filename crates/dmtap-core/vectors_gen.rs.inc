@@ -458,9 +458,12 @@ fn build_all() -> VectorFile {
     }
 
     // === 6. Suite fail-closed — an UNREGISTERED suite byte MUST be rejected (spec §1.1, §18.1.4) =
+    // `0x06` is the lowest still-unallocated Standards-Action point now that 0x01-0x05 are
+    // registered; this list previously tested `0x05` until §1.1 registered it as the hash-diverse
+    // SHA3-256 target (§16.7) — the same drift `0x04` underwent one revision earlier.
     for (name, byte) in [
         ("suite_reject_0x00", 0x00u8),
-        ("suite_reject_0x05", 0x05u8),
+        ("suite_reject_0x06", 0x06u8),
         ("suite_reject_0x7f", 0x7fu8),
         ("suite_reject_0xff", 0xffu8),
     ] {
@@ -473,13 +476,15 @@ fn build_all() -> VectorFile {
             "an unregistered suite byte MUST fail to decode (never guess; fail closed)",
         ));
     }
-    // Positive controls: 0x01/0x02/0x03 decode as KNOWN suite ids (0x02 reserved-PQ, 0x03
-    // reserved AEAD-diverse — both known code points, §21.15; unimplemented ⇒ fail closed on USE).
+    // Positive controls: 0x01/0x02/0x03/0x04/0x05 decode as KNOWN suite ids (0x02 reserved-PQ,
+    // 0x03 reserved AEAD-diverse, 0x04 reserved signature-diverse, 0x05 reserved hash-diverse —
+    // all known code points, §21.15; unimplemented ⇒ fail closed on USE).
     for (name, byte) in [
         ("suite_accept_0x01", 0x01u8),
         ("suite_accept_0x02", 0x02u8),
         ("suite_accept_0x03", 0x03u8),
         ("suite_accept_0x04", 0x04u8),
+        ("suite_accept_0x05", 0x05u8),
     ] {
         let cbor_bytes = cbor(&byte);
         vectors.push(v(
@@ -487,7 +492,7 @@ fn build_all() -> VectorFile {
             "suite_decode",
             json!({ "cbor_hex": hex(&cbor_bytes) }),
             json!({ "accepted": true }),
-            "0x01 (legacy), 0x02 (the v0 REQUIRED originating suite), 0x03 (reserved AEAD-diverse) and 0x04 (reserved signature-diverse, the SLH-DSA anchor profile) are all REGISTERED code points and decode. Registered and implemented are different questions: decoding says the registry knows the byte; the support predicates say whether anything may be done under it. 0x04 was previously asserted here as unregistered-and-rejected, which stopped being true when §1.1 registered it and contradicted this very vector's own rationale.",
+            "0x01 (legacy), 0x02 (the v0 REQUIRED originating suite), 0x03 (reserved AEAD-diverse), 0x04 (reserved signature-diverse, the SLH-DSA anchor profile) and 0x05 (reserved hash-diverse, the SHA3-256 target) are all REGISTERED code points and decode. Registered and implemented are different questions: decoding says the registry knows the byte; the support predicates say whether anything may be done under it. 0x04 (then 0x05) was previously asserted here as unregistered-and-rejected, which stopped being true when §1.1 registered it and contradicted this very vector's own rationale.",
         ));
     }
 

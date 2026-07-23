@@ -37,7 +37,7 @@ export async function respondRsvp(ev, response) {
   me.rsvp = response;
   await buildMote({ to: ev.organizer, kind: KIND.calendar, subject: 'RSVP: ' + ev.title, body: JSON.stringify({ type: 'rsvp', rsvp: response }), tier: state.settings.tierDefault });
   bus.rerender(); bus.refreshChrome();
-  toast(`${icon('check')} RSVP '${RSVP[response]}' sent to ${person(ev.organizer).name} — peer-to-peer, no server`);
+  toast(`${icon('check')} RSVP '${esc(RSVP[response])}' sent to ${esc(person(ev.organizer).name)} — peer-to-peer, no server`);
 }
 
 export function render(root) {

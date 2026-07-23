@@ -2,7 +2,7 @@
 // (spec §3.9): you pick a display name + a primary address; the KEY underneath is the identity,
 // verified later by safety number (not used as an address). Generates a real keypair.
 
-import { createIdentity, currentIdentity, addAlias } from './identity.js';
+import { createIdentity, currentIdentity, addAlias, sanitizeAddressInput } from './identity.js';
 import { esc, icon, toast, brandMark, safetyWords, safetyGrid, safetyNumeric } from './ui.js';
 
 export function renderOnboarding(onDone) {
@@ -46,7 +46,7 @@ export function renderOnboarding(onDone) {
       o.querySelector('#next').onclick = async () => {
         let primary;
         if (mode === 'provider') primary = (local.trim() || 'you').toLowerCase().replace(/[^a-z0-9._-]/g, '') + '@envoir.org';
-        else { primary = (domain.trim() || 'you@yourbrand.com').toLowerCase(); if (!/@/.test(primary)) primary += '@yourbrand.com'; }
+        else { primary = sanitizeAddressInput((domain.trim() || 'you@yourbrand.com').toLowerCase()); if (!/@/.test(primary)) primary += '@yourbrand.com'; }
         toast(`${icon('key')} Generating your Ed25519 keypair…`);
         ident = await createIdentity(primary, display.trim() || primary.split('@')[0]);
         if (legacy.trim()) addAlias(legacy.trim(), 'legacy');

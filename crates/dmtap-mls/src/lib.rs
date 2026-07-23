@@ -39,6 +39,7 @@ mod committer;
 mod error;
 mod member;
 mod session;
+mod sframe;
 
 pub use ciphersuite::{
     all_members_pq, is_pq_ciphersuite, security_level, MemberPqCapability, MlsCiphersuiteError,
@@ -50,6 +51,7 @@ pub use committer::{
 pub use error::MlsError;
 pub use member::Member;
 pub use session::{Handshake, Session};
+pub use sframe::{SframeEpochSecret, SFRAME_DEFAULT_SECRET_LEN, SFRAME_EXPORTER_LABEL};
 
 use openmls::prelude::Ciphersuite;
 

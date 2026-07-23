@@ -12,6 +12,7 @@
 use openmls::prelude::{
     tls_codec::*, LeafNodeIndex, MlsMessageIn, ProcessedMessageContent, ProtocolMessage,
 };
+use openmls_traits::OpenMlsProvider;
 
 use crate::error::MlsError;
 use crate::member::{decode_key_package, Member};
@@ -112,6 +113,18 @@ impl Session {
     /// state; the test-visible proof of "all members on the same epoch secret".
     pub fn epoch_authenticator(&self) -> Vec<u8> {
         self.group.epoch_authenticator().as_slice().to_vec()
+    }
+
+    /// The RFC 9420 §8.5 exporter, evaluated against this session's **current** epoch: the one and
+    /// only path any secret is allowed to leave the MLS key schedule by (`crate::sframe` is the
+    /// reference caller, for the DMTAP-RTC media secret, spec §27.5.1). Returns
+    /// `ExportSecretError::GroupStateError(UseAfterEviction)`, mapped to [`MlsError::Group`], when
+    /// this device is no longer an active member — an evicted device cannot export anything,
+    /// which is post-compromise security reaching every exporter consumer for free.
+    pub(crate) fn export_secret(&self, label: &str, context: &[u8], length: usize) -> Result<Vec<u8>, MlsError> {
+        self.group
+            .export_secret(self.member.provider().crypto(), label, context, length)
+            .map_err(|e| MlsError::Group(e.to_string()))
     }
 
     // --- membership changes (produce a Handshake for the committer to order) ----------------

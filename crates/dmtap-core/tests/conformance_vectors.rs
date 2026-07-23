@@ -152,13 +152,14 @@ fn cbor_vectors_round_trip() {
 }
 
 /// Suite fail-closed is exercised by the vectors, but assert the property directly too. `0x03` is a
-/// REGISTERED reserved code points (§1.1, §21.15) — `0x02`, `0x03` and `0x04` decode as known ids
-/// (unimplemented ⇒ fail closed on *use*, not on decode), so they are excluded here; only
-/// *unregistered* bytes must fail. `0x04` moved out of this list when §1.1 registered it as the
-/// signature-diverse anchor profile (§1.2.0).
+/// REGISTERED reserved code points (§1.1, §21.15) — `0x02`, `0x03`, `0x04` and `0x05` decode as
+/// known ids (unimplemented ⇒ fail closed on *use*, not on decode), so they are excluded here;
+/// only *unregistered* bytes must fail. `0x04` then `0x05` each moved out of this list in turn as
+/// §1.1 registered them (signature-diverse anchor profile, §1.2.0; hash-diverse SHA3-256 target,
+/// §16.7).
 #[test]
 fn unknown_suite_bytes_fail_closed() {
-    for b in [0x00u8, 0x05, 0x7f, 0xfe, 0xff] {
+    for b in [0x00u8, 0x06, 0x7f, 0xfe, 0xff] {
         let mut buf = Vec::new();
         ciborium::into_writer(&b, &mut buf).unwrap();
         let r: Result<Suite, _> = ciborium::from_reader(&buf[..]);

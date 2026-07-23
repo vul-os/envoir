@@ -937,8 +937,12 @@ impl<T: Transport> Node<T> {
     }
 
     /// Accept one **peeled** `private`-tier fragment cell (its δ plaintext: fixed
-    /// [`SphinxFragmentHeader`](dmtap_core::sphinx::SphinxFragmentHeader) + fragment data) into the
-    /// bounded reassembly cache (§4.4.1 safety part, §16.3). Returns
+    /// [`SphinxFragmentHeader`](dmtap_core::sphinx::SphinxFragmentHeader) + fragment data), delivered
+    /// over connection `from` (the transport return path / relay identity this cell arrived on — the
+    /// same attribution [`receive_mote`](Self::receive_mote) already uses for the PoW budget, §9.4),
+    /// into the bounded reassembly cache (§4.4.1 safety part, §16.3, including its **per-delivering-
+    /// connection** ceiling — a single connection cannot consume the whole reassembly budget and
+    /// starve every other connection's `private`-tier delivery). Returns
     /// [`Reassembled::Complete`](crate::reassembly::Reassembled::Complete) with the reconstructed MOTE
     /// when the final missing cell arrives, [`Reassembled::Pending`](crate::reassembly::Reassembled::Pending)
     /// while incomplete, or [`Reassembled::Rejected`](crate::reassembly::Reassembled::Rejected) on a
@@ -947,10 +951,11 @@ impl<T: Transport> Node<T> {
     /// the tracked follow-up (not in this pass).
     pub fn accept_fragment(
         &mut self,
+        from: &[u8],
         hdr: &dmtap_core::sphinx::SphinxFragmentHeader,
         data: &[u8],
     ) -> Reassembled {
-        self.reassembly.accept(hdr, data, self.now)
+        self.reassembly.accept(from, hdr, data, self.now)
     }
 
     /// The number of partial multi-cell MOTEs currently held in the reassembly cache (§4.4.1).

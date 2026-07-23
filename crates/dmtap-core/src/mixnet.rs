@@ -237,6 +237,45 @@ impl MixDescriptorError {
 }
 
 /// The signed, versioned, KT-anchored mix-fleet snapshot for an epoch (spec §4.4.2, §18.5.3).
+///
+/// # DEFERRED: this type implements the SUPERSEDED single-authority-signed model (do not build on it)
+///
+/// **(a) What this is.** `MixDirectory` here is a directory-**authority**-signed artifact: one
+/// `authority` identity key signs `sig` over the whole fleet snapshot (`mixes`, `epoch`,
+/// `version`, …), and a verifier trusts that one signature. This is the model an earlier revision
+/// of the spec specified.
+///
+/// **(b) What §4.2 (`04-transport.md` §4.2, "Senders need the mix fleet's…") now requires,
+/// normatively, instead.** `MixDirectory` is a **derived view, not an authority-signed artifact**:
+/// each mix publishes its own `MixNodeDescriptor` directly into the key-transparency logs (§3.5),
+/// and a client's directory for an epoch is **computed locally** as the set of descriptors that
+/// (i) self-verify under their own `node_ik`, (ii) carry a valid `_dmtap-mix` operator attestation
+/// (§4.4.8), (iii) name a current-epoch Sphinx key, and (iv) appear with a valid inclusion proof
+/// in a `> n/2` quorum of the client's pinned KT log set (§3.5.2(b)) — i.e. **KT-quorum-derived**,
+/// reconstructible from the logs alone, never authority-signed. A served `MixDirectory` MAY still
+/// exist as a serving-side **cache/convenience bundle**, but per §4.2 it is never authoritative: a
+/// client MUST be able to rebuild the identical view from KT alone and MUST reject a cached
+/// directory containing any descriptor it cannot independently re-verify against its own log
+/// quorum. The single-authority-signed shape below does not implement any of that — there is no
+/// KT-quorum reconstruction, no per-descriptor independent re-verification path, and no rejection
+/// of an authority-only signature standing in for quorum proof.
+///
+/// **Why this matters (from §4.2): a signed fleet snapshot makes its signer the most powerful
+/// party in the protocol** — it chooses the anonymity set, and since path-building fails closed
+/// without a fresh directory, that signer's silence stops all `private`-tier mail everywhere. A
+/// single point of both censorship and liveness. The derived-view design removes the question
+/// entirely: nothing to seize, freeze, or split-view beyond the KT logs, whose equivocation is
+/// already detected/attributed by §3.5.2(d).
+///
+/// **(c) Deferred, on purpose, together with the mixnet's own crypto.** Rearchitecting this type
+/// to the derived-view model is a substantial, self-contained piece of work (KT-quorum
+/// reconstruction logic, per-descriptor independent re-verification, freeze/freshness handling
+/// per the mix-directory freshness window, §16.3), and `node/src/onion.rs`'s Sphinx implementation
+/// is itself currently a stand-in, not the real per-hop cryptography §4.4.4 specifies. Perfecting
+/// *only* the directory shape now — while the thing it is a directory *of* is still a placeholder
+/// — would be effort spent on the wrong layer first. Both belong to one dedicated mixnet
+/// workstream (directory + real Sphinx crypto together), not to this conformance pass. **Do not
+/// build on this type as authoritative; do not extend its authority-signed shape further.**
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MixDirectory {
     pub suite: Suite,                  // key 1

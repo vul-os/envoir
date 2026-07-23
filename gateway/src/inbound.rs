@@ -33,7 +33,11 @@ pub struct RecipientKey {
 
 /// Resolves a legacy `RCPT TO` address to a DMTAP recipient key (§3.2/§19.1.1). Abstract so it is
 /// testable in-process; a real impl performs the DNS/directory lookup + KT verification.
-pub trait KeyDirectory {
+///
+/// `Send + Sync`: [`InboundGateway`] is shared (via `Arc`) across the per-connection threads the
+/// real MX listener spawns (§7.2, [`crate::inbound_tcp`] thread-per-connection) — every trait
+/// object it owns must therefore be safely usable from multiple threads at once.
+pub trait KeyDirectory: Send + Sync {
     /// Return the recipient key for `rcpt`, or `None` if no DMTAP recipient resolves (→ SMTP 550).
     fn resolve(&self, rcpt: &str) -> Option<RecipientKey>;
 }
@@ -54,14 +58,18 @@ pub enum DeliveryOutcome {
 /// Delivers an attested MOTE into the mesh and reports whether a **durable** ack came back inside
 /// the inbound SMTP transaction window (§19.7.1 step 6). The gateway does NOT queue: a `NoAck` here
 /// becomes a `451` so durability stays with the legacy sender. Abstract for in-process testing.
-pub trait MeshDelivery {
+///
+/// `Send + Sync`: see [`KeyDirectory`]'s note — shared across per-connection threads via `Arc`.
+pub trait MeshDelivery: Send + Sync {
     fn deliver(&self, env: &Envelope, attestation: &Attestation) -> DeliveryOutcome;
 }
 
 /// Pre-`DATA` anti-abuse gate (§9 / §19.7.1 step 1): RBL/DNSBL, SPF/DMARC, greylisting, per-IP rate
 /// limits — evaluated on connection/envelope metadata so the bulk of spam is refused before the
 /// message body is ever accepted onto the wire.
-pub trait AntiAbuse {
+///
+/// `Send + Sync`: see [`KeyDirectory`]'s note — shared across per-connection threads via `Arc`.
+pub trait AntiAbuse: Send + Sync {
     /// Decide from the connecting peer IP and `MAIL FROM` whether to proceed. Runs at `MAIL FROM`,
     /// strictly before `DATA`.
     fn check(&self, peer_ip: &str, mail_from: &str) -> AbuseDecision;
@@ -343,11 +351,22 @@ pub enum DmarcHandling {
     Enforce,
 }
 
+/// The default aggregate cap on an inbound `DATA` body (§3 in the security review — "no aggregate
+/// inbound DATA size cap"): with no limit, a peer that passes the pre-`DATA` anti-abuse gate could
+/// stream an unbounded body and drive the gateway's memory usage without limit (`MxSession::data`
+/// grows one line at a time with no ceiling). 25 MiB mirrors the generous end of common mainstream
+/// provider limits (Gmail/Outlook are ~25 MB) — comfortably enough for ordinary legacy mail with
+/// attachments, while still being a bound instead of none. Override via
+/// [`InboundGateway::with_max_message_bytes`].
+pub const DEFAULT_MAX_MESSAGE_BYTES: usize = 25 * 1024 * 1024;
+
 /// The inbound gateway: MX for one or more domains, stateless (§7.4).
 pub struct InboundGateway {
     /// The gateway's own identity key. An inbound legacy MOTE is *from* the gateway (legacy-origin);
-    /// `Payload.from` is this key and the attestation vouches for the legacy SMTP envelope.
-    ik: IdentityKey,
+    /// `Payload.from` is this key and the attestation vouches for the legacy SMTP envelope. Held as
+    /// an `Arc` so [`Self::for_own_domains`] can share it verbatim into every `attest_keys` entry
+    /// (§7.2a: the attestation key IS this same `IK`, never a second key invented for attestation).
+    ik: std::sync::Arc<IdentityKey>,
     /// Domain-anchored attestation keys (§7.2a), one per domain this gateway is MX for.
     attest_keys: Vec<AttestationKey>,
     directory: Box<dyn KeyDirectory>,
@@ -366,6 +385,8 @@ pub struct InboundGateway {
     dmarc_resolver: Option<Box<dyn DmarcTxtResolver>>,
     /// What to do with the DMARC verdict (see [`DmarcHandling`]).
     dmarc_policy: DmarcHandling,
+    /// The aggregate `DATA` body size cap (§7.2 step 2 / §19.7.1 — see [`DEFAULT_MAX_MESSAGE_BYTES`]).
+    max_message_bytes: usize,
 }
 
 /// Why an inbound message could not be wrapped/delivered — mapped to an SMTP reply by the session.
@@ -398,6 +419,13 @@ pub struct InboundBridged {
 }
 
 impl InboundGateway {
+    /// Build a gateway from an already-constructed `ik` and `attest_keys`. **Callers are
+    /// responsible for §7.2a's key-binding invariant**: a spec-conformant deployment's
+    /// `attest_keys` MUST be signed by this SAME `ik` (never an independently generated key) —
+    /// use [`Self::for_own_domains`] instead unless you have a specific reason to hold that
+    /// invariant yourself (this crate's own multi-gateway-chain provenance tests are the
+    /// legitimate exception: they deliberately model several DIFFERENT gateways, each with its own
+    /// `IK`, and construct each `InboundGateway`/`AttestationKey` pair independently).
     pub fn new(
         ik: IdentityKey,
         attest_keys: Vec<AttestationKey>,
@@ -405,6 +433,42 @@ impl InboundGateway {
         delivery: Box<dyn MeshDelivery>,
         abuse: Box<dyn AntiAbuse>,
     ) -> Self {
+        InboundGateway {
+            ik: std::sync::Arc::new(ik),
+            attest_keys,
+            directory,
+            delivery,
+            abuse,
+            dkim_resolver: None,
+            dkim_policy: DkimPolicy::Annotate,
+            spf_resolver: None,
+            spf_policy: SpfPolicy::Annotate,
+            dmarc_resolver: None,
+            dmarc_policy: DmarcHandling::Annotate,
+            max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
+        }
+    }
+
+    /// Build a gateway for one or more domains it is MX for, **correctly satisfying §7.2a's
+    /// normative key-binding**: every entry in `domains` gets an [`AttestationKey`] that SHARES
+    /// `ik`'s own key material (via [`AttestationKey::sharing`]) — the same `IK` that becomes
+    /// `Payload.from` on every MOTE this gateway injects (§7.2 step 4) — rather than each domain
+    /// independently generating its own unrelated attestation key (the anti-pattern §7.2a
+    /// explicitly rules out: "not a second signing key invented only for attestation"). This is
+    /// the constructor a real single-operator or multi-domain-but-one-operator deployment should
+    /// use; see [`Self::new`]'s docs for the (rarer) case that legitimately needs independent keys.
+    pub fn for_own_domains(
+        ik: IdentityKey,
+        domains: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
+        directory: Box<dyn KeyDirectory>,
+        delivery: Box<dyn MeshDelivery>,
+        abuse: Box<dyn AntiAbuse>,
+    ) -> Self {
+        let ik = std::sync::Arc::new(ik);
+        let attest_keys = domains
+            .into_iter()
+            .map(|(domain, selector)| AttestationKey::sharing(domain, selector, ik.clone()))
+            .collect();
         InboundGateway {
             ik,
             attest_keys,
@@ -417,7 +481,16 @@ impl InboundGateway {
             spf_policy: SpfPolicy::Annotate,
             dmarc_resolver: None,
             dmarc_policy: DmarcHandling::Annotate,
+            max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
         }
+    }
+
+    /// Override the aggregate inbound `DATA` body size cap (default [`DEFAULT_MAX_MESSAGE_BYTES`]).
+    /// Once the accumulated body exceeds `max_bytes`, [`MxSession`] refuses the transaction `552` at
+    /// the terminating `.` rather than accepting an unbounded body (§3 in the security review).
+    pub fn with_max_message_bytes(mut self, max_bytes: usize) -> Self {
+        self.max_message_bytes = max_bytes;
+        self
     }
 
     /// Enable inbound DKIM verification (spec §7.2 step 2): resolve the sender's
@@ -613,7 +686,10 @@ impl InboundGateway {
 
         // 3. Wrap the RFC 5322 message into a kind=mail MOTE, encrypted to the recipient's key.
         //    Payload.from is the gateway (legacy-origin); a fresh ephemeral key signs the envelope.
-        let draft = build_mote_draft(data, now);
+        //    Strip trust-boundary headers (§7.2c) BEFORE wrapping — never carry an
+        //    attacker-supplied Authentication-Results/ARC-* verdict into what this gateway signs.
+        let hygienic = strip_trust_boundary_headers(data);
+        let draft = build_mote_draft(&hygienic, now);
         let ephemeral = IdentityKey::generate();
         let env = build_mote(&Hpke, &self.ik, &ephemeral, &recip.ik, &recip.seal_pub, draft)
             .map_err(|_| InboundError::SealFailed)?;
@@ -645,12 +721,17 @@ impl InboundGateway {
 
         let (env, attestation) = self.wrap_and_attest(mail_from, rcpt_to, data, now)?;
 
-        // Sign the normative gateway attestation over the exact legacy bytes (§18.9.11), then
-        // assemble the client-facing provenance record the recipient would surface: a single
-        // gateway hop, gateway-touched origin (never pure-mesh). Legacy delivery arrives fast/direct
-        // (not off the mixnet), so tier=Fast / profile=NotApplicable; min_hops/observed_at are
-        // recipient-node observations, left unset by the gateway.
-        let gateway_attestation = GatewayAttestation::sign(att_key, data, Some(mail_from), now, 0);
+        // Sign the normative gateway attestation over the exact HYGIENIC legacy bytes (§18.9.11,
+        // §7.2c) — the same trust-boundary-header-stripped bytes `wrap_and_attest` (above) just
+        // wrapped, so `msg_digest` binds to exactly what this gateway actually vouches for, not to
+        // an attacker-supplied Authentication-Results/ARC-* claim that never should have ridden
+        // along. Then assemble the client-facing provenance record the recipient would surface: a
+        // single gateway hop, gateway-touched origin (never pure-mesh). Legacy delivery arrives
+        // fast/direct (not off the mixnet), so tier=Fast / profile=NotApplicable; min_hops/
+        // observed_at are recipient-node observations, left unset by the gateway.
+        let hygienic = strip_trust_boundary_headers(data);
+        let gateway_attestation =
+            GatewayAttestation::sign(att_key, &hygienic, Some(mail_from), now, 0);
         let provenance = ProvenanceRecord::assemble(
             Tier::Fast,
             Profile::NotApplicable,
@@ -766,6 +847,33 @@ impl SmtpReply {
     }
 }
 
+/// Remove every `Authentication-Results` / `ARC-Seal` / `ARC-Message-Signature` /
+/// `ARC-Authentication-Results` header field from `rfc5322_bytes`' header block, byte-exact
+/// everywhere else (§7.2c "Strip before you sign": this hygiene rule is explicitly **not**
+/// governed by §7.2b's byte-exactness — that protects the body and the sender's own headers, not a
+/// trust-boundary claim the legacy sender was never entitled to inject). Without this, an
+/// attacker-crafted `Authentication-Results: ...dkim=pass header.d=paypal.com` riding the wrapped
+/// bytes would enter `msg_digest` (§18.9.11) unchanged, and the gateway's own genuine attestation
+/// signature over that digest would then launder the forged verdict as if the gateway itself had
+/// vouched for it.
+///
+/// The actual header-hygiene transform is [`dmtap_mail::mime::strip_trust_boundary_headers`] — the
+/// RFC 5322 layer is `dmtap-mail`'s job, and this crate is a consumer of it, not a second
+/// implementation. This function is a thin adapter, not a duplicate: it exists only because this
+/// crate's call sites (and the tests below) work with a **whole** RFC 5322 message (headers *and*
+/// body), whereas the shared implementation strips exactly one header block. Splitting at the
+/// header/body boundary *here*, before delegating, is what preserves §7.2b's guarantee that body
+/// bytes are never reinterpreted as headers no matter what they contain — see
+/// `body_is_carried_through_byte_exact_including_lookalike_bytes` below. A message with no
+/// identifiable header/body separator is passed through as an all-header block, matching the
+/// shared implementation's own no-op-on-no-match behavior.
+fn strip_trust_boundary_headers(rfc5322_bytes: &[u8]) -> Vec<u8> {
+    let (head, body) = dmtap_mail::mime::header_and_body(rfc5322_bytes);
+    let mut out = dmtap_mail::mime::strip_trust_boundary_headers(&head);
+    out.extend_from_slice(&body);
+    out
+}
+
 /// Extract the domain part of an SMTP address like `<alice@example.org>` or `alice@example.org`.
 fn domain_of(addr: &str) -> Option<&str> {
     let a = addr.trim().trim_start_matches('<').trim_end_matches('>');
@@ -799,6 +907,11 @@ pub struct MxSession<'g> {
     mail_from: Option<String>,
     rcpt_to: Option<String>,
     data: Vec<u8>,
+    /// Set once `data`'s accumulated length has exceeded `gw.max_message_bytes` (§3 in the security
+    /// review). Further `DATA` lines are counted but NOT appended to `data` — bounding memory even
+    /// against a hostile multi-gigabyte body — and the terminating `.` replies `552` instead of
+    /// proceeding to wrap/attest/deliver.
+    size_exceeded: bool,
     /// The SPF outcome evaluated at `MAIL FROM` (spec item 1) for the current transaction, carried
     /// through to the DMARC gate at the end of `DATA`.
     spf_outcome: Option<SpfOutcome>,
@@ -815,6 +928,7 @@ impl<'g> MxSession<'g> {
             mail_from: None,
             rcpt_to: None,
             data: Vec::new(),
+            size_exceeded: false,
             spf_outcome: None,
         }
     }
@@ -828,6 +942,7 @@ impl<'g> MxSession<'g> {
         self.mail_from = None;
         self.rcpt_to = None;
         self.data.clear();
+        self.size_exceeded = false;
         self.spf_outcome = None;
     }
 
@@ -924,6 +1039,16 @@ impl<'g> MxSession<'g> {
     fn feed_data(&mut self, line: &[u8]) -> SmtpReply {
         if line == b"." {
             self.phase = Phase::Command;
+            if self.size_exceeded {
+                // §3 in the security review: refuse an over-cap body at the terminator rather than
+                // wrapping/attesting/delivering an unbounded message. `reset_transaction` drops the
+                // (already-truncated) accumulated bytes.
+                self.reset_transaction();
+                return SmtpReply::new(
+                    552,
+                    "5.3.4 message size exceeds fixed maximum message size",
+                );
+            }
             let mail_from = self.mail_from.clone().unwrap_or_default();
             let rcpt_to = self.rcpt_to.clone().unwrap_or_default();
             let data = std::mem::take(&mut self.data);
@@ -943,9 +1068,148 @@ impl<'g> MxSession<'g> {
         // CRLF. Byte-exact end-to-end: this buffer is what DKIM verification hashes and what the
         // MOTE seals — no UTF-8 decode may ever touch it.
         let unstuffed = line.strip_prefix(b".").unwrap_or(line);
-        self.data.extend_from_slice(unstuffed);
-        self.data.extend_from_slice(b"\r\n");
+        if !self.size_exceeded {
+            if self.data.len() + unstuffed.len() + 2 > self.gw.max_message_bytes {
+                // Over cap: stop accumulating (bounds memory against a hostile multi-GB body) but
+                // keep consuming lines until the terminator, per SMTP's "reply after DATA ends" shape
+                // — the `552` above is returned once the client actually finishes sending.
+                self.size_exceeded = true;
+                self.data.clear();
+                self.data.shrink_to_fit();
+            } else {
+                self.data.extend_from_slice(unstuffed);
+                self.data.extend_from_slice(b"\r\n");
+            }
+        }
         // No reply mid-DATA.
         SmtpReply::new(0, "")
+    }
+}
+
+#[cfg(test)]
+mod trust_boundary_header_tests {
+    //! §7.2c "Strip before you sign": unit tests for [`strip_trust_boundary_headers`] directly —
+    //! the pure header-hygiene transform applied before `wrap_and_attest`/`wrap_attest_and_stamp`
+    //! ever compute `msg_digest` or wrap a message into a MOTE.
+    use super::strip_trust_boundary_headers;
+
+    #[test]
+    fn removes_a_forged_authentication_results_header() {
+        let msg = b"From: attacker@evil.example\r\n\
+Authentication-Results: dmtap.gw; dkim=pass header.d=paypal.com\r\n\
+Subject: hi\r\n\r\nbody\r\n";
+        let out = strip_trust_boundary_headers(msg);
+        let out_s = String::from_utf8_lossy(&out);
+        assert!(!out_s.to_ascii_lowercase().contains("authentication-results"));
+        assert!(out_s.contains("From: attacker@evil.example"));
+        assert!(out_s.contains("Subject: hi"));
+        assert!(out_s.ends_with("\r\n\r\nbody\r\n"));
+    }
+
+    #[test]
+    fn removes_all_three_arc_headers_case_insensitively() {
+        let msg = b"From: a@b.example\r\n\
+arc-seal: i=1; a=rsa-sha256; d=example.org; s=x; t=1; cv=none; b=xxx\r\n\
+ARC-Message-Signature: i=1; a=rsa-sha256; d=example.org; s=x; b=yyy\r\n\
+Arc-Authentication-Results: i=1; mx.example.org; dkim=pass\r\n\
+Subject: hi\r\n\r\nbody\r\n";
+        let out = strip_trust_boundary_headers(msg);
+        let out_s = String::from_utf8_lossy(&out).to_ascii_lowercase();
+        assert!(!out_s.contains("arc-seal"));
+        assert!(!out_s.contains("arc-message-signature"));
+        assert!(!out_s.contains("arc-authentication-results"));
+        assert!(out_s.contains("from: a@b.example"));
+        assert!(out_s.contains("subject: hi"));
+    }
+
+    #[test]
+    fn preserves_the_senders_own_dkim_signature_and_ordinary_headers_untouched() {
+        let msg = b"DKIM-Signature: v=1; a=rsa-sha256; d=example.org; s=sel; b=abc\r\n\
+From: a@example.org\r\n\
+To: b@host.net\r\n\
+Subject: hi\r\n\r\nbody\r\n";
+        let out = strip_trust_boundary_headers(msg);
+        assert_eq!(out, msg, "no trust-boundary header present ⇒ byte-identical output");
+    }
+
+    #[test]
+    fn removes_a_stripped_headers_folded_continuation_lines_too() {
+        // Built by concatenating single-line byte literals (not a `\`-continued multi-line
+        // literal): a backslash-newline in a Rust string literal strips leading whitespace on the
+        // next line, which would silently eat the very fold-indent this test needs to exercise.
+        let mut msg = Vec::new();
+        msg.extend_from_slice(b"From: a@b.example\r\n");
+        msg.extend_from_slice(b"Authentication-Results: dmtap.gw;\r\n");
+        msg.extend_from_slice(b" dkim=pass header.d=paypal.com;\r\n");
+        msg.extend_from_slice(b" spf=pass\r\n");
+        msg.extend_from_slice(b"Subject: hi\r\n\r\nbody\r\n");
+        let out = strip_trust_boundary_headers(&msg);
+        let out_s = String::from_utf8_lossy(&out);
+        assert!(!out_s.to_ascii_lowercase().contains("authentication-results"));
+        assert!(!out_s.contains("dkim=pass"), "the folded continuation line must go with it");
+        assert!(out_s.contains("From: a@b.example"));
+        assert!(out_s.contains("Subject: hi"));
+    }
+
+    #[test]
+    fn preserves_a_kept_headers_folded_continuation_lines() {
+        let msg = b"Subject: a very long\r\n subject that folds\r\n\r\nbody\r\n";
+        let out = strip_trust_boundary_headers(msg);
+        assert_eq!(out, msg);
+    }
+
+    #[test]
+    fn removes_multiple_authentication_results_instances_from_multiple_hops() {
+        let msg = b"Authentication-Results: mx1.example; dkim=pass\r\n\
+From: a@b.example\r\n\
+Authentication-Results: mx2.example; dkim=fail\r\n\
+Subject: hi\r\n\r\nbody\r\n";
+        let out = strip_trust_boundary_headers(msg);
+        let out_s = String::from_utf8_lossy(&out).to_ascii_lowercase();
+        assert!(!out_s.contains("authentication-results"));
+        assert!(out_s.contains("from: a@b.example"));
+        assert!(out_s.contains("subject: hi"));
+    }
+
+    #[test]
+    fn body_is_carried_through_byte_exact_including_lookalike_bytes() {
+        // The body itself may contain byte sequences that look like a header ("Authentication-
+        // Results:") or even a CRLFCRLF-shaped run — none of that may be touched: only the FIRST
+        // CRLFCRLF (the real header/body separator) is ever consulted, and everything from there
+        // onward is copied verbatim.
+        let msg = b"From: a@b.example\r\n\r\nAuthentication-Results: not-a-real-header\r\n\r\nmore\r\n";
+        let out = strip_trust_boundary_headers(msg);
+        assert_eq!(out, msg, "body content is never reinterpreted as headers");
+    }
+
+    #[test]
+    fn a_message_with_no_header_body_separator_is_returned_unchanged() {
+        let msg = b"this is not a well-formed RFC 5322 message at all";
+        assert_eq!(strip_trust_boundary_headers(msg), msg);
+    }
+
+    #[test]
+    fn stripping_is_idempotent() {
+        let msg = b"Authentication-Results: dmtap.gw; dkim=pass\r\nFrom: a@b.example\r\n\r\nbody\r\n";
+        let once = strip_trust_boundary_headers(msg);
+        let twice = strip_trust_boundary_headers(&once);
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn empty_header_block_round_trips() {
+        let msg = b"\r\nbody with no headers at all\r\n";
+        assert_eq!(strip_trust_boundary_headers(msg), msg);
+    }
+
+    #[test]
+    fn a_malformed_leading_continuation_line_does_not_corrupt_output() {
+        // RFC 5322 forbids a header block starting with a folded continuation line, but a hostile
+        // or broken peer can still send one; this must not panic or silently duplicate bytes.
+        let msg = b" not-really-a-continuation\r\nFrom: a@b.example\r\n\r\nbody\r\n";
+        let out = strip_trust_boundary_headers(msg);
+        let out_s = String::from_utf8_lossy(&out);
+        assert!(out_s.contains("From: a@b.example"));
+        assert!(out_s.ends_with("\r\n\r\nbody\r\n"));
     }
 }

@@ -40,9 +40,11 @@ use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
+
+use crate::outbound_tcp::is_forbidden_dest_ip;
 
 /// A parsed MTA-STS policy mode (RFC 8461 §3.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -272,12 +274,41 @@ impl HttpsPolicyFetcher {
         self
     }
 
+    /// Resolve the socket to dial for the `mta-sts.<domain>` policy host, enforcing the SAME SSRF
+    /// guard the outbound MX transport uses ([`is_forbidden_dest_ip`],
+    /// [`crate::outbound_tcp::SmtpTcpTransport::dial_addr`]): an address that resolves only to
+    /// loopback/private/link-local/unique-local/unspecified/broadcast is refused rather than dialed.
+    ///
+    /// Without this guard, whoever controls (or can spoof) DNS for `mta-sts.<domain>` — for ANY
+    /// domain the gateway is willing to deliver to, since this fetch runs unauthenticated against an
+    /// attacker-influenced name — could point this HTTPS client at `127.0.0.1`, an internal service,
+    /// or the cloud metadata endpoint `169.254.169.254`, turning it into an SSRF pivot into the
+    /// operator's own network. This mirrors `dial_addr`'s fail-closed posture exactly, sharing the
+    /// same deny-list rather than re-implementing it.
+    fn resolve_addr(&self, host: &str) -> std::io::Result<SocketAddr> {
+        let mut resolved_any = false;
+        for addr in (host, 443u16).to_socket_addrs()? {
+            resolved_any = true;
+            if !is_forbidden_dest_ip(addr.ip()) {
+                return Ok(addr);
+            }
+        }
+        if resolved_any {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "refusing to fetch MTA-STS policy from {host}: it resolves only to disallowed \
+                     (loopback/private/link-local/unique-local/unspecified/broadcast) addresses"
+                ),
+            ))
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "no address for mta-sts host"))
+        }
+    }
+
     fn fetch(&self, domain: &str) -> std::io::Result<String> {
         let host = format!("mta-sts.{domain}");
-        let addr: SocketAddr =
-            (host.as_str(), 443u16).to_socket_addrs_first().ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::NotFound, "no address for mta-sts host")
-            })?;
+        let addr = self.resolve_addr(&host)?;
         let tcp = TcpStream::connect_timeout(&addr, self.connect_timeout)?;
         tcp.set_read_timeout(Some(self.io_timeout))?;
         tcp.set_write_timeout(Some(self.io_timeout))?;
@@ -322,18 +353,6 @@ impl Default for HttpsPolicyFetcher {
 impl PolicyFetcher for HttpsPolicyFetcher {
     fn fetch_policy(&self, domain: &str) -> Option<String> {
         self.fetch(domain).ok()
-    }
-}
-
-/// A tiny local helper trait so `fetch` above can use the same `ToSocketAddrs` resolution the
-/// outbound transport uses, without pulling `ToSocketAddrs::to_socket_addrs` iterator boilerplate
-/// inline.
-trait ToSocketAddrsFirst {
-    fn to_socket_addrs_first(&self) -> Option<SocketAddr>;
-}
-impl<T: std::net::ToSocketAddrs> ToSocketAddrsFirst for T {
-    fn to_socket_addrs_first(&self) -> Option<SocketAddr> {
-        self.to_socket_addrs().ok()?.next()
     }
 }
 
@@ -533,6 +552,35 @@ mod tests {
         let txt = InMemoryTxtResolver::new().with_txt("_mta-sts.flaky.example", &["v=STSv1; id=1"]);
         let policy = MtaStsTlsPolicy::new(Box::new(txt), Box::new(InMemoryPolicyFetcher::new()));
         assert_eq!(policy.requirement_for("flaky.example"), TlsRequirement::Opportunistic);
+    }
+
+    #[test]
+    fn https_policy_fetch_refuses_ssrf_targets() {
+        // The MTA-STS HTTPS leg MUST apply the same SSRF deny-list the outbound MX transport does
+        // (§1 in the security review): a host resolving to cloud metadata, loopback, or an RFC 1918
+        // address must never be dialed, even though the "domain" here is attacker-influenced (it is
+        // whatever a legacy sender's `To:` address names).
+        let fetcher = HttpsPolicyFetcher::new();
+        for host in ["169.254.169.254", "127.0.0.1", "10.0.0.1"] {
+            match fetcher.resolve_addr(host) {
+                Err(e) => {
+                    assert_eq!(
+                        e.kind(),
+                        std::io::ErrorKind::PermissionDenied,
+                        "host {host} must be refused, got {e:?}"
+                    );
+                }
+                Ok(addr) => panic!("expected SSRF refusal for {host}, but resolved to {addr}"),
+            }
+        }
+    }
+
+    #[test]
+    fn https_policy_fetch_allows_an_ordinary_public_address() {
+        // A literal public IP (skips DNS) still resolves and is not refused by the guard.
+        let fetcher = HttpsPolicyFetcher::new();
+        let addr = fetcher.resolve_addr("93.184.216.34").expect("public address is allowed");
+        assert_eq!(addr.ip().to_string(), "93.184.216.34");
     }
 
     #[test]

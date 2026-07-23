@@ -26,7 +26,6 @@ use dmtap_mail::auth::StaticAuthenticator;
 use dmtap_mail::store::{Flag, MemoryStore};
 use rustls::ServerConfig;
 
-use crate::attestation::AttestationKey;
 use crate::authz::{
     AuthzMode, GatewayMode, IdentityRegistry, Quota, QuotaLedger, RegisteredIdentity,
 };
@@ -452,9 +451,12 @@ impl PersonalConfig {
         let spf_policy = if self.spf_enforce { SpfPolicy::Enforce } else { SpfPolicy::Annotate };
         let dmarc_policy =
             if self.dmarc_enforce { DmarcHandling::Enforce } else { DmarcHandling::Annotate };
-        InboundGateway::new(
+        // §7.2a normative: the attestation key MUST be this gateway's own `IK` (never a second,
+        // independently generated key) — `for_own_domains` shares the same `ik` into the
+        // domain's `AttestationKey` rather than `new()` + a separately `generate()`d one.
+        InboundGateway::for_own_domains(
             IdentityKey::generate(),
-            vec![AttestationKey::generate(&self.domain, &self.selector)],
+            [(self.domain.clone(), self.selector.clone())],
             directory,
             mesh,
             Box::new(AllowAllAbuse),
@@ -849,9 +851,13 @@ impl PersonalConfig {
         let bound = listener.local_addr()?;
         eprintln!("gateway[personal]: inbound MX listening on {bound} for {} — up (SIGINT/SIGTERM to stop)", self.domain);
 
-        // Serve the inbound MX (this thread) and every enabled legacy access surface (each on its own
-        // thread) concurrently. All poll the SAME shutdown flag, so one SIGINT/SIGTERM stops them all.
-        // The MX gateway is not `Send`, so it stays on this thread; the legacy servers are all `Send`.
+        // Serve the inbound MX and every enabled legacy access surface, each on its own thread,
+        // concurrently. All poll the SAME shutdown flag, so one SIGINT/SIGTERM stops them all.
+        // `InboundGateway` is `Send + Sync` (§7.2, `crate::inbound_tcp` thread-per-connection), so
+        // `MxListener::serve_until` itself fans each *accepted connection* out to its own spawned
+        // thread; the `Arc` here is what lets that inner fan-out and this outer scope share one
+        // gateway instance cheaply.
+        let gw = Arc::new(gw);
         std::thread::scope(|scope| -> std::io::Result<()> {
             let mut handles: Vec<std::thread::ScopedJoinHandle<std::io::Result<()>>> = Vec::new();
             if let Some(dep) = imap {
@@ -863,7 +869,7 @@ impl PersonalConfig {
             if let Some(dep) = submission {
                 handles.push(scope.spawn(move || dep.run(shutdown)));
             }
-            let mx = listener.serve_until(&gw, shutdown);
+            let mx = listener.serve_until(gw.clone(), shutdown);
             for h in handles {
                 h.join().map_err(|_| std::io::Error::other("legacy access thread panicked"))??;
             }
