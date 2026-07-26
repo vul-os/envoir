@@ -3,153 +3,413 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Envoir docs</title>
-<meta name="description" content="Envoir &amp; DMTAP documentation: architecture, protocol, privacy &amp; threat model, security, and per-feature guides for mail, chat, files, and identity.">
+<title>Envoir — docs</title>
+<meta name="description" content="Envoir &amp; DMTAP documentation: overview, getting started, architecture, protocol, privacy &amp; threat model, security, naming, and per-feature guides for mail, chat, files, and identity.">
 <meta name="color-scheme" content="dark light">
 <link rel="icon" type="image/svg+xml" href="assets/logo-mark.svg">
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="assets/favicon-180.png">
 <link rel="mask-icon" href="assets/logo-mono.svg" color="#4C4DFF">
-<link rel="stylesheet" href="css/style.css">
-<link rel="stylesheet" href="css/docs.css">
 
-<meta property="og:title" content="Envoir docs">
-<meta property="og:description" content="Architecture, protocol, privacy model, security, and feature guides for Envoir — the open-source reference implementation of DMTAP.">
+<meta property="og:title" content="Envoir — docs">
+<meta property="og:description" content="Architecture, protocol, privacy model, security, naming, and feature guides for Envoir — the open-source reference implementation of DMTAP (KOTVA-Mail).">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Envoir">
 <meta property="og:image" content="assets/og-image.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Envoir docs">
-<meta name="twitter:description" content="Architecture, protocol, privacy model, security, and feature guides for Envoir — the open-source reference implementation of DMTAP.">
-<meta name="twitter:image" content="assets/og-image.png">
 <meta name="theme-color" content="#0a0c11" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f4f2ee" media="(prefers-color-scheme: light)">
+
+<!-- SOVEREIGNTY: zero network requests. marked + mermaid are vendored locally under -->
+<!-- assets/vendor/; docs render straight from this repo's own docs/*.md. No CDN, no analytics. -->
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  color-scheme:dark;
+  --font-serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,"Times New Roman",serif;
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Helvetica,Arial,sans-serif;
+  --font-mono:ui-monospace,"SF Mono","Cascadia Mono","Fira Code",Menlo,Consolas,"Liberation Mono",monospace;
+  --bg-0:#0a0c11; --bg-1:#0e1118; --bg-2:#12151d; --bg-panel:#12141b;
+  --line:rgba(238,241,247,.09); --line-strong:rgba(238,241,247,.16);
+  --ink:#eef1f7; --ink-dim:#a5adc0; --ink-faint:#656d80;
+  --accent-1:#4c4dff; --accent-2:#9a4dff; --accent-teal:#00e0c7;
+  --accent-soft:rgba(124,77,255,.14);
+  --radius-sm:6px; --radius-md:12px; --radius-lg:16px;
+  --container:1180px;
+  --code-bg:#0b0d14;
+}
+:root[data-theme="light"]{
+  color-scheme:light;
+  --bg-0:#f4f2ee; --bg-1:#ffffff; --bg-2:#ebe8e1; --bg-panel:#ffffff;
+  --line:rgba(20,20,25,.1); --line-strong:rgba(20,20,25,.18);
+  --ink:#14151a; --ink-dim:#4c5266; --ink-faint:#82889b;
+  --accent-1:#3a34e0; --accent-2:#7b2fd6; --accent-teal:#008b7d;
+  --accent-soft:rgba(90,60,220,.1);
+  --code-bg:#f5f3ef;
+}
+html{scroll-behavior:smooth}
+body{font-family:var(--font-sans);background:var(--bg-0);color:var(--ink-dim);
+  line-height:1.65;-webkit-font-smoothing:antialiased;font-size:16px;overflow-x:hidden}
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:
+  radial-gradient(1000px 540px at 86% -8%,rgba(76,77,255,.08),transparent 60%),
+  radial-gradient(820px 480px at -6% 6%,rgba(154,77,255,.05),transparent 55%)}
+a{color:inherit;text-decoration:none}
+img{max-width:100%;display:block}
+.mono{font-family:var(--font-mono)}
+.wrap{max-width:var(--container);margin:0 auto;padding:0 clamp(18px,4vw,40px)}
+.skip-link{position:absolute;left:-9999px;top:0;background:var(--accent-1);color:#fff;
+  padding:8px 14px;border-radius:0 0 8px 0;z-index:200}
+.skip-link:focus{left:0}
+
+/* Header */
+.site-header{position:sticky;top:0;z-index:80;backdrop-filter:blur(12px);
+  background:color-mix(in srgb,var(--bg-0) 78%,transparent);border-bottom:1px solid var(--line)}
+.nav-inner{display:flex;align-items:center;gap:16px;height:60px}
+.vulos-back{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);
+  font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);
+  transition:color .15s;flex:none}
+.vulos-back:hover{color:var(--accent-1)}
+.brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:17px;letter-spacing:-.02em;
+  color:var(--ink);padding-left:15px;border-left:1px solid var(--line)}
+.brand img{width:26px;height:26px}
+.nav-spacer{flex:1}
+.nav-links{display:flex;align-items:center;gap:20px}
+.nav-links a{color:var(--ink-dim);font-size:14px;transition:color .15s}
+.nav-links a:hover{color:var(--ink)}
+.nav-links a.here{color:var(--accent-1)}
+.nav-links .gh{display:inline-flex;align-items:center;gap:5px}
+.nav-links .gh svg{width:15px;height:15px}
+.menu-btn{display:none;font-family:var(--font-mono);font-size:13px;color:var(--ink-dim);
+  background:var(--bg-panel);border:1px solid var(--line-strong);border-radius:8px;
+  padding:7px 12px;cursor:pointer;align-items:center;gap:7px}
+.menu-btn:hover{color:var(--ink);border-color:var(--accent-1)}
+
+/* Shell */
+.shell{max-width:var(--container);margin:0 auto;padding:34px clamp(18px,4vw,40px) 80px;
+  display:grid;grid-template-columns:250px minmax(0,1fr);gap:44px;align-items:start}
+
+/* Sidebar */
+.sidebar{position:sticky;top:80px;max-height:calc(100vh - 100px);overflow-y:auto;
+  border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--bg-panel);
+  padding:14px;scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}
+.sidebar::-webkit-scrollbar{width:8px}
+.sidebar::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:8px}
+.sidebar-head{padding:6px 10px 12px;border-bottom:1px solid var(--line);margin-bottom:8px}
+.sidebar-head .eyebrow{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--accent-1)}
+.sidebar-head h3{font-size:16px;color:var(--ink);letter-spacing:-.01em;margin-top:4px}
+.sidebar .grp{font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;
+  letter-spacing:.12em;color:var(--ink-faint);padding:14px 8px 5px}
+.sidebar .grp:first-of-type{padding-top:4px}
+.sidebar a{display:block;font-size:14px;color:var(--ink-dim);padding:7px 10px;
+  border-radius:8px;letter-spacing:-.005em;line-height:1.4;border-left:2px solid transparent}
+.sidebar a:hover{background:var(--accent-soft);color:var(--ink)}
+.sidebar a.active{background:var(--accent-soft);color:var(--ink);border-left-color:var(--accent-1)}
+
+/* Content */
+.main{min-width:0}
+.crumb{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.12em;
+  color:var(--ink-faint);margin-bottom:16px}
+.crumb b{color:var(--accent-1);font-weight:500}
+.md{font-size:16px;color:var(--ink-dim)}
+.md>*:first-child{margin-top:0}
+.md h1,.md h2,.md h3,.md h4{color:var(--ink);line-height:1.25;letter-spacing:-.02em;scroll-margin-top:84px}
+.md h1{font-family:var(--font-serif);font-size:2.1rem;margin:.1em 0 .7em;padding-bottom:.4em;
+  border-bottom:1px solid var(--line);letter-spacing:-.01em}
+.md h2{font-family:var(--font-serif);font-size:1.5rem;margin:2rem 0 .8em;padding-bottom:.3em;
+  border-bottom:1px solid var(--line);letter-spacing:-.01em}
+.md h3{font-size:1.18rem;margin:1.7em 0 .6em}
+.md h4{font-size:1rem;margin:1.5em 0 .5em;color:var(--ink)}
+.md h1 .anchor,.md h2 .anchor,.md h3 .anchor,.md h4 .anchor{opacity:0;margin-left:.4rem;
+  color:var(--accent-1);font-weight:400;text-decoration:none;font-size:.8em}
+.md h1:hover .anchor,.md h2:hover .anchor,.md h3:hover .anchor,.md h4:hover .anchor{opacity:.75}
+.md p,.md li{color:var(--ink-dim)}
+.md p{margin:.9em 0}
+.md ul,.md ol{margin:.9em 0 .9em 1.4em}
+.md li{margin:.35em 0}
+.md li::marker{color:var(--ink-faint)}
+.md a{color:var(--accent-1)}
+.md a:hover{color:var(--accent-2);text-decoration:underline}
+.md strong{color:var(--ink);font-weight:650}
+.md em{color:var(--ink)}
+.md code{font-family:var(--font-mono);font-size:.86em;background:var(--accent-soft);
+  color:var(--ink);padding:.12em .42em;border-radius:5px}
+.md pre{background:var(--code-bg);border:1px solid var(--line-strong);border-radius:11px;
+  padding:16px 18px;overflow-x:auto;margin:1.1em 0}
+.md pre code{background:none;color:var(--ink-dim);padding:0;font-size:.82rem;line-height:1.7}
+.md blockquote{margin:1.1em 0;padding:.5em 1em;border-left:3px solid var(--accent-1);
+  background:var(--accent-soft);color:var(--ink-dim);border-radius:0 8px 8px 0}
+.md blockquote p{margin:.3em 0;color:inherit}
+.md table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.88rem;display:block;overflow-x:auto}
+.md th,.md td{border:1px solid var(--line-strong);padding:9px 12px;text-align:left;vertical-align:top;color:var(--ink-dim)}
+.md th{background:var(--bg-2);color:var(--ink);font-weight:600}
+.md hr{border:none;border-top:1px solid var(--line);margin:2em 0}
+.md img{max-width:100%;border-radius:10px;border:1px solid var(--line);margin:1.1em 0}
+.md .mermaid{background:var(--bg-panel);border:1px solid var(--line);border-radius:11px;
+  padding:18px;margin:1.2em 0;text-align:center;overflow-x:auto}
+.err{font-family:var(--font-mono);font-size:.85rem;color:#ffb3a6;background:rgba(224,80,60,.08);
+  border:1px solid rgba(224,80,60,.25);padding:14px 16px;border-radius:10px}
+.loading{font-family:var(--font-mono);font-size:.82rem;color:var(--ink-faint)}
+
+/* Scrim (mobile drawer backdrop) */
+.scrim{display:none;position:fixed;inset:0;z-index:70;background:rgba(4,6,10,.55)}
+.scrim.open{display:block}
+
+/* Footer */
+.site-footer{border-top:1px solid var(--line);padding:34px 0;margin-top:20px}
+.footer-inner{max-width:var(--container);margin:0 auto;padding:0 clamp(18px,4vw,40px);
+  display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px}
+.footer-left{display:flex;align-items:center;gap:9px;font-size:13.5px;color:var(--ink-faint)}
+.footer-left img{width:20px;height:20px;opacity:.85}
+.footer-links{display:flex;gap:22px;flex-wrap:wrap}
+.footer-links a{font-size:13.5px;color:var(--ink-faint)}
+.footer-links a:hover{color:var(--ink-dim)}
+
+@media(max-width:860px){
+  .nav-links{display:none}
+  .menu-btn{display:inline-flex}
+  .shell{grid-template-columns:1fr;gap:18px;padding-top:20px}
+  .sidebar{position:fixed;top:0;left:0;bottom:0;z-index:75;width:min(310px,84vw);
+    max-height:none;border-radius:0;border-left:none;border-top:none;border-bottom:none;
+    transform:translateX(-102%);transition:transform .22s ease}
+  .sidebar.open{transform:translateX(0)}
+  .md h1{font-size:1.65rem}
+  .md h2{font-size:1.3rem}
+}
+</style>
+<script src="assets/vendor/marked.umd.js"></script>
+<script src="assets/vendor/mermaid.min.js"></script>
 </head>
 <body>
-<a class="skip-link" href="#doc-content">Skip to content</a>
+<a class="skip-link" href="#content">Skip to content</a>
 
-<header class="site-nav">
-  <div class="wrap nav-inner">
-    <a class="brand" href="index.html" aria-label="Envoir home">
-      <img src="assets/logo-mark.svg" width="30" height="30" alt="" aria-hidden="true">
-      <span class="word">Envoir</span>
-    </a>
+<header class="site-header"><div class="wrap nav-inner">
+  <a class="vulos-back" href="https://vulos.org" target="_top">&larr; Vulos</a>
+  <a class="brand" href="index.html" aria-label="Envoir home">
+    <img src="assets/logo-mark.svg" width="26" height="26" alt="" aria-hidden="true">Envoir
+  </a>
+  <div class="nav-spacer"></div>
+  <nav class="nav-links" aria-label="Primary">
+    <a href="index.html#how">How it works</a>
+    <a href="index.html#privacy">Privacy</a>
+    <a href="index.html#open-source">Open source</a>
+    <a href="docs.html" class="here">Docs</a>
+    <a class="gh" href="https://github.com/vul-os/envoir" target="_blank" rel="noopener">
+      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </nav>
+  <button class="menu-btn" id="menuBtn" type="button" aria-label="Toggle docs menu" aria-expanded="false">&#9776; menu</button>
+</div></header>
 
-    <nav class="nav-links" id="primary-nav" aria-label="Primary">
-      <a href="index.html#how">How it works</a>
-      <a href="index.html#privacy">Privacy</a>
-      <a href="index.html#open-source">Open source</a>
-      <a href="docs.html" class="active">Docs</a>
-    </nav>
+<div class="scrim" id="scrim"></div>
 
-    <div class="nav-right">
-      <button class="switch" id="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Toggle light/dark theme"></button>
-      <a class="btn btn-ghost btn-mono nav-cta" href="https://github.com/env-oir/envoir" target="_blank" rel="noopener">Get the code</a>
-      <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Open menu">
-        <span class="nav-toggle-bars" aria-hidden="true"><span></span><span></span><span></span></span>
-      </button>
-    </div>
-  </div>
-
-  <div class="mobile-menu" id="mobile-menu" hidden>
-    <nav aria-label="Mobile">
-      <a href="index.html#how">How it works</a>
-      <a href="index.html#privacy">Privacy</a>
-      <a href="index.html#open-source">Open source</a>
-      <a href="docs.html">Docs</a>
-    </nav>
-    <a class="btn btn-primary btn-mono" href="https://github.com/env-oir/envoir" target="_blank" rel="noopener">Get the code →</a>
-  </div>
-</header>
-
-<div class="docs-shell">
-  <div class="docs-mobile-bar">
-    <button id="doc-nav-toggle" type="button" class="btn btn-ghost btn-mono docs-nav-btn">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" stroke-linecap="round"/></svg>
-      Contents
-    </button>
-    <span class="docs-mobile-crumb" id="doc-breadcrumb-mobile">Envoir docs</span>
-  </div>
-
-  <div id="doc-nav-scrim" class="docs-nav-scrim"></div>
-
-  <aside class="docs-sidebar" aria-label="Documentation sections">
-    <div class="docs-sidebar-head">
-      <span class="eyebrow"><span class="tag">docs</span></span>
+<div class="shell">
+  <aside class="sidebar" id="sidebar" aria-label="Documentation sections">
+    <div class="sidebar-head">
+      <span class="eyebrow">docs</span>
       <h3>Envoir &amp; DMTAP</h3>
-      <p>Rendered straight from this repo’s <code class="mono">docs/*.md</code> — the same files that back the root README.</p>
     </div>
-    <nav id="doc-sidebar" class="doc-nav" aria-label="Docs pages"></nav>
+    <nav id="sidebar-nav" aria-label="Docs pages"></nav>
   </aside>
-
-  <main id="main" class="docs-main">
-    <div class="docs-breadcrumb" id="doc-breadcrumb"></div>
-    <article id="doc-content" class="doc-content" aria-live="polite">
-      <p class="doc-loading">Loading…</p>
-    </article>
-    <nav class="doc-prevnext" id="doc-prevnext" aria-label="Adjacent pages"></nav>
+  <main class="main">
+    <div class="crumb" id="crumb"></div>
+    <article class="md" id="content"><span class="loading">Loading…</span></article>
   </main>
-
-  <aside class="docs-toc" id="doc-toc" aria-label="On this page" hidden></aside>
 </div>
 
-<footer>
-  <div class="wrap">
-    <div class="foot-grid">
-      <div>
-        <div class="foot-brand">
-          <img src="assets/logo-mark.svg" width="26" height="26" alt="" aria-hidden="true">
-          <strong>Envoir</strong>
-        </div>
-        <p class="foot-desc">The open-source reference implementation of DMTAP — sovereign mail, chat, files, and login on one keypair identity.</p>
-      </div>
-
-      <div class="foot-col">
-        <h4>Product</h4>
-        <ul>
-          <li><a href="index.html#identity">Mail</a></li>
-          <li><a href="index.html#identity">Chat</a></li>
-          <li><a href="index.html#identity">Files</a></li>
-          <li><a href="index.html#identity">Sign in with Envoir</a></li>
-        </ul>
-      </div>
-
-      <div class="foot-col">
-        <h4>Docs</h4>
-        <ul>
-          <li><a href="#/architecture">Architecture</a></li>
-          <li><a href="#/protocol">Protocol</a></li>
-          <li><a href="#/privacy">Privacy model</a></li>
-          <li><a href="#/security">Security</a></li>
-        </ul>
-      </div>
-
-      <div class="foot-col">
-        <h4>Open source</h4>
-        <ul>
-          <li><a href="https://github.com/env-oir/envoir" target="_blank" rel="noopener">Source (env-oir/envoir)</a></li>
-          <li><a href="https://github.com/env-oir/dmtap" target="_blank" rel="noopener">Spec (env-oir/dmtap)</a></li>
-          <li><a href="../LICENSE-MIT" target="_blank" rel="noopener">MIT license</a></li>
-          <li><a href="../brand/README.md" target="_blank" rel="noopener">Brand assets</a></li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="foot-bottom">
-      <span>© 2026 Envoir. MIT licensed. DMTAP is an open protocol — Envoir is one implementation of it.</span>
-      <span class="legal-links">
-        <a href="https://github.com/env-oir/dmtap" target="_blank" rel="noopener">Spec</a>
-        <a href="https://github.com/env-oir/envoir" target="_blank" rel="noopener">Repo</a>
-      </span>
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-left"><img src="assets/logo-mark.svg" alt="" aria-hidden="true"> Envoir — MIT licensed · no token, ever · a reference implementation of DMTAP (KOTVA-Mail).</div>
+    <div class="footer-links">
+      <a href="index.html">Home</a>
+      <a href="https://github.com/vul-os/envoir" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/vul-os/kotva" target="_blank" rel="noopener">Spec (KOTVA)</a>
+      <a href="https://vulos.org" target="_blank" rel="noopener">vulos.org</a>
     </div>
   </div>
 </footer>
 
-<script src="js/main.js"></script>
-<script src="js/markdown.js"></script>
-<script src="js/docs.js"></script>
+<script>
+// The site is served statically; docs render straight from this repo's own docs/*.md.
+// Cross-links to docs in the sidebar become in-app navigation; links to any other
+// repo file (READMEs, contracts, source) resolve to their real GitHub blob location,
+// so no link on this page is ever dead — and no request ever leaves this origin.
+const REPO_BLOB_BASE = 'https://github.com/vul-os/envoir/blob/main/';
+const GROUPS = [
+  {label:"Start", items:[
+    {slug:"overview",              title:"Overview"},
+    {slug:"getting-started",       title:"Getting started"},
+    {slug:"naming",                title:"Naming"}
+  ]},
+  {label:"Concepts", items:[
+    {slug:"architecture",          title:"Architecture"},
+    {slug:"protocol",              title:"Protocol"},
+    {slug:"privacy",               title:"Privacy & threat model"},
+    {slug:"security",              title:"Security"}
+  ]},
+  {label:"Features", items:[
+    {slug:"mail",                  title:"Mail"},
+    {slug:"chat",                  title:"Chat"},
+    {slug:"calendar",              title:"Calendar"},
+    {slug:"contacts",              title:"Contacts"},
+    {slug:"files",                 title:"Files"},
+    {slug:"identity",              title:"Identity"},
+    {slug:"transport-traceability",title:"Transport provenance"},
+    {slug:"self-hosting",          title:"Self-hosting"}
+  ]},
+  {label:"Project", items:[
+    {slug:"pwa-and-push",          title:"PWA & push"},
+    {slug:"faq",                   title:"FAQ"},
+    {slug:"roadmap",               title:"Roadmap"},
+    {slug:"contributing",          title:"Contributing"}
+  ]}
+];
+const DOCS = GROUPS.flatMap(g => g.items);
+const bySlug = Object.fromEntries(DOCS.map(d => [d.slug, d]));
+
+const content = document.getElementById('content');
+const crumb = document.getElementById('crumb');
+const sidebar = document.getElementById('sidebar');
+const sidebarNav = document.getElementById('sidebar-nav');
+const scrim = document.getElementById('scrim');
+const menuBtn = document.getElementById('menuBtn');
+
+// Build the grouped sidebar.
+GROUPS.forEach(g => {
+  const h = document.createElement('div'); h.className = 'grp'; h.textContent = g.label;
+  sidebarNav.appendChild(h);
+  g.items.forEach(d => {
+    const a = document.createElement('a');
+    a.dataset.slug = d.slug; a.href = '#' + d.slug; a.textContent = d.title;
+    sidebarNav.appendChild(a);
+  });
+});
+
+let mermaidReady = false;
+try {
+  const dark = document.documentElement.getAttribute('data-theme') !== 'light';
+  mermaid.initialize({ startOnLoad:false, theme: dark ? 'dark' : 'default', securityLevel:'loose',
+    themeVariables:{ fontFamily:'var(--font-sans)' } });
+  mermaidReady = true;
+} catch(e){}
+
+if (window.marked && marked.setOptions) marked.setOptions({ gfm:true, breaks:false });
+
+// GitHub-compatible heading slugs (does NOT collapse consecutive hyphens), so the
+// hand-written "#messaging--files"-style fragments in the source docs still resolve.
+function slugifyHeading(t){
+  return t.toLowerCase().trim().replace(/[^\w\s-]/g,'').replace(/\s+/g,'-');
+}
+
+function setActive(slug){
+  sidebarNav.querySelectorAll('a').forEach(a => a.classList.toggle('active', a.dataset.slug === slug));
+  const on = sidebarNav.querySelector('a.active');
+  if (on && sidebar.scrollHeight > sidebar.clientHeight){
+    const r = on.getBoundingClientRect(), sr = sidebar.getBoundingClientRect();
+    if (r.top < sr.top || r.bottom > sr.bottom) on.scrollIntoView({ block:'center' });
+  }
+}
+
+async function renderMermaid(){
+  if(!mermaidReady) return;
+  content.querySelectorAll('code.language-mermaid').forEach(code => {
+    const div = document.createElement('div'); div.className = 'mermaid';
+    div.textContent = code.textContent; code.closest('pre').replaceWith(div);
+  });
+  const nodes = content.querySelectorAll('.mermaid');
+  if(nodes.length){ try { await mermaid.run({ nodes }); } catch(e){ console.warn('mermaid', e); } }
+}
+
+async function load(slug, heading){
+  const doc = bySlug[slug] || DOCS[0];
+  setActive(doc.slug);
+  crumb.innerHTML = 'Docs <span style="opacity:.5">/</span> <b>' + doc.title + '</b>';
+  content.innerHTML = '<span class="loading">Loading…</span>';
+  try {
+    const res = await fetch('docs/' + doc.slug + '.md', { cache:'no-cache' });
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const md = await res.text();
+    content.innerHTML = marked.parse(md);
+
+    // Local images live under docs/img/ — rewrite the source docs' "../img/x" refs.
+    content.querySelectorAll('img').forEach(img => {
+      const s = img.getAttribute('src') || '';
+      if(/^https?:/i.test(s)) return;
+      const m = s.match(/(?:\.\.\/)*(?:docs\/)?img\/(.+)$/);
+      if(m) img.setAttribute('src', 'docs/img/' + m[1]);
+    });
+
+    // heading anchor ids + hover "#" links (using GitHub-compatible slugs)
+    const seen = {};
+    content.querySelectorAll('h1,h2,h3,h4').forEach(h => {
+      let id = slugifyHeading(h.textContent);
+      if(!id) return;
+      if(seen[id] != null){ seen[id]++; id = id + '-' + seen[id]; } else seen[id] = 0;
+      h.id = id;
+      const a = document.createElement('a');
+      a.className = 'anchor'; a.href = '#' + doc.slug + '#' + id; a.textContent = '#';
+      a.setAttribute('aria-label', 'Link to this section');
+      h.appendChild(a);
+    });
+
+    // Resolve cross-links: a .md whose basename is one of our own docs becomes in-app
+    // navigation; anything else resolves to its real GitHub blob location.
+    content.querySelectorAll('a[href]').forEach(a => {
+      const h = a.getAttribute('href') || '';
+      if(/^(https?:|#|mailto:)/i.test(h)) return;
+      const m = h.match(/([A-Za-z0-9._-]+)\.md(#.*)?$/i);
+      if(m){
+        const target = bySlug[m[1].toLowerCase()];
+        if(target){
+          const frag = m[2] ? '#' + m[2].slice(1) : '';
+          a.setAttribute('href', '#' + target.slug + frag);
+          return;
+        }
+      }
+      // Not one of our docs → point at the real file on GitHub (repo-root relative).
+      const clean = h.replace(/^(\.\.?\/)+/, '');
+      a.setAttribute('href', REPO_BLOB_BASE + clean);
+      a.target = '_blank'; a.rel = 'noopener';
+    });
+    content.querySelectorAll('a[href^="http"]').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
+
+    await renderMermaid();
+
+    if(heading){
+      const el = document.getElementById(heading);
+      if(el){ el.scrollIntoView(); return; }
+    }
+    window.scrollTo({ top:0 });
+  } catch(err){
+    content.innerHTML = '<div class="err">Could not load <code>' + doc.slug + '.md</code> — ' + err.message + '</div>';
+  }
+}
+
+function closeDrawer(){ sidebar.classList.remove('open'); scrim.classList.remove('open'); menuBtn.setAttribute('aria-expanded','false'); }
+
+function route(){
+  const raw = (location.hash || '').replace(/^#/, '');
+  const parts = raw.split('#');
+  const slug = parts[0] || DOCS[0].slug;
+  if(bySlug[slug]){
+    load(slug, parts[1]);
+  } else if(raw){
+    const el = document.getElementById(raw);
+    if(el) el.scrollIntoView(); else load(DOCS[0].slug);
+  } else {
+    load(DOCS[0].slug);
+  }
+  if(window.matchMedia('(max-width:860px)').matches) closeDrawer();
+}
+
+window.addEventListener('hashchange', route);
+route();
+
+menuBtn.addEventListener('click', () => {
+  const open = !sidebar.classList.contains('open');
+  sidebar.classList.toggle('open', open); scrim.classList.toggle('open', open);
+  menuBtn.setAttribute('aria-expanded', String(open));
+});
+scrim.addEventListener('click', closeDrawer);
+</script>
 </body>
 </html>
