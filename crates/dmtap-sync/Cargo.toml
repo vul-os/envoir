@@ -1,22 +1,35 @@
+# dmtap-sync — the shared sync engine. This crate is PACKAGED TO MOVE: it is the one library in
+# this workspace that four other products consume, and a product is not a place to import a library
+# from. The destination is its own published crate; everything below is written so that lifting the
+# directory out is a manifest edit, not a source edit. What still has to change on that day is
+# spelled out in README.md ("Extraction status") — do not let this list grow silently.
 [package]
 name = "dmtap-sync"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
 description = "DMTAP substrate capability ③ — Sync (substrate/SYNC.md): the signed, deterministic, MULTI-AUTHOR CRDT operation algebra (OR-Set, HLC-LWW register, remove-wins death certificate, PN-counter, RGA sequence, cycle-safe movable tree), per-op RFC 9052 COSE_Sign1 authenticity, canonical observable-state snapshot roots, and range-Merkle reconciliation fingerprints"
-repository = "https://example.invalid/envoir"
+repository = "https://github.com/vul-os/envoir"
+readme = "README.md"
+keywords = ["crdt", "sync", "cose", "dmtap", "convergence"]
+categories = ["data-structures", "cryptography", "encoding"]
 
 [dependencies]
 # Ed25519 (COSE_Sign1 signing/verification) and the §18.1.5 v0 content address (0x1e ‖ BLAKE3-256)
 # come from core; this crate adds NO new third-party dependency.
+#
+# `workspace = true` resolves to `kotva-core`, tag-pinned from the KOTVA repo — a SPEC/substrate
+# repo, not a product, so this is not a product-to-product import. It is inherited rather than
+# inlined deliberately: two copies of a git pin that drift produce two `kotva-core`s in one graph,
+# which fails to compile in a way that reads like a type error. On extraction this one line becomes
+# the explicit dependency; see README.md.
 dmtap-core = { workspace = true }
 
-[dev-dependencies]
-# The §5.6 single-owner device-cluster reference. Used ONLY by the parity tests
-# (`tests/clustersync_parity.rs`), which prove that this crate's generalized OR-Set / LWW /
-# death-certificate merges agree op-for-op with the §5.6 normative profile on the subset both
-# cover — the "reuse" obligation discharged as an executable cross-check rather than as a type
-# dependency (§5.6's `Hlc`/value type is the `device`-flavoured, unsigned-integer-only one; the
-# substrate value type must additionally carry negative integers, §4.1 `ext-value`).
-dmtap-clustersync = { path = "../dmtap-clustersync" }
+# NOTE — no [dev-dependencies]. The §5.6 parity proof (OR-Set / LWW / death-certificate merges
+# agreeing op-for-op with the normative single-owner profile) is still executed on every
+# `cargo test --workspace`, but it now lives on the OTHER side of that pair, in
+# `crates/dmtap-clustersync/tests/sync_parity.rs`, which dev-depends on this crate. It was moved
+# there so this crate has no dependency of any kind — not even a dev one — on an envoir-local
+# crate, which is what a `git = ".../envoir"` line in an adopter's manifest is currently standing
+# in for. The proof is unchanged; only which of the two crates owns it is.

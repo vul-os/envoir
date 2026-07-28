@@ -3,6 +3,32 @@
 # This repo had no CI. 1462 tests and six machine-checked formal proofs existed
 # and nothing ran them on a push — which is how a committed conformance vector
 # came to assert the opposite of spec §1.1 while every local run stayed green.
+#
+# The first version of this file was itself structurally red, in three ways that
+# all shared one root cause — it checked out ONLY this repo, while the test suite
+# reaches out of the worktree in two directions:
+#
+#   1. `crates/dmtap-sync-wasm/tests/native_trace.rs` HARD-FAILS (deliberately —
+#      it is half of a cross-surface proof) when the sibling KOTVA spec repo is
+#      absent, so `cargo test` could never have gone green. KOTVA is now checked
+#      out beside this repo.
+#   2. `cargo {build,test} --workspace` overrides `default-members` and therefore
+#      pulls in `crates/dmtap-postage-patala`, which path-depends on the sibling
+#      `patala` repo. The root manifest's promise that "plain cargo build never
+#      pulls patala in" is true of `cargo build`; `--workspace` is exactly the
+#      spelling that breaks it. The gate below builds the DEFAULT members, which
+#      is the set this repo claims to build standalone, and the optional patala
+#      adapter is tested in its own job that checks patala out.
+#   3. `cargo tree --workspace 2>/dev/null | grep -q patala` was asserting the
+#      postage seam stays provider-agnostic. With patala absent, cargo tree
+#      FAILS, the error goes to /dev/null, the grep matches nothing, and the step
+#      prints "default build has no patala dependency" — a gate that passes by
+#      not running. It now fails closed on a cargo-tree error and asserts against
+#      the default members, which is the set the claim is actually about.
+#
+# Nothing here may be "green because it did nothing". Every step that could
+# silently no-op (a glob matching no test files, a vector file that is not there)
+# asserts a coverage COUNT, not just an exit code.
 name: ci
 
 on:
@@ -11,21 +37,166 @@ on:
   pull_request:
     branches: [main, dev]
 
+env:
+  # The KOTVA revision this repo's conformance cross-reference is calibrated
+  # against. PINNED rather than tracking `main` on purpose: the catalog and the
+  # vector files live in another repo that is pushed to independently, and an
+  # unrelated push there must not turn this repo's PRs red. The `spec-drift` job
+  # below tracks KOTVA `main` non-blockingly so the drift is still visible.
+  #
+  # To bump: move this SHA, run `cargo test --locked` with that revision checked
+  # out at ../kotva, and land both together.
+  #
+  # NOTE, and it is a real one: this is NOT the revision the Rust dependency
+  # resolves to. `Cargo.toml` pins `kotva-core`/`kotva-mail` at tag `core-v0.2.0`
+  # (a4a6ca5), while the conformance catalog this suite reads is ahead of that
+  # tag. Running the suite against the TAG's catalog FAILS — DMTAP-SUITE-03 there
+  # references `suite_reject_0x05`, a vector that exists only in this repo's
+  # `vectors.json`, because that file already tracks KOTVA main. The two pins want
+  # reconciling in KOTVA (a `core-v0.3.0` tag cut from main would do it); until
+  # then this SHA is the honest description of what is actually tested.
+  KOTVA_REF: 585a8b171424dff44b20da4fb1876aee3aeb1631
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: envoir
+    env:
+      # Read by all THREE surfaces of the parity proof (the Rust harnesses via
+      # `conformance_runner::spec_repo_dir`, `test/vectors.test.mjs` via
+      # process.env, `bindings/go/vectors_test.go` via os.Getenv), so one
+      # variable places the spec checkout for every one of them.
+      KOTVA_DIR: ${{ github.workspace }}/kotva
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: envoir
+
+      # The sibling spec repo. The Rust/JS/Go harnesses all resolve it as
+      # `../kotva` by default, so this path is also what a developer checkout
+      # looks like — `KOTVA_DIR` above just makes it explicit.
+      #
+      # `token`: falls back to the job's own GITHUB_TOKEN, which is enough while
+      # KOTVA is public. Set a `KOTVA_TOKEN` secret (a PAT or app token with read
+      # access) if it is ever made private; without it the checkout FAILS loudly
+      # rather than the suite quietly skipping every cross-repo proof.
+      - uses: actions/checkout@v4
+        with:
+          repository: vul-os/kotva
+          ref: ${{ env.KOTVA_REF }}
+          path: kotva
+          token: ${{ secrets.KOTVA_TOKEN || github.token }}
+
+      - name: The spec checkout is really there (fail closed)
+        run: |
+          missing=0
+          for f in conformance/suite.json \
+                   conformance/vectors/vectors.json \
+                   conformance/vectors/pub_vectors.json \
+                   conformance/vectors/pubsub_vectors.json \
+                   conformance/vectors/sync_vectors.json; do
+            if [ ! -f "$KOTVA_DIR/$f" ]; then
+              echo "::error::missing $KOTVA_DIR/$f"
+              missing=1
+            fi
+          done
+          if [ "$missing" = 1 ]; then
+            echo "::error::the KOTVA checkout is incomplete. Every cross-repo proof in this run" \
+                 "would either hard-fail or silently skip; refusing to continue and report green."
+            exit 1
+          fi
+          echo "KOTVA @ $(git -C "$KOTVA_DIR" rev-parse HEAD)"
+          echo "suite cases: $(grep -c '"id":' "$KOTVA_DIR/conformance/suite.json")"
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: envoir
 
-      - name: Build
-        run: cargo build --workspace --locked
+      # DEFAULT MEMBERS, not `--workspace`. See the header: `--workspace` drags in
+      # `crates/dmtap-postage-patala` and with it the sibling `patala` repo, which
+      # is an OPTIONAL payment-provider adapter and deliberately not part of the
+      # standalone build. The `patala-adapter` job below covers that crate.
+      - name: Build (default members — the standalone set)
+        run: cargo build --locked
 
-      - name: Test
-        run: cargo test --workspace --locked
+      - name: Test (default members — the standalone set)
+        run: cargo test --locked
+
+      # --- the cross-surface parity proof -------------------------------------
+      # `substrate/BINDINGS.md` §4: one algebra, three surfaces, one set of frozen
+      # bytes. This is the entire value proposition of the binding and none of it
+      # was gated before — `pkg-node/` is gitignored build output, so the JS half
+      # could not even load the module without build.sh running first.
+      - name: Install wasm-pack
+        run: curl -sSf https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # `node --test` accepts glob patterns from v21
+
+      - name: Build the WASM binding
+        run: ./crates/dmtap-sync-wasm/build.sh nodejs
+
+      # `node --test` with a glob that matches NOTHING prints "pass 0" and exits
+      # 0 — verified, not assumed. That is the same failure mode this suite has
+      # already shipped once (a sync gate reporting 24/24 while driving zero
+      # vectors), so the pass count and the name of the byte-identical assertion
+      # are both checked explicitly.
+      #
+      # `--test-reporter=spec` is pinned because the DEFAULT reporter depends on
+      # both the Node version and whether stdout is a TTY (`tap` when piped on
+      # some versions, `spec` on others), and the two spell the summary
+      # differently. Parsing an unpinned format is how a counter silently reads 0.
+      - name: Cross-surface parity — WASM half (byte-identical to native)
+        run: |
+          set -o pipefail
+          node --test --test-reporter=spec 'crates/dmtap-sync-wasm/test/*.test.mjs' 2>&1 \
+            | tee /tmp/node-test.log
+          counts=$(awk '/ pass [0-9]+$/ {p=$NF} / fail [0-9]+$/ {f=$NF} END {print p+0, f+0}' /tmp/node-test.log)
+          pass=${counts% *}; fail=${counts#* }
+          echo "node --test: $pass passed, $fail failed"
+          if [ "$fail" != 0 ]; then
+            echo "::error::$fail JS/WASM parity assertions failed"; exit 1
+          fi
+          if [ "$pass" -lt 31 ]; then
+            echo "::error::only $pass JS/WASM assertions ran (expected >= 31). The glob matched" \
+                 "nothing, the summary format moved, or coverage was removed. NOT VERIFIED: that" \
+                 "the WASM binding reproduces the native trace."
+            exit 1
+          fi
+          if ! grep -q 'native Rust and WASM produce byte-identical results for every vector' /tmp/node-test.log; then
+            echo "::error::the byte-identical cross-surface assertion did not run — it is the" \
+                 "whole point of this binding"
+            exit 1
+          fi
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: envoir/bindings/go/go.sum
+
+      # The third surface. It needs no Rust toolchain: the raw-ABI module is
+      # committed (a Go module has no build step) and `provenance_test.go` ties
+      # that blob to the sources it was built from by digest. `go test ./...`
+      # exits 0 for a package with NO test files, so the count is asserted.
+      - name: Cross-surface parity — Go half
+        working-directory: envoir/bindings/go
+        run: |
+          set -o pipefail
+          go test ./... -count=1 -v 2>&1 | tee /tmp/go-test.log | tail -40
+          ran=$(grep -c '^--- PASS: ' /tmp/go-test.log || true)
+          echo "go test: $ran top-level test functions passed (49 at 2026-07-28)"
+          if [ "$ran" -lt 45 ]; then
+            echo "::error::only $ran Go test functions ran (expected >= 45). NOT VERIFIED: that" \
+                 "the wazero/raw-ABI surface reproduces the native trace."
+            exit 1
+          fi
 
       # NON-BLOCKING, deliberately. Both currently fail on pre-existing debt:
       # ~2600 rustfmt diffs and ~79 clippy findings, none introduced by the work
@@ -43,15 +214,88 @@ jobs:
 
       - name: Clippy (report only)
         continue-on-error: true
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
       # The postage seam must stay provider-agnostic: the DEFAULT build carries no
       # payment provider at all. This is the one property the seam exists for, so
       # it is asserted rather than assumed.
+      #
+      # Note what changed: no `--workspace` (which would find the optional adapter
+      # member and fail a build that is in fact agnostic), and no `2>/dev/null`
+      # (which turned a cargo-tree ERROR into a silent pass). The tree is captured
+      # once and its exit status checked, so an unresolvable manifest is a
+      # failure, not a green tick.
       - name: Postage seam is provider-agnostic
         run: |
-          if cargo tree --workspace 2>/dev/null | grep -q patala; then
-            echo "::error::default build pulled a payment provider — the seam is no longer agnostic"
+          if ! cargo tree > /tmp/tree.txt 2>/tmp/tree.err; then
+            echo "::error::cargo tree failed, so the provider-agnostic property was NOT verified:"
+            cat /tmp/tree.err
             exit 1
           fi
-          echo "default build has no patala dependency"
+          if [ ! -s /tmp/tree.txt ]; then
+            echo "::error::cargo tree produced no output — nothing was verified"; exit 1
+          fi
+          if grep -q patala /tmp/tree.txt; then
+            echo "::error::default build pulled a payment provider — the seam is no longer agnostic"
+            grep -n patala /tmp/tree.txt
+            exit 1
+          fi
+          echo "default build has no patala dependency ($(wc -l < /tmp/tree.txt) tree lines scanned)"
+
+  # The OPTIONAL patala-backed postage adapter (`crates/dmtap-postage-patala`).
+  # Excluded from `default-members` because it path-depends on a sibling repo, so
+  # it needs its own checkout — and it does need testing, which is why the main
+  # job dropping `--workspace` does not lose coverage.
+  patala-adapter:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: envoir
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: envoir
+      - uses: actions/checkout@v4
+        with:
+          repository: vul-os/patala
+          path: patala
+          token: ${{ secrets.PATALA_TOKEN || github.token }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: envoir
+      - name: Test the optional postage adapter
+        run: cargo test -p dmtap-postage-patala --locked
+
+  # DRIFT DETECTOR, non-blocking by design. The `test` job pins KOTVA so an
+  # unrelated push to the spec repo cannot redden this repo's PRs; this job runs
+  # the same cross-reference against KOTVA `main` so that when the spec moves
+  # ahead of what this implementation reproduces, it is VISIBLE in the checks
+  # list rather than discovered months later. A red tick here means "go bump
+  # KOTVA_REF and fix what that surfaces", never "this PR is broken".
+  spec-drift:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: envoir
+    env:
+      KOTVA_DIR: ${{ github.workspace }}/kotva
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: envoir
+      - uses: actions/checkout@v4
+        with:
+          repository: vul-os/kotva
+          path: kotva
+          token: ${{ secrets.KOTVA_TOKEN || github.token }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: envoir
+      - name: Conformance cross-reference against KOTVA main
+        run: |
+          echo "KOTVA main @ $(git -C "$KOTVA_DIR" rev-parse HEAD) (pinned: $KOTVA_REF)"
+          cargo test --locked -p conformance-runner
+          cargo run --locked -p conformance-runner | tail -40

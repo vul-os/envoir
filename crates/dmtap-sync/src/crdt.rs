@@ -1,7 +1,7 @@
 //! The CRDT operation algebra (`SYNC.md` §4) — all six types.
 //!
 //! Three are the §5.6 device-cluster CRDTs, generalized here from one owner's device set to any
-//! author set (the semantics are unchanged; `tests/clustersync_parity.rs` proves op-for-op
+//! author set (the semantics are unchanged; `dmtap-clustersync`'s `tests/sync_parity.rs` proves op-for-op
 //! agreement with the `dmtap-clustersync` reference on the subset both cover):
 //!
 //! * [`OrSet`] — add-wins observed-remove set (§4.3),

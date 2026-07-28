@@ -36,8 +36,18 @@ const RECEIVER_NOW_MS: u64 = 1_700_000_900_000;
 
 type Case = BTreeMap<String, String>;
 
+/// Root of the sibling KOTVA spec repo. `KOTVA_DIR` overrides the default sibling layout so CI can
+/// place the checkout anywhere — the same override the JS and Go halves of this proof read, so one
+/// variable drives all three surfaces.
+fn spec_repo_dir() -> PathBuf {
+    match std::env::var_os("KOTVA_DIR") {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../kotva"),
+    }
+}
+
 fn vectors_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../dmtap/conformance/vectors/sync_vectors.json")
+    spec_repo_dir().join("conformance/vectors/sync_vectors.json")
 }
 
 fn trace_path() -> PathBuf {

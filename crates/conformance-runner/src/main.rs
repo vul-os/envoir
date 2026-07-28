@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use conformance_runner::{
-    check_all_vectors, load_suite, load_vectors, run_all_suite_cases, CaseOutcome, Verdict,
-    SYNC_KNOWN_DISCREPANCIES,
+    check_all_vectors, load_suite, load_vectors, run_all_suite_cases, spec_repo_dir, CaseOutcome,
+    Verdict, SYNC_KNOWN_DISCREPANCIES,
 };
 
 fn vectors_path() -> PathBuf {
@@ -26,27 +26,27 @@ fn vectors_path() -> PathBuf {
 /// `vectors.json`, recomputed here via `dmtap_core::pubobj`. Merged into the run when present so the
 /// §22/§23 suite cases resolve their `pub_*` vectors.
 fn pub_vectors_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../kotva/conformance/vectors/pub_vectors.json")
+    spec_repo_dir().join("conformance/vectors/pub_vectors.json")
 }
 
 /// The sibling spec repo's **Sync substrate** (`substrate/SYNC.md` §10) known-answer vectors —
 /// again a SEPARATE file, recomputed here via the `dmtap-sync` reference crate.
 fn sync_vectors_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../kotva/conformance/vectors/sync_vectors.json")
+    spec_repo_dir().join("conformance/vectors/sync_vectors.json")
 }
 
 /// The sibling spec repo's **DMTAP-PUBSUB** (§25) known-answer vectors — a SEPARATE file from
 /// `vectors.json`, recomputed here via `dmtap_core::pubsub`. Merged into the run when present so
 /// the PUBSUB suite cases resolve their `pubsub_*` vectors, exactly like `pub_vectors_path`.
 fn pubsub_vectors_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../kotva/conformance/vectors/pubsub_vectors.json")
+    spec_repo_dir().join("conformance/vectors/pubsub_vectors.json")
 }
 
 /// The sibling spec repo's conformance-suite catalog. Optional: this harness's mandatory proof
 /// (vectors.json) does not depend on it, but when present we cross-reference it for extra
 /// coverage reporting.
 fn suite_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../kotva/conformance/suite.json")
+    spec_repo_dir().join("conformance/suite.json")
 }
 
 fn main() {

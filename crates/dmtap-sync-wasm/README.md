@@ -2,11 +2,11 @@
 
 **The first binding of the shared sync engine.** A `wasm-bindgen` wrapper that gives a JavaScript
 product the *same compiled* CRDT algebra a Rust server runs — not a second implementation of
-[`substrate/SYNC.md`](../../../dmtap/substrate/SYNC.md) that happens to agree most of the time.
+[`substrate/SYNC.md`](../../../kotva/substrate/SYNC.md) that happens to agree most of the time.
 
-This is surface #1 of the plan in [`substrate/BINDINGS.md`](../../../dmtap/substrate/BINDINGS.md)
+This is surface #1 of the plan in [`substrate/BINDINGS.md`](../../../kotva/substrate/BINDINGS.md)
 §3. It was built first because every product that would adopt Sync already ships a JS/TS frontend
-(ofisi's editor, kerf's frontend, vidmesh's `kernel-ts`), and because it sidesteps the
+(diwan's editor, kerf's frontend, vidmesh's `kernel-ts`), and because it sidesteps the
 cgo-vs-pure-Go tension §5 flags for the Go path — a pure-Go host can later load this *same* `.wasm`
 artifact through `wazero` with `CGO_ENABLED=0` intact.
 
@@ -23,7 +23,7 @@ node --test 'crates/dmtap-sync-wasm/test/*.test.mjs'  # the same 24 through WASM
 ```
 
 The JS suite drives the frozen conformance vectors
-(`../../../dmtap/conformance/vectors/sync_vectors.json`) through the WASM build and asserts, per
+(`../../../kotva/conformance/vectors/sync_vectors.json`) through the WASM build and asserts, per
 vector, that every recomputed byte matches **both** the vector's frozen expectation **and** a trace
 recorded from the native Rust engine. That second assertion is the one `BINDINGS.md` §4 calls
 non-negotiable: without it, "the browser computes what the server computes" is a claim.
@@ -156,8 +156,8 @@ malformed. Different bugs, different fixes — and a caller that has to regex-ma
 
 | Artifact | Raw | Gzipped |
 |---|---|---|
-| `pkg-node/dmtap_sync_bg.wasm` (`--target nodejs`) | 395,912 B (387 KiB) | 154,657 B (151 KiB) |
-| `pkg/dmtap_sync_bg.wasm` (`--target bundler`) | 395,912 B (387 KiB) | 154,657 B (151 KiB) |
+| `pkg-node/dmtap_sync_bg.wasm` (`--target nodejs`) | 401,020 B (391 KiB) | 156,664 B (153 KiB) |
+| `pkg/dmtap_sync_bg.wasm` (`--target bundler`) | 401,020 B (391 KiB) | 156,664 B (153 KiB) |
 
 Both targets emit the same `.wasm`; only the JS glue differs.
 
@@ -223,8 +223,14 @@ comments, so the types and their documentation cannot drift from the implementat
 
 ## CI
 
-This repository has no CI configuration (no `.github/`, no other runner), so there is nothing to
-wire into. The complete gate is three commands, in this order:
+The repository now has CI (`.github/workflows/ci.yml`), but it runs `cargo build/test --workspace`
+only. **It does not run any part of the cross-surface proof**: it never invokes `build.sh`, never
+runs the `node --test` half, and — because it checks out this repo alone — cannot even satisfy
+`--test native_trace`, which reads the frozen vectors from the sibling KOTVA spec repo and
+deliberately hard-fails rather than skipping when they are absent. Treat the gate below as a local
+one until CI checks out KOTVA alongside and adds the WASM steps.
+
+The complete gate is four commands, in this order:
 
 ```sh
 cargo test -p dmtap-sync-wasm                          # marshalling-layer unit tests
@@ -233,8 +239,7 @@ cargo test -p dmtap-sync-wasm --test native_trace      # native half of the pari
 node --test 'crates/dmtap-sync-wasm/test/*.test.mjs'   # WASM half + the byte-for-byte diff
 ```
 
-The last two are also available as `npm run test:sync-wasm` from the repo root. When CI is
-introduced, that is the job.
+The last two are also available as `npm run test:sync-wasm` from the repo root.
 
 ---
 

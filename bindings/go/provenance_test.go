@@ -4,11 +4,27 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
+
+// repoMarkers reports which "you are inside a source checkout" markers exist at root. It is the
+// signal that separates a moved/deleted crates/ tree (drift — a failure) from a module fetched
+// standalone through the Go proxy (nothing to check — a skip). A proxy fetch is rooted in the
+// module cache, two levels above which is neither a Cargo workspace nor a git repository.
+func repoMarkers(root string) []string {
+	var found []string
+	for _, m := range []string{"Cargo.toml", ".git", "crates"} {
+		if _, err := os.Stat(filepath.Join(root, m)); err == nil {
+			found = append(found, m)
+		}
+	}
+	return found
+}
 
 // The staleness guard for the committed wasm artifact.
 //
@@ -30,7 +46,8 @@ import (
 //
 // When it fails, the fix is to rebuild and re-record, not to edit the digest:
 //
-//	crates/dmtap-sync-wasm/build-abi.sh && go run ./bindings/go/internal/genprovenance
+//	crates/dmtap-sync-wasm/build-abi.sh
+//	(cd bindings/go && go run ./internal/genprovenance)   # no go.mod at the repo root
 type provenance struct {
 	SourceDigest   string            `json:"source_digest"`
 	ArtifactSHA256 string            `json:"artifact_sha256"`
@@ -67,13 +84,49 @@ func TestEmbeddedArtifactMatchesProvenance(t *testing.T) {
 // TestArtifactIsNotStaleAgainstSource is the guard that matters: it fails when the Rust source has
 // moved since the artifact was built, which is the drift that previously shipped a real bug.
 //
-// It skips cleanly when the Rust sources are absent — a consumer who fetched only the Go module
-// through the proxy has no crates/ directory, and there is nothing for them to verify or fix.
+// # Absent sources: two different situations, and only one of them is benign
+//
+// This test used to skip on a single condition — `crates/dmtap-sync-wasm` is not there — which
+// conflates a consumer who fetched only the Go module through the proxy (nothing to check, nothing
+// they could fix) with a checkout in which the Rust *moved*. The second is precisely the event this
+// repo is preparing for: `dmtap-sync` and `dmtap-sync-wasm` are being extracted into their own
+// crate. Under the old condition, the day that happens is the day this guard goes permanently green
+// by doing nothing, which is the worst available outcome for a staleness check.
+//
+// So the two are told apart by whether a *repo* is present around this module. A standalone module
+// fetch is rooted in the module cache and has no Cargo workspace and no git directory above it; an
+// envoir checkout has both. Sources missing with a repo around them is drift, and drift fails.
+//
+// The benign skip states its reason on stderr as well as through `t.Skip`. Be precise about how far
+// that gets: `go test` buffers a package's output and DISCARDS it when the package passes, so under
+// a bare `go test` the notice is not shown and the package still prints only `ok` — measured, not
+// assumed. It is shown under `-v`, `-json`, and any wrapper built on those (gotestsum, CI). There
+// is no channel a passing Go test can write to that a bare `go test` will display; the only way to
+// be unconditionally loud is to fail, and failing a consumer who legitimately has no Rust tree
+// would be wrong. So: loud where anything is looking, and the drift cases above — which are the
+// ones that can actually hide a bug — fail rather than skip.
 func TestArtifactIsNotStaleAgainstSource(t *testing.T) {
 	p := loadProvenance(t)
 	root := filepath.Join("..", "..")
 
-	if _, err := os.Stat(filepath.Join(root, "crates", "dmtap-sync-wasm")); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "crates", "dmtap-sync-wasm")); err != nil {
+		if markers := repoMarkers(root); len(markers) > 0 {
+			t.Fatalf("the Rust sources this artifact was built from are GONE, but this is a repo checkout (%s present).\n"+
+				"  looked for: %s\n"+
+				"  stat said:  %v\n"+
+				"If the crates were moved or extracted, this binding must follow them: repoint it at their new home and re-record with\n"+
+				"  (cd bindings/go && go run ./internal/genprovenance)\n"+
+				"Until then the committed dmtap_sync_abi.wasm is unverifiable, and an unverifiable blob is the exact failure mode this guard exists for.",
+				strings.Join(markers, ", "), filepath.Join(root, "crates", "dmtap-sync-wasm"), err)
+		}
+		// Genuinely standalone: no crates/, and no repo around us either. Nothing to check and
+		// nothing the consumer could do about it. Say so on stderr, which `go test` always shows.
+		fmt.Fprintf(os.Stderr,
+			"\nNOTICE: %s SKIPPED — Rust sources not present and no envoir checkout around this module\n"+
+				"        (looked for %s). The committed dmtap_sync_abi.wasm is NOT being checked against the\n"+
+				"        source that produced it in this run; only its own sha256 is (see\n"+
+				"        TestEmbeddedArtifactMatchesProvenance). This is expected for a plain module fetch.\n\n",
+			t.Name(), filepath.Join(root, "crates", "dmtap-sync-wasm"))
 		t.Skip("Rust sources not present (module fetched standalone) — nothing to check against")
 	}
 

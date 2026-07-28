@@ -1,5 +1,5 @@
 //! `cargo test`-visible gate over the **Sync substrate** vectors
-//! (`../dmtap/conformance/vectors/sync_vectors.json`, `substrate/SYNC.md` §10), executed through
+//! (`../kotva/conformance/vectors/sync_vectors.json`, `substrate/SYNC.md` §10), executed through
 //! the `dmtap-sync` reference crate.
 //!
 //! The counts are asserted **exactly**, in both directions: a regression in `dmtap-sync` fails
@@ -11,12 +11,14 @@
 //! `SYNC-FJ-02` for the §5.2.1 fast-join pull path; and since C-08/C-09, `SYNC-VAL-01` for the
 //! full recursive `ext-value` boundary and `SYNC-SNAP-03` for the §6.1.2 op-set snapshot body.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use conformance_runner::{check_all_vectors, load_vectors, Verdict, SYNC_KNOWN_DISCREPANCIES};
+use conformance_runner::{
+    check_all_vectors, load_vectors, spec_repo_dir, Verdict, SYNC_KNOWN_DISCREPANCIES,
+};
 
 fn sync_vectors_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../dmtap/conformance/vectors/sync_vectors.json")
+    spec_repo_dir().join("conformance/vectors/sync_vectors.json")
 }
 
 /// Every Sync vector passes byte-exactly (the discrepancy allowlist is currently empty, so this is
@@ -25,7 +27,17 @@ fn sync_vectors_path() -> PathBuf {
 fn sync_vectors_pass_except_the_documented_discrepancy() {
     let path = sync_vectors_path();
     if !path.exists() {
-        eprintln!("sibling spec repo not checked out at {} — skipping", path.display());
+        // Skipping LOUDLY, naming what went unverified. The bare "— skipping" this replaces was
+        // the same shape as the bug this suite has already shipped: a green tick that means
+        // nothing ran. CI now checks KOTVA out beside this repo (`.github/workflows/ci.yml`) and
+        // fails closed if the checkout is incomplete, so this branch is a developer-machine
+        // affordance only — never the state a gate reports success from.
+        eprintln!(
+            "SKIPPED (loudly): {} does not exist, so NONE of the 24 frozen SYNC.md §10 vectors \
+             ran. NOT VERIFIED: that `dmtap-sync` reproduces the spec's known answers at all. \
+             Check the sibling KOTVA repo out at ../kotva, or point KOTVA_DIR at it.",
+            path.display()
+        );
         return;
     }
     let vf = load_vectors(&path).expect("sync_vectors.json must load");

@@ -1,4 +1,4 @@
-//! # dmtap-sync — DMTAP substrate capability ③, **Sync** (`dmtap/substrate/SYNC.md`)
+//! # dmtap-sync — DMTAP substrate capability ③, **Sync** (`kotva/substrate/SYNC.md`)
 //!
 //! The shared sync engine: a **signed, deterministic, multi-author CRDT operation algebra** with
 //! range-Merkle reconciliation, first-class signed snapshots, and sparse namespace sync.
@@ -12,7 +12,8 @@
 //! ([`cose`], RFC 9052) by an author key that chains to an `IK`, so no shared secret group is
 //! required and two products built by different parties can converge on any namespace they both
 //! subscribe to. Where this crate and §5.6 overlap, the semantics are identical
-//! (`tests/clustersync_parity.rs` proves it op-for-op).
+//! (`dmtap-clustersync`'s `tests/sync_parity.rs` proves it op-for-op; it lives on that side of the
+//! pair so this crate depends on nothing envoir-local — see README.md, "Extraction status").
 //!
 //! ## Modules
 //!

@@ -21,9 +21,13 @@ func main() {
 		fatal("run this from inside the envoir checkout (need crates/ and bindings/go/): %v", err)
 	}
 	var srcs []string
+	// Both manifests, not just the binding's. dmtap-sync's Cargo.toml selects the version and
+	// features of dmtap-core that get compiled INTO the artifact, so a change there moves the bytes
+	// exactly as a change to a .rs file does — it was simply not being watched.
 	for _, pat := range []string{
 		"crates/dmtap-sync-wasm/src/*.rs", "crates/dmtap-sync/src/*.rs",
-		"crates/dmtap-sync-wasm/Cargo.toml", "crates/dmtap-sync-wasm/build-abi.sh",
+		"crates/dmtap-sync-wasm/Cargo.toml", "crates/dmtap-sync/Cargo.toml",
+		"crates/dmtap-sync-wasm/build-abi.sh",
 	} {
 		m, _ := filepath.Glob(filepath.Join(root, pat))
 		for _, p := range m {

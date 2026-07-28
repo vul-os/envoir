@@ -32,9 +32,20 @@ import (
 // The frozen vectors live in the sibling spec repo; the native trace lives beside the Rust harness
 // that records it.
 const (
-	vectorsPath     = "../../../dmtap/conformance/vectors/sync_vectors.json"
+	defaultKotvaDir = "../../../kotva"
 	nativeTracePath = "../../crates/dmtap-sync-wasm/test/native-trace.json"
 )
+
+// vectorsPath resolves the frozen Sync vectors inside the sibling KOTVA spec repo. `KOTVA_DIR`
+// overrides the default sibling layout so CI can place the checkout anywhere — the same override
+// the Rust and JS halves of this proof read, so one variable drives all three surfaces.
+func vectorsPath() string {
+	dir := os.Getenv("KOTVA_DIR")
+	if dir == "" {
+		dir = defaultKotvaDir
+	}
+	return filepath.Join(dir, "conformance/vectors/sync_vectors.json")
+}
 
 // --- fixture ------------------------------------------------------------------------------------
 
@@ -51,13 +62,14 @@ func load(t *testing.T) *fixture {
 	t.Helper()
 	ctx := context.Background()
 
-	raw, err := os.ReadFile(vectorsPath)
+	vp := vectorsPath()
+	raw, err := os.ReadFile(vp)
 	if err != nil {
 		// Never skipped. This suite IS the conformance proof, and a proof that quietly does not run
 		// when the spec repo is not checked out is worse than no proof, because it reports success.
 		t.Fatalf("the frozen vectors are missing at %s: %v\n"+
 			"This suite is the conformance proof; it must never be skipped because the sibling "+
-			"spec repo is not checked out.", mustAbs(vectorsPath), err)
+			"spec repo is not checked out.", mustAbs(vp), err)
 	}
 	file := decodeJSON(string(raw))
 

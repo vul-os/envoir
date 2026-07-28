@@ -96,6 +96,22 @@ pub struct Vector {
     pub note: String,
 }
 
+/// Root of the sibling KOTVA spec repo — the owner of `conformance/suite.json` and of every vector
+/// file this crate cross-references (`vectors/{pub,pubsub,sync}_vectors.json`).
+///
+/// Defaults to `../kotva` beside this workspace, which is the developer checkout layout the
+/// workspace manifest documents (`[workspace.metadata.dmtap] spec = "../kotva/"`). `KOTVA_DIR`
+/// overrides it so CI can place the checkout wherever the runner puts it, and so a specific spec
+/// revision can be pointed at without moving directories around — see `.github/workflows/ci.yml`,
+/// which runs the suite against BOTH the tag this workspace compiles `kotva-core` from and the
+/// spec repo's moving `main`.
+pub fn spec_repo_dir() -> std::path::PathBuf {
+    match std::env::var_os("KOTVA_DIR") {
+        Some(dir) if !dir.is_empty() => std::path::PathBuf::from(dir),
+        _ => std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../kotva"),
+    }
+}
+
 /// Load and parse `vectors.json` from a path.
 pub fn load_vectors(path: &std::path::Path) -> Result<VectorFile, String> {
     let text = std::fs::read_to_string(path)
@@ -113,8 +129,8 @@ pub struct SuiteFile {
     pub cases: Vec<SuiteCase>,
 }
 
-/// A `vector` field in `suite.json` is either a single vector name or a short list of names
-/// (e.g. `DMTAP-NAME-05` compares two vectors).
+/// A `vector` (or `reuses_vector`) field in `suite.json` is either a single vector name or a short
+/// list of names (e.g. `DMTAP-NAME-05` compares two vectors).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum VectorRef {
@@ -143,10 +159,27 @@ pub struct SuiteCase {
     pub operation: String,
     #[serde(default)]
     pub vector: Option<VectorRef>,
+    /// The catalog's OTHER way of naming vectors: a case that does not own a vector of its own but
+    /// drives one (or more) that another case owns. `conformance/README.md` step 2 states the two
+    /// spellings are equivalent for a runner — "If the case has a `vector` (or `reuses_vector`),
+    /// load that entry from `vectors.json`" — and SUITE.md's row for the one `vectored` case that
+    /// uses it (`DMTAP-NAME-05`) says exactly that: "reuses `keyname_key_ones` /
+    /// `keyname_key_twos`". Ignoring this field made that case report as a coverage gap that did
+    /// not exist.
+    #[serde(default)]
+    pub reuses_vector: Option<VectorRef>,
     #[serde(default)]
     pub input: Option<Value>,
     pub expect: Value,
     pub status: String,
+}
+
+impl SuiteCase {
+    /// The vector names this case drives, under either catalog spelling. `vector` wins when both
+    /// are present (a case that owns a vector and also cross-references another).
+    pub fn vector_names(&self) -> Option<Vec<&str>> {
+        self.vector.as_ref().or(self.reuses_vector.as_ref()).map(VectorRef::names)
+    }
 }
 
 pub fn load_suite(path: &std::path::Path) -> Result<SuiteFile, String> {
@@ -833,10 +866,11 @@ pub fn run_suite_case(case: &SuiteCase, results: &BTreeMap<String, Verdict>) -> 
 }
 
 fn run_vectored_case(case: &SuiteCase, results: &BTreeMap<String, Verdict>) -> CaseOutcome {
-    let Some(vref) = &case.vector else {
-        return CaseOutcome::Fail("status=vectored but no `vector` field".into());
+    let Some(names) = case.vector_names() else {
+        return CaseOutcome::Fail(
+            "status=vectored but neither a `vector` nor a `reuses_vector` field".into(),
+        );
     };
-    let names = vref.names();
 
     // One special multi-vector meta-check the catalog defines (DMTAP-NAME-05): two key-name
     // vectors' encoded names MUST differ. Every other vectored case is single-vector.
@@ -931,26 +965,38 @@ pub fn run_all_suite_cases(
         .iter()
         .map(|c| {
             let mut outcome = run_suite_case(c, results);
+            // The inequality half of `keyname_distinct`. This block used to be three nested
+            // `if let`/`if` guards with NO else arms, so every way of not being able to run the
+            // check — no vector reference, a reference under `reuses_vector` instead of `vector`,
+            // a list that is not exactly two long — left the case reporting Pass while asserting
+            // nothing. It now fails closed on each of those, naming what it could not verify.
             if c.operation == "keyname_distinct" && outcome == CaseOutcome::Pass {
-                if let Some(vref) = &c.vector {
-                    let names = vref.names();
-                    if names.len() == 2 {
-                        let a = by_name.get(names[0]).and_then(|v| v.expected.get("name")).and_then(Value::as_str);
-                        let b = by_name.get(names[1]).and_then(|v| v.expected.get("name")).and_then(Value::as_str);
+                outcome = match c.vector_names().as_deref() {
+                    Some([one, two]) => {
+                        let a = by_name.get(one).and_then(|v| v.expected.get("name")).and_then(Value::as_str);
+                        let b = by_name.get(two).and_then(|v| v.expected.get("name")).and_then(Value::as_str);
                         match (a, b) {
-                            (Some(a), Some(b)) if a == b => {
-                                outcome = CaseOutcome::Fail(format!(
-                                    "keyname_distinct: {} and {} produced the SAME name `{a}`",
-                                    names[0], names[1]
-                                ));
-                            }
-                            (Some(_), Some(_)) => {}
-                            _ => {
-                                outcome = CaseOutcome::Fail("keyname_distinct: could not read both names".into());
-                            }
+                            (Some(a), Some(b)) if a == b => CaseOutcome::Fail(format!(
+                                "keyname_distinct: {one} and {two} produced the SAME name `{a}`"
+                            )),
+                            (Some(_), Some(_)) => CaseOutcome::Pass,
+                            _ => CaseOutcome::Fail(format!(
+                                "keyname_distinct: could not read `expected.name` for both of \
+                                 `{one}` and `{two}` — the name-inequality MUST was NOT verified"
+                            )),
                         }
                     }
-                }
+                    Some(other) => CaseOutcome::Fail(format!(
+                        "keyname_distinct needs exactly 2 vector names, got {} ({other:?}) — the \
+                         name-inequality MUST was NOT verified",
+                        other.len()
+                    )),
+                    None => CaseOutcome::Fail(
+                        "keyname_distinct case names no vectors (neither `vector` nor \
+                         `reuses_vector`) — the name-inequality MUST was NOT verified"
+                            .into(),
+                    ),
+                };
             }
             (c.id.clone(), outcome)
         })

@@ -1,6 +1,6 @@
 # `dmtapsync` — the DMTAP Sync engine, callable from Go
 
-The shared sync engine ([`substrate/SYNC.md`](../../../dmtap/substrate/SYNC.md)) as a Go package: the
+The shared sync engine ([`substrate/SYNC.md`](../../../kotva/substrate/SYNC.md)) as a Go package: the
 six-kind CRDT algebra, COSE_Sign1-signed operations, HLC total order, observable-state snapshots,
 version vectors and range-Merkle reconciliation — **without cgo**.
 
@@ -27,7 +27,7 @@ already correctly predicted the cr-sqlite dead end. cgo would break cross-compil
 the products this exists to serve: a `cdylib` per target OS/arch, a C toolchain at build time, and
 a fresh class of memory-safety-at-the-boundary bugs.
 
-[`BINDINGS.md` §5](../../../dmtap/substrate/BINDINGS.md) costs three options — cgo, a sidecar
+[`BINDINGS.md` §5](../../../kotva/substrate/BINDINGS.md) costs three options — cgo, a sidecar
 process, and a pure-Go WASM runtime — and recommends the third for any product carrying a pure-Go
 constraint. This is that option, built.
 
@@ -54,10 +54,18 @@ Two things turned out differently from the plan, both worth knowing:
 
 ## Getting started
 
-The embedded module is **build output, not source** — it is gitignored. Generate it once:
+Nothing to build: `dmtap_sync_abi.wasm` is **committed**, so `go get` works from a plain proxy
+fetch. (This reverses an earlier position that it should be gitignored — a Go module has no build
+step, so a gitignored artifact makes the package uncompilable for anyone consuming it normally, and
+both adopting products ended up vendoring it by hand. `embed.go` explains the reversal in full.)
+
+Because it is committed, it is tied to its source explicitly: `wasm_provenance.json` records a
+digest over every Rust input and `provenance_test.go` fails when the source has moved. After
+changing the Rust, rebuild **and** re-record:
 
 ```sh
-crates/dmtap-sync-wasm/build-abi.sh     # or: go generate ./bindings/go
+crates/dmtap-sync-wasm/build-abi.sh                    # or: go generate ./bindings/go
+(cd bindings/go && go run ./internal/genprovenance)     # no go.mod at the repo root
 ```
 
 Requires `rustup target add wasm32-unknown-unknown`. `wasm-opt` (binaryen) is optional but roughly
@@ -80,7 +88,7 @@ state, err := eng.ObservableState()
 root, err := eng.StateRoot()
 ```
 
-Refusals carry the [§12](../../../dmtap/substrate/SYNC.md) registry entry, so branch on the code
+Refusals carry the [§12](../../../kotva/substrate/SYNC.md) registry entry, so branch on the code
 rather than on prose:
 
 ```go
@@ -193,7 +201,7 @@ byte-identical to the native Rust trace.
 
 ## Cost
 
-**Embedded artifact: 420,951 bytes (411 KiB), 162,426 bytes gzipped.** It lands in every binary that
+**Embedded artifact: 426,957 bytes (416 KiB), 164,352 bytes gzipped.** It lands in every binary that
 imports this package; `dmtapsync.EngineWasmSize` exposes it so a product can check rather than trust.
 
 | | |
@@ -273,10 +281,9 @@ that an implementation exposing none is not thereby incomplete.
 For a product currently running a hand-rolled engine (flowstock's Go HLC+oplog, the OS's fabric
 LWW/OR-set, whatsacc):
 
-1. **Generate the artifact in your build.** Add `crates/dmtap-sync-wasm/build-abi.sh` to your build
-   or CI step before `go build`. It is gitignored, so a fresh checkout does not compile without it —
-   deliberately: a missing file is a build error you cannot ignore, a stale one is a bug you can
-   ship.
+1. **Nothing to generate.** The artifact is committed, so `go get` is the whole install. What
+   protects you from the stale-blob failure that argument was originally about is
+   `provenance_test.go`, which lives here rather than in each adopter.
 
 2. **Create one `Runtime` at startup, not per operation.** This is the single biggest performance
    mistake available. If your process is short-lived, add `WithCompilationCacheDir`.

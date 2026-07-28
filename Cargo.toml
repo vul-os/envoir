@@ -29,6 +29,13 @@ members = [
 # workspace root never pulls patala in; only `cargo build -p dmtap-postage-patala` /
 # `cargo test -p dmtap-postage-patala` does. `dmtap-seam` alone stays the default, dependency-free
 # postage seam (see `crates/dmtap-seam/src/postage.rs`).
+#
+# ONE SPELLING BREAKS THAT, and it cost a red CI: `--workspace` OVERRIDES `default-members` and
+# selects every member, this one included — so `cargo build --workspace` in a checkout without the
+# sibling patala repo fails to resolve, and `cargo tree --workspace` reports a patala dependency
+# for a build that has none. Neither is a defect in the seam. Use the bare form (which is what
+# `.github/workflows/ci.yml` does) whenever "the standalone set" is what you mean, and reach for
+# `-p dmtap-postage-patala` when you mean the adapter.
 default-members = [
     "node",
     "integration",
@@ -60,5 +67,6 @@ dmtap-core = { package = "kotva-core", git = "https://github.com/vul-os/kotva", 
 dmtap-mail = { package = "kotva-mail", git = "https://github.com/vul-os/kotva", tag = "core-v0.2.0" }
 
 [workspace.metadata.dmtap]
-spec = "../dmtap/"   # the DMTAP spec repo (sibling; the spec no longer lives in this repo)
+spec = "../kotva/"   # the DMTAP spec repo (sibling; the spec no longer lives in this repo, and
+                     # the repo itself was renamed dmtap -> kotva)
 license = "MIT OR Apache-2.0"

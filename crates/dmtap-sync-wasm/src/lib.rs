@@ -1,7 +1,7 @@
 //! # dmtap-sync-wasm — the browser/JS binding for the shared sync engine
 //!
 //! A `wasm-bindgen` wrapper over [`dmtap_sync`], the reference implementation of DMTAP substrate
-//! capability ③ (`dmtap/substrate/SYNC.md`). It exists so a JavaScript product can **replace its
+//! capability ③ (`kotva/substrate/SYNC.md`). It exists so a JavaScript product can **replace its
 //! hand-rolled CRDT engine with the same compiled algebra** every other surface runs, rather than
 //! re-reading the spec in a fifth language and hoping its CBOR encoder agrees bit-for-bit.
 //!

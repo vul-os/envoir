@@ -1,7 +1,10 @@
 //! The `abi` surface's entropy backend: **there isn't one, and that is deliberate.**
 //!
-//! `dmtap-core` pulls three `getrandom` majors transitively (`ed25519-dalek`, `x-wing`, `ml-dsa`).
-//! On `wasm32-unknown-unknown` none of them links unless it is told where entropy comes from. The
+//! `dmtap-core` pulls two `getrandom` majors transitively on `wasm32-unknown-unknown`: **0.2** via
+//! `hpke` → `p256` → `elliptic-curve` → `crypto-bigint` → `rand_core` 0.6, and **0.4** via `x-wing`
+//! → `ml-kem` → `sha3` → `digest` → `crypto-common`. (It used to be three. `getrandom` 0.3 left the
+//! wasm32 graph and the crate stopped naming it — see the note on [`__getrandom_v03_custom`].)
+//! Neither of them links unless it is told where entropy comes from. The
 //! JS surface answers "the host's `crypto.getRandomValues`". This surface cannot give that answer:
 //! the Go binding instantiates the module with **no host functions at all** — no clock, no
 //! filesystem, no network, no imports of any kind — which is a large part of why it is easy to
@@ -24,7 +27,7 @@
 ///
 /// `getrandom` 0.3/0.4 select their custom backend through a `--cfg getrandom_backend="custom"`
 /// RUSTFLAG rather than a Cargo feature, so `build-abi.sh` sets that flag and
-/// [`__getrandom_v03_custom`] below serves both of them.
+/// [`__getrandom_v03_custom`] below serves them.
 #[cfg(all(target_arch = "wasm32", feature = "abi"))]
 fn unavailable(_buf: &mut [u8]) -> Result<(), getrandom_02::Error> {
     Err(getrandom_02::Error::UNSUPPORTED)
@@ -33,7 +36,17 @@ fn unavailable(_buf: &mut [u8]) -> Result<(), getrandom_02::Error> {
 #[cfg(all(target_arch = "wasm32", feature = "abi"))]
 getrandom_02::register_custom_getrandom!(unavailable);
 
-/// The 0.3/0.4 custom backend, same refusal.
+/// The 0.4 custom backend, same refusal.
+///
+/// The symbol name is `__getrandom_v03_custom` because 0.4 kept 0.3's spelling — both majors
+/// `extern`-declare this exact name, each against **its own** `Error` type. This definition is
+/// typed against 0.4's, because 0.4 is the only one of the two in the wasm32 graph
+/// (`cargo tree -p dmtap-sync-wasm --target wasm32-unknown-unknown -i getrandom@0.3.x` finds no
+/// requirer). It was previously typed against 0.3's `Error`, with 0.3 declared as a direct
+/// dependency purely to name that type — which worked only because the two `Error`s happen to have
+/// identical layout, and kept an otherwise-unused crate in the tree. If 0.3 ever re-enters the
+/// graph the link fails loudly for want of a definition, which is the correct direction: this file
+/// exists to refuse, not to fabricate.
 ///
 /// # Safety
 ///
@@ -44,6 +57,6 @@ getrandom_02::register_custom_getrandom!(unavailable);
 pub unsafe extern "Rust" fn __getrandom_v03_custom(
     _dest: *mut u8,
     _len: usize,
-) -> Result<(), getrandom_03::Error> {
-    Err(getrandom_03::Error::UNSUPPORTED)
+) -> Result<(), getrandom_04::Error> {
+    Err(getrandom_04::Error::UNSUPPORTED)
 }

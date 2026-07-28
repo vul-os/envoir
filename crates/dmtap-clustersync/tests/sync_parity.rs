@@ -1,15 +1,21 @@
-//! **Parity with the §5.6 reference** (`dmtap-clustersync`).
+//! **Parity between the §5.6 reference (this crate) and the substrate** (`dmtap-sync`).
 //!
 //! `SYNC.md` §1 is explicit that the substrate's semantics are *grounded in* §5.6, and that where
-//! the two agree, §5.6 remains the normative home of the single-owner device-cluster profile. This
-//! crate therefore must not quietly re-invent the three CRDTs it inherits: for the same logical
+//! the two agree, §5.6 remains the normative home of the single-owner device-cluster profile. The
+//! substrate therefore must not quietly re-invent the three CRDTs it inherits: for the same logical
 //! inputs, its [`OrSet`](dmtap_sync::OrSet), [`LwwMap`](dmtap_sync::LwwMap) and
-//! [`DeathReg`](dmtap_sync::DeathReg) must reach the same decisions as the reference.
+//! [`DeathReg`](dmtap_sync::DeathReg) must reach the same decisions as the reference here.
 //!
 //! The types cannot be *shared* — §5.6's HLC is `device`-flavoured and its value type is core's
 //! unsigned-integer-only `Cv`, while the substrate's `cv` must also carry negative integers (§4.1)
 //! — so the reuse obligation is discharged here, executably: same ops in, same observable answer
 //! out, including the exact-tie tiebreaks that are the easiest thing to get subtly wrong.
+//!
+//! This file used to live in `dmtap-sync/tests/clustersync_parity.rs` and assert the same things in
+//! the same direction. It was moved to this side of the pair so that `dmtap-sync` — the crate four
+//! products depend on, and the one packaged to leave this repo — carries no dependency on an
+//! envoir-local crate, not even a dev one. Parity is a claim about a *pair*; either crate can host
+//! the check, and only one of the two is going anywhere.
 
 use dmtap_clustersync as cs;
 use dmtap_core::cbor::Cv;

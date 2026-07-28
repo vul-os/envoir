@@ -8,7 +8,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use conformance_runner::{
-    check_all_vectors, load_suite, load_vectors, run_all_suite_cases, CaseOutcome, VectorFile, Verdict,
+    check_all_vectors, load_suite, load_vectors, run_all_suite_cases, spec_repo_dir, CaseOutcome,
+    SuiteFile, VectorFile, Verdict,
 };
 
 fn vectors_path() -> PathBuf {
@@ -16,7 +17,7 @@ fn vectors_path() -> PathBuf {
 }
 
 fn suite_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../kotva/conformance/suite.json")
+    spec_repo_dir().join("conformance/suite.json")
 }
 
 /// The DMTAP-PUB (§22) / CAD-profile (§23) known-answer vectors live in a SEPARATE file in the
@@ -25,7 +26,7 @@ fn suite_path() -> PathBuf {
 /// The runner recomputes them via `dmtap_core::pubobj`, so a passing run proves the Rust reference
 /// reproduces the Python reference byte-for-byte.
 fn pub_vectors_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../kotva/conformance/vectors/pub_vectors.json")
+    spec_repo_dir().join("conformance/vectors/pub_vectors.json")
 }
 
 /// Load `vectors.json` and, when the sibling spec repo is present, merge in `pub_vectors.json`.
@@ -161,17 +162,22 @@ fn suite_json_cross_reference_matches_known_state() {
          expectation needs updating for). Full failure detail: {fails:?}"
     );
 
-    // Sanity: the catalog has grown past its original shape (124 cases as of writing, up from 104;
-    // see SUITE.md/README) and this crate now executes the large majority of them — 116/124 (up from
-    // 111/124 after the suite-negotiation / tier-enforcement / mix-descriptor-freshness / pinned-
-    // domain-directory / random-mode gateway-alias reference surfaces landed and were wired here),
-    // with only 8 honestly left `Skipped` for behavior no crate in this workspace can exercise yet
-    // (see the `skip_reason` table in `construction.rs`). Rather than pin an exact
-    // total (which would break on every new spec case), just sanity-check the three buckets sum
-    // correctly and that both "some cases pass" and "some cases are honestly skipped" hold.
+    // Coverage floor, honestly stated. The catalog is 367 cases as of 2026-07-28 (it was 124 when
+    // the sentence this replaces was written, and 104 before that — the old "116/124" claim had
+    // gone stale by a factor of three, which is why a *count* now guards it instead of a comment).
+    // This crate executes 182 of them and 185 come back `Skipped` with a printed reason, for
+    // behaviour no crate in this workspace can exercise yet (see the `skip_reason` table in
+    // `construction.rs`). The TOTAL is deliberately not pinned — every new spec case would break
+    // that — but the EXECUTED count is a floor: the catalog growing can only add skips, so this
+    // number falling means real coverage was lost.
     assert_eq!(pass + skip + fails.len(), outcomes.len());
     assert!(skip > 0, "expected at least some construction-todo cases to be skipped-with-note");
-    assert!(pass > 0, "expected at least some vectored/self-contained cases to pass");
+    assert!(
+        pass >= 182,
+        "executed suite.json coverage FELL to {pass} (was 182 at 2026-07-28) — real coverage was \
+         lost, or cases were removed from the catalog. {skip} skipped, {} failed.",
+        fails.len()
+    );
 }
 
 /// No silent coverage gaps: EVERY case marked `status: "vectored"` in `suite.json` MUST actually
@@ -209,6 +215,154 @@ fn every_vectored_case_is_actually_executed() {
         silently_skipped.is_empty(),
         "these `vectored` cases were SKIPPED instead of executed (coverage gap): {silently_skipped:?}"
     );
+}
+
+/// Regression guard for the catalog's SECOND vector-reference spelling.
+///
+/// `conformance/README.md` step 2 makes `vector` and `reuses_vector` equivalent for a runner ("If
+/// the case has a `vector` (or `reuses_vector`), load that entry from `vectors.json`"), and
+/// SUITE.md's `DMTAP-NAME-05` row spells it out: "reuses `keyname_key_ones` /
+/// `keyname_key_twos`". This crate's suite reader honoured only `vector`, so that case reported
+/// `status=vectored but no `vector` field` — a phantom coverage gap in a case that is in fact
+/// fully byte-backed. This test pins the fix in both directions: the spelling must resolve, and
+/// the cases using it must actually execute.
+#[test]
+fn cases_that_name_vectors_via_reuses_vector_are_executed() {
+    let sp = suite_path();
+    if !sp.exists() {
+        eprintln!(
+            "SKIPPED (loudly): {} is absent, so NOTHING about the sibling KOTVA catalog was \
+             verified here — not the `reuses_vector` spelling, not DMTAP-NAME-05's key-name \
+             inequality. CI must check KOTVA out beside this repo (see .github/workflows/ci.yml).",
+            sp.display()
+        );
+        return;
+    }
+    let (vf, results) = load_merged();
+    let suite = load_suite(&sp).expect("suite.json must parse");
+    let outcomes: BTreeMap<String, CaseOutcome> =
+        run_all_suite_cases(&suite, &vf, &results).into_iter().collect();
+
+    // Coverage count, not a vacuous loop: the catalog must still contain cases using this
+    // spelling. If it stops doing so, this guard has nothing to prove and says so.
+    let reusing: Vec<&str> =
+        suite.cases.iter().filter(|c| c.reuses_vector.is_some()).map(|c| c.id.as_str()).collect();
+    assert!(
+        reusing.len() >= 4,
+        "expected >=4 `reuses_vector` cases in suite.json (DMTAP-PRE-05/NAME-05/VAL-02/VAL-08 at \
+         the time of writing), found {}: {reusing:?}",
+        reusing.len()
+    );
+
+    // Every case naming its vectors ONLY via `reuses_vector` must still resolve them — no case may
+    // come back with the "no vector field" schema complaint.
+    let unresolved: Vec<(&str, &str)> = suite
+        .cases
+        .iter()
+        .filter(|c| c.vector.is_none() && c.reuses_vector.is_some())
+        .filter_map(|c| match outcomes.get(&c.id) {
+            Some(CaseOutcome::Fail(why)) if why.contains("no `vector` field") || why.contains("`reuses_vector` field") => {
+                Some((c.id.as_str(), why.as_str()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        unresolved.is_empty(),
+        "these cases name vectors via `reuses_vector` and the runner failed to resolve them: \
+         {unresolved:#?}"
+    );
+
+    // And the one such case that is `status: vectored` — the §3.9.6/§18.9.17 distinct-names MUST —
+    // must PASS, having actually compared two different committed key-names.
+    let name05 = outcomes.get("DMTAP-NAME-05").expect("DMTAP-NAME-05 must exist in suite.json");
+    assert_eq!(
+        *name05,
+        CaseOutcome::Pass,
+        "DMTAP-NAME-05 (keyname_distinct over keyname_key_ones/keyname_key_twos) must execute and \
+         pass, got {name05:?}"
+    );
+}
+
+// ------------------------------------------------------------------------------------------
+// Synthetic proof that the `keyname_distinct` check FAILS CLOSED.
+//
+// The three tests above can only show the real catalog passing. Passing is also what a check that
+// asserts nothing produces, which is exactly the bug this file previously carried: the
+// name-inequality assertion sat behind un-elsed `if let`/`if` guards, so a case that named its
+// vectors under `reuses_vector`, or named the wrong number of them, sailed through as Pass. These
+// tests feed the engine hand-built catalogs where the MUST is VIOLATED or unverifiable and require
+// a Fail. They need no sibling repo, so they run in a bare checkout too.
+// ------------------------------------------------------------------------------------------
+
+fn synthetic(case: serde_json::Value, name_a: &str, name_b: &str) -> CaseOutcome {
+    let suite: SuiteFile =
+        serde_json::from_value(serde_json::json!({ "format": "t", "cases": [case] })).unwrap();
+    let vectors: VectorFile = serde_json::from_value(serde_json::json!({
+        "format": "t", "suite": "t", "generated_by": "t", "methodology": "t",
+        "vectors": [
+            { "name": "kn_a", "operation": "keyname_encode", "input": {}, "expected": { "name": name_a } },
+            { "name": "kn_b", "operation": "keyname_encode", "input": {}, "expected": { "name": name_b } },
+        ],
+    }))
+    .unwrap();
+    let results: BTreeMap<String, Verdict> =
+        [("kn_a".to_string(), Verdict::Pass), ("kn_b".to_string(), Verdict::Pass)].into();
+    run_all_suite_cases(&suite, &vectors, &results).remove(0).1
+}
+
+fn keyname_case(vector_field: &str, value: serde_json::Value) -> serde_json::Value {
+    let mut case = serde_json::json!({
+        "id": "SYNTH-01", "level": "Core", "category": "NAME", "req": "MUST",
+        "checks": "distinct keys yield distinct names", "operation": "keyname_distinct",
+        "expect": { "outcome": "accept" }, "status": "vectored",
+    });
+    if !vector_field.is_empty() {
+        case[vector_field] = value;
+    }
+    case
+}
+
+#[test]
+fn keyname_distinct_fails_when_the_two_names_are_equal() {
+    for field in ["vector", "reuses_vector"] {
+        let outcome = synthetic(
+            keyname_case(field, serde_json::json!(["kn_a", "kn_b"])),
+            "same-name",
+            "same-name",
+        );
+        match outcome {
+            CaseOutcome::Fail(why) => assert!(
+                why.contains("SAME name"),
+                "expected the name-collision failure via `{field}`, got: {why}"
+            ),
+            other => panic!(
+                "two IDENTICAL key-names must FAIL DMTAP-NAME-05 when named via `{field}`, got {other:?}"
+            ),
+        }
+    }
+}
+
+#[test]
+fn keyname_distinct_fails_closed_when_it_cannot_run() {
+    // No vector reference at all under either spelling.
+    match synthetic(keyname_case("", serde_json::Value::Null), "a", "b") {
+        CaseOutcome::Fail(why) => assert!(why.contains("no vectors") || why.contains("neither")),
+        other => panic!("a keyname_distinct case naming no vectors must FAIL, got {other:?}"),
+    }
+    // Wrong arity — one name, so there is nothing to compare.
+    match synthetic(keyname_case("vector", serde_json::json!("kn_a")), "a", "b") {
+        CaseOutcome::Fail(why) => assert!(
+            why.contains("exactly 2 vector"),
+            "expected an arity failure, got: {why}"
+        ),
+        other => panic!("a 1-vector keyname_distinct case must FAIL, got {other:?}"),
+    }
+    // A referenced vector that is missing from vectors.json: the names cannot be read.
+    match synthetic(keyname_case("reuses_vector", serde_json::json!(["kn_a", "kn_missing"])), "a", "b") {
+        CaseOutcome::Fail(_) => {}
+        other => panic!("an unresolvable vector reference must FAIL, got {other:?}"),
+    }
 }
 
 /// Regression guard for task item 3 (construction-todo cases): a meaningful number of them must

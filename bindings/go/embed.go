@@ -13,7 +13,10 @@ import _ "embed"
 // fetch. Rebuild it after changing the Rust with:
 //
 //	crates/dmtap-sync-wasm/build-abi.sh     # or: go generate ./bindings/go
-//	go run ./bindings/go/internal/genprovenance
+//	(cd bindings/go && go run ./internal/genprovenance)
+//
+// The parentheses are not decoration: there is no go.mod at the repo root, so `go run
+// ./bindings/go/internal/genprovenance` from there fails with "cannot find main module".
 //
 // Committing it was not the first choice. Gitignoring it was, on the reasoning that a missing file
 // is a build error you cannot ignore while a stale one is a bug you can ship — and that reasoning
@@ -28,9 +31,16 @@ import _ "embed"
 //
 // So the blob is tied to its source explicitly instead of implicitly. wasm_provenance.json records
 // a digest over every Rust input; provenance_test.go recomputes it and fails when the source has
-// moved. It hashes rather than rebuilds, so it needs no Rust toolchain, and it skips cleanly when
-// the crates/ tree is absent (a standalone module fetch has nothing to check). Adopters no longer
-// need to vendor, and the guard lives here once instead of in each of them.
+// moved. It hashes rather than rebuilds, so it needs no Rust toolchain. Adopters no longer need to
+// vendor, and the guard lives here once instead of in each of them.
+//
+// Absent sources are not one case but two, and the guard separates them: a standalone module fetch
+// (no crates/ tree AND no repo around it) has nothing to check, and skips with a NOTICE on stderr;
+// a checkout in which crates/ is simply GONE is drift, and FAILS. That distinction is load-bearing,
+// because dmtap-sync and dmtap-sync-wasm are being prepared to move to their own crate, and the
+// one-condition version of this check would have gone permanently, silently green on the day they
+// did. The NOTICE is visible under `go test -v`/`-json` but not under a bare `go test`, which
+// discards a passing package's output — see provenance_test.go for why that is where it stops.
 //
 // Do not substitute a module built any other way. The whole value of this binding is that these are
 // the same bytes of algebra the native Rust runner and the browser binding execute, which

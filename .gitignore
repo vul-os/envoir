@@ -11,5 +11,13 @@ dist/
 # Committing them once already cost a real bug — a stale checked-in module kept aborting on free
 # long after the source it was built from had been fixed, because nothing ties a binary blob in git
 # to the code that produced it. Generating them at build time makes that class of drift impossible.
+#
+# The npm-side packages below are still handled that way. `bindings/go/dmtap_sync_abi.wasm` is NOT,
+# and is deliberately committed: a Go module has no build step, so gitignoring it makes the package
+# uncompilable for anyone who `go get`s it. That artifact buys back the guarantee explicitly instead
+# — `wasm_provenance.json` + `provenance_test.go` fail when it drifts from its source. See
+# `bindings/go/embed.go` for the full reasoning.
 crates/dmtap-sync-wasm/pkg/
 crates/dmtap-sync-wasm/pkg-node/
+# build.sh's third target (`./build.sh web`), which was never listed here.
+crates/dmtap-sync-wasm/pkg-web/

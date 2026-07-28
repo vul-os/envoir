@@ -19,7 +19,11 @@ import * as sync from '../pkg-node/dmtap_sync.js';
 import { runVectors, NOT_COVERED, hex, unhex, refusal, RECEIVER_NOW_MS } from './trace.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const VECTORS = join(here, '../../../../dmtap/conformance/vectors/sync_vectors.json');
+// The sibling KOTVA spec repo owns the frozen vectors. `KOTVA_DIR` overrides the default sibling
+// layout so CI can put the checkout wherever it likes — the same override the Rust and Go halves
+// of this proof read, so one variable drives all three surfaces.
+const KOTVA_DIR = process.env.KOTVA_DIR || join(here, '../../../../kotva');
+const VECTORS = join(KOTVA_DIR, 'conformance/vectors/sync_vectors.json');
 const NATIVE_TRACE = join(here, 'native-trace.json');
 
 // --- the signing host -----------------------------------------------------------------------

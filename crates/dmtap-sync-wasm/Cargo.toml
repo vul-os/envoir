@@ -1,12 +1,23 @@
+# dmtap-sync-wasm — the binding crate. It moves WITH `dmtap-sync`, never apart from it: it is the
+# same algebra behind a different boundary, and a version of it built against a different
+# `dmtap-sync` than the one next to it is exactly the drift `bindings/go/provenance_test.go` exists
+# to catch. See ../dmtap-sync/README.md ("Extraction status").
 [package]
 name = "dmtap-sync-wasm"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
 description = "The browser/JS binding for the DMTAP Sync substrate (substrate/SYNC.md, substrate/BINDINGS.md §3): a wasm-bindgen wrapper exposing dmtap-sync's signed CRDT operation algebra, HLC, observable-state snapshots, version vectors and range-Merkle reconciliation to JavaScript — the SAME compiled core, never a re-implementation. No private key crosses the boundary: op and snapshot signing are detached (preimage out, signature in)."
-repository = "https://example.invalid/envoir"
-publish = false
+repository = "https://github.com/vul-os/envoir"
+readme = "README.md"
+keywords = ["crdt", "sync", "wasm", "dmtap", "bindings"]
+categories = ["wasm", "api-bindings", "data-structures"]
+# `publish` was `false` here — inherited from the test/tool crates it was written alongside, not
+# from a decision about this crate. It is a real library (rlib as well as cdylib) and the Rust half
+# of a published binding, so it is left publishable. Note that publishing is BLOCKED upstream for a
+# different reason (see ../dmtap-sync/README.md); flipping this line back is a one-line revert if
+# the intent was in fact to keep the Rust crate off crates.io and ship only `pkg/` to npm.
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -25,7 +36,7 @@ crate-type = ["cdylib", "rlib"]
 # is what the Go artifact is built with, via `--no-default-features --features abi`.
 [features]
 default = ["js"]
-js = ["dep:wasm-bindgen", "getrandom_02/js", "getrandom_03/wasm_js", "getrandom_04/wasm_js"]
+js = ["dep:wasm-bindgen", "getrandom_02/js", "getrandom_04/wasm_js"]
 # The Go artifact's entropy story is the `custom` backend in `src/entropy.rs`, not the browser's
 # `crypto.getRandomValues` — see the RNG block below.
 abi = ["getrandom_02/custom"]
@@ -34,17 +45,21 @@ abi = ["getrandom_02/custom"]
 # The algebra. Everything this crate returns is produced by these two crates; the binding marshals
 # arguments and never re-implements a merge, a hash or an encoding (BINDINGS.md §4).
 dmtap-core = { workspace = true }
-dmtap-sync = { path = "../dmtap-sync" }
+# `version` alongside `path` so this manifest is publishable as-is: a path-only dependency has no
+# version requirement to put in the published metadata. In-workspace the path still wins, so this
+# changes nothing about what is compiled.
+dmtap-sync = { path = "../dmtap-sync", version = "0.1.0" }
 # The JS boundary + the structured argument/result encoding. `serde_json` is already a workspace
 # dependency (conformance-runner), so this adds no new third-party crate to the tree.
 serde_json = "1"
 wasm-bindgen = { version = "0.2", optional = true }
 
 # --- wasm32 RNG plumbing ------------------------------------------------------------------------
-# `dmtap-core` pulls three `getrandom` majors transitively (ed25519-dalek / x-wing / ml-dsa). None
-# of them compiles for `wasm32-unknown-unknown` without being told where entropy comes from, so the
-# binding crate names them explicitly. WHERE it points them at depends on the surface, and the two
-# answers are genuinely different:
+# `dmtap-core` pulls two `getrandom` majors transitively on this target — 0.2 via
+# hpke/p256/elliptic-curve/crypto-bigint/rand_core-0.6, and 0.4 via x-wing/ml-kem/sha3/digest/
+# crypto-common. Neither compiles for `wasm32-unknown-unknown` without being told where entropy
+# comes from, so the binding crate names them explicitly. WHERE it points them at depends on the
+# surface, and the two answers are genuinely different:
 #
 #   js   the host's `crypto.getRandomValues`, via wasm-bindgen. A browser has a real CSPRNG.
 #   abi  a `custom` backend that FAILS (`src/entropy.rs`). A wazero module is given no host
@@ -59,5 +74,9 @@ wasm-bindgen = { version = "0.2", optional = true }
 # must still LINK, which is the whole reason this block exists.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom_02 = { package = "getrandom", version = "0.2" }
-getrandom_03 = { package = "getrandom", version = "0.3" }
+# getrandom 0.3 was declared here too, and was DEAD: nothing in the wasm32 graph requires it
+# (`cargo tree -p dmtap-sync-wasm --target wasm32-unknown-unknown -i getrandom@0.3.4` lists this
+# crate as the only requirer). It existed to name the `Error` type of `entropy.rs`'s
+# `__getrandom_v03_custom` — a symbol 0.4 declares under the same 0.3-era name, so 0.4's own `Error`
+# is the correct type there and 0.3 is not needed at all. Removed; see src/entropy.rs.
 getrandom_04 = { package = "getrandom", version = "0.4" }
