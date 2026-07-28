@@ -1,8 +1,11 @@
 # Build and test gate for the Envoir reference implementation.
 #
-# This repo had no CI. 1462 tests and six machine-checked formal proofs existed
-# and nothing ran them on a push — which is how a committed conformance vector
-# came to assert the opposite of spec §1.1 while every local run stayed green.
+# This repo had no CI. Hundreds of tests and six machine-checked formal proofs
+# existed and nothing ran them on a push — which is how a committed conformance
+# vector came to assert the opposite of spec §1.1 while every local run stayed
+# green. (The figure this line used to quote, "1462 tests", predated 620a68c
+# carving the gateway out; the default-member suite is 759 tests across 72
+# binaries as of 2026-07-28, plus 31 JS and 49 Go across the other two surfaces.)
 #
 # The first version of this file was itself structurally red, in three ways that
 # all shared one root cause — it checked out ONLY this repo, while the test suite
