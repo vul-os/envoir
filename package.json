@@ -2,12 +2,10 @@
   "name": "envoir",
   "private": true,
   "version": "0.0.0",
-  "description": "Envoir monorepo tooling. See docs/SCREENSHOTS.md for the screenshotter and crates/dmtap-sync-wasm/README.md for the WASM sync binding.",
+  "description": "Envoir monorepo tooling. See docs/SCREENSHOTS.md for the screenshotter. The WASM sync binding MOVED to the KOTVA repo (crates/kotva-sync-wasm there); its npm build and `node --test` parity suite moved with it.",
   "type": "module",
   "scripts": {
     "screenshotter": "node docs/capture-screenshots.mjs",
-    "test:client": "node --test 'client/test/**/*.test.mjs'",
-    "test:sync-wasm": "node --test 'crates/dmtap-sync-wasm/test/*.test.mjs'",
-    "build:sync-wasm": "./crates/dmtap-sync-wasm/build.sh"
+    "test:client": "node --test 'client/test/**/*.test.mjs'"
   }
 }

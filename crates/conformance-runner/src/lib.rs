@@ -307,8 +307,14 @@ fn check_vector_inner(v: &Vector) -> Result<Verdict, String> {
             }
         }
         "safety_number" => {
-            let a = unhex(as_hex_str(&v.input, "ik_a_hex")?)?;
-            let b = unhex(as_hex_str(&v.input, "ik_b_hex")?)?;
+            // §3.4.1 is computed over the parties' whole-Identity CONTENT ADDRESSES, never over a
+            // bare `ik`. This arm used to read `ik_a_hex`/`ik_b_hex` and pass raw byte slices,
+            // which matched an older reference; the vectors it was checked against carried the
+            // same older shape, so the pair agreed with each other and with nothing else. Reading
+            // the spec repo's canonical vectors (see `vectors_path`) is what surfaced it: the
+            // fields are now `id_{a,b}_addr_hex` and the reference takes `&ContentId`.
+            let a = dmtap_core::id::ContentId(unhex(as_hex_str(&v.input, "id_a_addr_hex")?)?);
+            let b = dmtap_core::id::ContentId(unhex(as_hex_str(&v.input, "id_b_addr_hex")?)?);
             let want_num = as_hex_str(&v.expected, "safety_number")?;
             let want_hex = as_hex_str(&v.expected, "fingerprint_hex")?;
             let got_num = dmtap_core::safety::safety_number(&a, &b);

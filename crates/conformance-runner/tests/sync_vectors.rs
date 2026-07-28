@@ -1,6 +1,12 @@
 //! `cargo test`-visible gate over the **Sync substrate** vectors
 //! (`../kotva/conformance/vectors/sync_vectors.json`, `substrate/SYNC.md` §10), executed through
-//! the `dmtap-sync` reference crate.
+//! the reference crate — which now lives in that same repo as `kotva-sync`, consumed here under
+//! the unchanged Rust path `dmtap_sync::` via a cargo dependency-rename.
+//!
+//! This is the CONSUMER-side gate: it proves the crate *as envoir compiles it* still reproduces
+//! the frozen answers. KOTVA has its own gates beside the implementation
+//! (`crates/kotva-sync-wasm/tests/native_trace.rs`, `bindings/go/vectors_test.go`), which read the
+//! vectors in-tree and likewise fail closed.
 //!
 //! The counts are asserted **exactly**, in both directions: a regression in `dmtap-sync` fails
 //! here, and so does an upstream *fix* to an allowlisted vector (that makes it pass, which this
@@ -26,21 +32,26 @@ fn sync_vectors_path() -> PathBuf {
 #[test]
 fn sync_vectors_pass_except_the_documented_discrepancy() {
     let path = sync_vectors_path();
-    if !path.exists() {
-        // Skipping LOUDLY, naming what went unverified. The bare "— skipping" this replaces was
-        // the same shape as the bug this suite has already shipped: a green tick that means
-        // nothing ran. CI now checks KOTVA out beside this repo (`.github/workflows/ci.yml`) and
-        // fails closed if the checkout is incomplete, so this branch is a developer-machine
-        // affordance only — never the state a gate reports success from.
-        eprintln!(
-            "SKIPPED (loudly): {} does not exist, so NONE of the 24 frozen SYNC.md §10 vectors \
-             ran. NOT VERIFIED: that `dmtap-sync` reproduces the spec's known answers at all. \
-             Check the sibling KOTVA repo out at ../kotva, or point KOTVA_DIR at it.",
-            path.display()
-        );
-        return;
-    }
+    // FAILS CLOSED. This used to skip — loudly, but still skip — when the sibling KOTVA repo was
+    // absent, on the reasoning that it was a developer-machine affordance. That reasoning has
+    // expired, and leaving it would now be indefensible: this crate's MANDATORY gate
+    // (`run_over_vectors::all_vectors_pass`) reads its `vectors.json` from that same repo since the
+    // vector corpus was consolidated there, so a checkout without KOTVA cannot produce a green
+    // `cargo test -p conformance-runner` under any circumstances. The skip branch could therefore
+    // only ever have fired in a run that was already failing — it bought nothing and cost the one
+    // thing that matters, which is that a gate never reports success having run zero cases. That
+    // exact shape shipped here once already: a "24/24" that drove nothing.
+    assert!(
+        path.exists(),
+        "the frozen SYNC.md §10 vectors are missing at {}, so NONE of the 24 would run. NOT \
+         VERIFIED: that `dmtap-sync` (now `kotva-sync`, consumed from the KOTVA repo) reproduces \
+         the spec's known answers at all. Check KOTVA out at ../kotva, or point KOTVA_DIR at it. \
+         This is a hard failure on purpose: a conformance gate that passes without its vectors is \
+         worse than no gate.",
+        path.display()
+    );
     let vf = load_vectors(&path).expect("sync_vectors.json must load");
+    assert!(!vf.vectors.is_empty(), "sync_vectors.json loaded but is EMPTY — nothing was verified");
     assert_eq!(vf.vectors.len(), 24, "SYNC.md §10 freezes exactly 24 vectors");
 
     let mut passed = Vec::new();

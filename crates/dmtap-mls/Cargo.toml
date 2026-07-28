@@ -1,11 +1,14 @@
 [package]
 name = "dmtap-mls"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "Apache-2.0 OR MIT"
 description = "DMTAP MLS group layer (spec §5): real RFC 9420 groups via openmls, with the committer epoch-ordering seam"
-repository = "https://example.invalid/envoir"
+repository = "https://github.com/vul-os/envoir"
+homepage = "https://github.com/vul-os/envoir"
+keywords = ["dmtap", "mls", "rfc9420", "groups", "ratchet"]
+readme = "README.md"
 
 [dependencies]
 dmtap-core = { workspace = true }

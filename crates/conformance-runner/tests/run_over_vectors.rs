@@ -5,15 +5,28 @@
 //! here rather than silently drifting.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use conformance_runner::{
     check_all_vectors, load_suite, load_vectors, run_all_suite_cases, spec_repo_dir, CaseOutcome,
     SuiteFile, VectorFile, Verdict,
 };
 
+/// The known-answer vectors. THE SPEC REPO OWNS THESE.
+///
+/// This used to be `CARGO_MANIFEST_DIR/vectors.json` — a THIRD copy of the vector set, alongside
+/// the spec repo's `conformance/vectors/vectors.json` and the reference crate's own mirror of it.
+/// Three copies is two too many, and they had already diverged in a way that hid a real defect:
+/// the local copy still carried the pre-fix `safety_number` shape (`ik_a_hex`/`ik_b_hex`, the bare
+/// identity key), so this runner and its private vectors agreed with each other while disagreeing
+/// with the specification. A vector file a runner ships next to itself cannot falsify that runner.
+///
+/// Vectors belong with the spec; runners belong with implementations. The local copy is deleted and
+/// this reads the spec repo's canonical file. There is no `exists()` fallback on purpose: if the
+/// spec repo is not checked out, the mandatory gate must FAIL, not skip — `all_vectors_pass` is
+/// this crate's whole charter.
 fn vectors_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("vectors.json")
+    spec_repo_dir().join("conformance/vectors/vectors.json")
 }
 
 fn suite_path() -> PathBuf {

@@ -1,9 +1,13 @@
 [package]
 name = "integration"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
+repository = "https://github.com/vul-os/envoir"
+homepage = "https://github.com/vul-os/envoir"
+keywords = ["dmtap", "integration", "testing", "end-to-end", "envoir"]
+readme = "README.md"
 publish = false
 description = "Cross-component end-to-end integration tests for the Envoir DMTAP reference stack — wiring the real node, mail, gateway, p2p, naming, and deniable crates together (legacy↔DMTAP, DMTAP↔DMTAP over TCP, DMTAP↔DMTAP over real libp2p, adversarial, KT-verified resolution, deniable repudiation)"
 

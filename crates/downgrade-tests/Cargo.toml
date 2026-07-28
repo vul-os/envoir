@@ -1,11 +1,14 @@
 [package]
 name = "downgrade-tests"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
 description = "Downgrade & negative test suite proving DMTAP's §10.7 fail-closed invariants, driven entirely through dmtap-core's public API"
-repository = "https://example.invalid/envoir"
+repository = "https://github.com/vul-os/envoir"
+homepage = "https://github.com/vul-os/envoir"
+keywords = ["dmtap", "downgrade", "security", "testing", "negotiation"]
+readme = "README.md"
 publish = false
 
 [dependencies]

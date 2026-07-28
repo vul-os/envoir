@@ -160,7 +160,7 @@ version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "16e2cdb6d5ed835199484bb92bb8b3edd526effe995c61732580439c1a67e2e9"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "http",
  "log",
  "url",
@@ -195,22 +195,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "base32"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23ce669cd6c8588f79e15cf450314f9638f967fc5770ff1c7c1deb0925ea7cfa"
-
-[[package]]
 name = "base45"
 version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "240e56f4d3c453c36faacb695c535a4d5f8c7d23dac175014f32eb0a71012a03"
-
-[[package]]
-name = "base64"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
 name = "base64"
@@ -419,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "conformance-runner"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "ciborium",
  "dmtap-auth",
@@ -427,9 +415,9 @@ dependencies = [
  "dmtap-deniable",
  "dmtap-mls",
  "dmtap-naming",
- "dmtap-sync",
  "envoir-node",
  "kotva-core",
+ "kotva-sync",
  "serde",
  "serde_json",
 ]
@@ -501,17 +489,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b2a41393f66f16b0823bb79094d54ac5fbd34ab292ddafb9a0456ac9f87d201"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "crate-git-revision"
-version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c521bf1f43d31ed2f73441775ed31935d77901cb3451e44b38a1c1612fcbaf98"
-dependencies = [
- "serde",
- "serde_derive",
- "serde_json",
 ]
 
 [[package]]
@@ -755,7 +732,7 @@ dependencies = [
 
 [[package]]
 name = "dmtap-auth"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "blake3",
  "kotva-core",
@@ -765,15 +742,15 @@ dependencies = [
 
 [[package]]
 name = "dmtap-clustersync"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
- "dmtap-sync",
  "kotva-core",
+ "kotva-sync",
 ]
 
 [[package]]
 name = "dmtap-deniable"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chacha20poly1305",
  "hkdf",
@@ -786,7 +763,7 @@ dependencies = [
 
 [[package]]
 name = "dmtap-mls"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "blake3",
  "kotva-core",
@@ -799,9 +776,9 @@ dependencies = [
 
 [[package]]
 name = "dmtap-namechain-rpc"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "bs58",
  "curve25519-dalek 4.1.3",
  "dmtap-naming",
@@ -816,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "dmtap-naming"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "blake3",
  "icu_properties",
@@ -828,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "dmtap-operator"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "dmtap-seam",
  "serde_json",
@@ -838,7 +815,7 @@ dependencies = [
 
 [[package]]
 name = "dmtap-p2p"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "envoir-node",
  "futures",
@@ -851,24 +828,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "dmtap-postage-patala"
-version = "0.0.1"
-dependencies = [
- "async-trait",
- "dmtap-seam",
- "patala-core",
- "patala-stellar",
- "thiserror 1.0.69",
- "tokio",
-]
-
-[[package]]
 name = "dmtap-seam"
-version = "0.0.1"
+version = "0.1.0"
 
 [[package]]
 name = "dmtap-send"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "kotva-core",
  "rand_core 0.6.4",
@@ -878,27 +843,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "dmtap-sync"
-version = "0.1.0"
-dependencies = [
- "kotva-core",
-]
-
-[[package]]
-name = "dmtap-sync-wasm"
-version = "0.1.0"
-dependencies = [
- "dmtap-sync",
- "getrandom 0.2.17",
- "getrandom 0.4.3",
- "kotva-core",
- "serde_json",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "downgrade-tests"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "kotva-core",
 ]
@@ -989,7 +935,7 @@ dependencies = [
 
 [[package]]
 name = "envoir-node"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "argon2",
  "chacha20poly1305",
@@ -998,10 +944,10 @@ dependencies = [
  "dmtap-mls",
  "dmtap-naming",
  "dmtap-send",
- "dmtap-sync",
  "getrandom 0.2.17",
  "kotva-core",
  "kotva-mail",
+ "kotva-sync",
  "serde",
  "serde_json",
  "tokio",
@@ -1023,12 +969,6 @@ dependencies = [
  "libc",
  "windows-sys 0.61.2",
 ]
-
-[[package]]
-name = "escape-bytes"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bfcf67fea2815c2fc3b90873fae90957be12ff417335dfadc7f52927feb03b2"
 
 [[package]]
 name = "fastbloom"
@@ -1628,37 +1568,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "hyper-rustls"
-version = "0.27.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f"
-dependencies = [
- "http",
- "hyper",
- "hyper-util",
- "rustls",
- "tokio",
- "tokio-rustls",
- "tower-service",
- "webpki-roots 1.0.8",
-]
-
-[[package]]
 name = "hyper-util"
 version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0"
 dependencies = [
- "base64 0.22.1",
  "bytes",
  "futures-channel",
  "futures-util",
  "http",
  "http-body",
  "hyper",
- "ipnet",
  "libc",
- "percent-encoding",
  "pin-project-lite",
  "socket2 0.6.5",
  "tokio",
@@ -1844,7 +1765,7 @@ dependencies = [
 
 [[package]]
 name = "integration"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "dmtap-deniable",
  "dmtap-naming",
@@ -1944,7 +1865,6 @@ dependencies = [
 [[package]]
 name = "kotva-core"
 version = "0.2.0"
-source = "git+https://github.com/vul-os/kotva?tag=core-v0.2.0#a4a6ca5afed1d21daf8e3e6b3b63d1dac7c90fe7"
 dependencies = [
  "blake3",
  "chacha20poly1305",
@@ -1957,6 +1877,7 @@ dependencies = [
  "serde",
  "sha2",
  "thiserror 1.0.69",
+ "unicode-normalization",
  "x-wing",
  "x25519-dalek 2.0.1",
 ]
@@ -1964,12 +1885,18 @@ dependencies = [
 [[package]]
 name = "kotva-mail"
 version = "0.2.0"
-source = "git+https://github.com/vul-os/kotva?tag=core-v0.2.0#a4a6ca5afed1d21daf8e3e6b3b63d1dac7c90fe7"
 dependencies = [
  "kotva-core",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "kotva-sync"
+version = "0.1.0"
+dependencies = [
+ "kotva-core",
 ]
 
 [[package]]
@@ -2864,7 +2791,7 @@ dependencies = [
 
 [[package]]
 name = "netsim"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rand 0.8.7",
  "rand_chacha 0.3.1",
@@ -3112,39 +3039,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 
 [[package]]
-name = "patala-core"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "patala-stellar"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "ed25519-dalek",
- "hex",
- "patala-core",
- "rand_core 0.6.4",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "stellar-strkey 0.0.8",
- "stellar-xdr",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "pem"
 version = "3.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d30c53c26bc5b31a98cd02d20f25a7c8567146caf63ed593a9d87b2775291be"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "serde_core",
 ]
 
@@ -3611,44 +3511,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reqwest"
-version = "0.12.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
-dependencies = [
- "base64 0.22.1",
- "bytes",
- "futures-core",
- "http",
- "http-body",
- "http-body-util",
- "hyper",
- "hyper-rustls",
- "hyper-util",
- "js-sys",
- "log",
- "percent-encoding",
- "pin-project-lite",
- "quinn",
- "rustls",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "sync_wrapper",
- "tokio",
- "tokio-rustls",
- "tower",
- "tower-http",
- "tower-service",
- "url",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "webpki-roots 1.0.8",
-]
-
-[[package]]
 name = "resolv-conf"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3787,12 +3649,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ryu"
-version = "1.0.23"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
-
-[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3869,18 +3725,6 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
-]
-
-[[package]]
-name = "serde_urlencoded"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3491c14715ca2294c4d6a88f15e84739788c1d030eed8c110436aafdaa2f3fd"
-dependencies = [
- "form_urlencoded",
- "itoa",
- "ryu",
- "serde",
 ]
 
 [[package]]
@@ -4066,41 +3910,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
-name = "stellar-strkey"
-version = "0.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12d2bf45e114117ea91d820a846fd1afbe3ba7d717988fee094ce8227a3bf8bd"
-dependencies = [
- "base32",
- "crate-git-revision",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "stellar-strkey"
-version = "0.0.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e3aa3ed00e70082cb43febc1c2afa5056b9bb3e348bbb43d0cd0aa88a611144"
-dependencies = [
- "crate-git-revision",
- "data-encoding",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "stellar-xdr"
-version = "22.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e09ea07e51f4123d8142f9b9f6924691413abfcba4ab642b333e795782c0141"
-dependencies = [
- "base64 0.13.1",
- "crate-git-revision",
- "escape-bytes",
- "hex",
- "stellar-strkey 0.0.9",
-]
-
-[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4115,15 +3924,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "sync_wrapper"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
-dependencies = [
- "futures-core",
 ]
 
 [[package]]
@@ -4309,16 +4109,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio-rustls"
-version = "0.26.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
-dependencies = [
- "rustls",
- "tokio",
-]
-
-[[package]]
 name = "tokio-util"
 version = "0.7.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4330,45 +4120,6 @@ dependencies = [
  "pin-project-lite",
  "tokio",
 ]
-
-[[package]]
-name = "tower"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebe5ef63511595f1344e2d5cfa636d973292adc0eec1f0ad45fae9f0851ab1d4"
-dependencies = [
- "futures-core",
- "futures-util",
- "pin-project-lite",
- "sync_wrapper",
- "tokio",
- "tower-layer",
- "tower-service",
-]
-
-[[package]]
-name = "tower-http"
-version = "0.6.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840"
-dependencies = [
- "bitflags",
- "bytes",
- "futures-util",
- "http",
- "http-body",
- "pin-project-lite",
- "tower",
- "tower-layer",
- "tower-service",
- "url",
-]
-
-[[package]]
-name = "tower-layer"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "121c2a6cda46980bb0fcd1647ffaf6cd3fc79a013de288782836f6df9c48780e"
 
 [[package]]
 name = "tower-service"
@@ -4481,7 +4232,7 @@ version = "2.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "log",
  "once_cell",
  "rustls",
@@ -4563,16 +4314,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wasm-bindgen-futures"
-version = "0.4.72"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9473dbd2991ae90b6291c3c32c30c6187ac49aa32f9905d1cce280ec1e110b0f"
-dependencies = [
- "js-sys",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "wasm-bindgen-macro"
 version = "0.2.122"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4602,16 +4343,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a929b2c61f11ba3e9bc35b50c1f25cb38e0e892c0c231ae2b8cf78d5dad4437"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "web-sys"
-version = "0.3.99"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d621441cfc37b84979402712047321980c178f299193a3589d05b99e8763436"
-dependencies = [
- "js-sys",
- "wasm-bindgen",
 ]
 
 [[package]]

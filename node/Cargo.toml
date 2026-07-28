@@ -1,11 +1,14 @@
 [package]
 name = "envoir-node"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "Apache-2.0 OR MIT"
 description = "Envoir reference node — identity, mailbox, mesh, messaging, and files for the Decentralized Message Transfer & Access Protocol (DMTAP)"
-repository = "https://example.invalid/envoir"
+repository = "https://github.com/vul-os/envoir"
+homepage = "https://github.com/vul-os/envoir"
+keywords = ["dmtap", "envoir", "node", "mesh", "decentralized"]
+readme = "README.md"
 
 # The node is the whole client-side: identity, mailbox, mesh participation, delivery,
 # messaging (MLS), files, and client protocols. See the DMTAP spec repo (../dmtap/) for the spec.
@@ -34,7 +37,7 @@ dmtap-mail = { workspace = true }
 
 # --- The Sync substrate (substrate/SYNC.md): the CRDT algebra, signed-op envelope, snapshots and
 # range-Merkle reconciliation. The node binds its §5.2/§5.3 wire protocol to HTTP (`node::syncserve`).
-dmtap-sync = { path = "../crates/dmtap-sync" }
+dmtap-sync = { workspace = true }
 
 # --- Durable outbound-queue journal (spec §19.3.3, §0.5, §4.7) ---
 # The sender-side retry queue is the sole durability mechanism and MUST survive restart. The

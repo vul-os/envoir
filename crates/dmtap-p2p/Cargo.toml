@@ -11,12 +11,15 @@
 # gateway / core build paths stay lean.
 [package]
 name = "dmtap-p2p"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.83"
 license = "Apache-2.0 OR MIT"
 description = "Envoir libp2p mesh transport for DMTAP (spec §4): Kademlia, request-response, relay + DCUtR, over the node's Transport trait"
-repository = "https://example.invalid/envoir"
+repository = "https://github.com/vul-os/envoir"
+homepage = "https://github.com/vul-os/envoir"
+keywords = ["dmtap", "p2p", "libp2p", "relay", "transport"]
+readme = "README.md"
 
 [dependencies]
 # The node crate owns the `Transport` trait + `Frame` (spec §4); this crate implements it.

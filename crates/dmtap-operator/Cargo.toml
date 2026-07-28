@@ -5,12 +5,15 @@
 # dropped; only the load-bearing, non-commercial operator machinery survived. See src/lib.rs.
 [package]
 name = "dmtap-operator"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
 description = "Reference DMTAP operator machinery: a bounded/idempotent usage-ingest queue, flat quotas, fail-closed gateway authorization (spec §12.2), and gateway-domain DNS record automation — implements dmtap-seam with no billing logic"
-repository = "https://example.invalid/envoir"
+repository = "https://github.com/vul-os/envoir"
+homepage = "https://github.com/vul-os/envoir"
+keywords = ["dmtap", "operator", "quota", "accounting", "seam"]
+readme = "README.md"
 
 [dependencies]
 # The seam this crate implements reference impls of (Metering's UsageEvent/UsageKind, Policy,

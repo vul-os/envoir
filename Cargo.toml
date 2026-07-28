@@ -20,22 +20,34 @@ members = [
     "crates/*",    # shared libraries incl. dmtap-seam (the operator seam) + dmtap-mls (§5 groups)
 ]
 
-# `crates/dmtap-postage-patala` is a real member (matched by the `crates/*` glob above) but is
-# deliberately left OUT of `default-members`: it path-depends on the sibling `patala` repo
+# EXCLUDED, not merely left out of `default-members` — see the note below for why that distinction
+# is the whole point.
+exclude = ["crates/dmtap-postage-patala"]
+
+# `crates/dmtap-postage-patala` path-depends on the sibling `patala` repo
 # (`../../patala/{patala-core,patala-stellar}`), an OPTIONAL reference payment-provider adapter for
 # `dmtap-seam`'s provider-agnostic `postage::PostageProvider` seam — never a hard dependency of
-# `dmtap-seam` or envoir. This mirrors exactly the trick `patala`'s OWN workspace uses for
-# `patala-solana`/`patala-stellar`/`patala-hyperswitch`: plain `cargo build`/`cargo test` at this
-# workspace root never pulls patala in; only `cargo build -p dmtap-postage-patala` /
-# `cargo test -p dmtap-postage-patala` does. `dmtap-seam` alone stays the default, dependency-free
-# postage seam (see `crates/dmtap-seam/src/postage.rs`).
+# `dmtap-seam` or envoir. `dmtap-seam` alone stays the default, dependency-free postage seam
+# (see `crates/dmtap-seam/src/postage.rs`).
 #
-# ONE SPELLING BREAKS THAT, and it cost a red CI: `--workspace` OVERRIDES `default-members` and
-# selects every member, this one included — so `cargo build --workspace` in a checkout without the
-# sibling patala repo fails to resolve, and `cargo tree --workspace` reports a patala dependency
-# for a build that has none. Neither is a defect in the seam. Use the bare form (which is what
-# `.github/workflows/ci.yml` does) whenever "the standalone set" is what you mean, and reach for
-# `-p dmtap-postage-patala` when you mean the adapter.
+# IT IS `exclude`d, NOT just kept out of `default-members`. The previous note here claimed that
+# "plain `cargo build`/`cargo test` at this workspace root never pulls patala in". That was FALSE,
+# and measurably so: Cargo loads EVERY member manifest eagerly during workspace resolution, long
+# before it decides what to build. While the crate was matched by the `crates/*` glob, a checkout
+# without a sibling `patala` beside it could not run a single cargo command:
+#
+#   $ cargo build            # in a worktree with no ../../patala
+#   error: failed to load manifest for workspace member `crates/dmtap-postage-patala`
+#     Caused by: failed to read `.../patala/patala-core/Cargo.toml`
+#
+# `cargo metadata` failed identically. So a fresh `git clone` of envoir was unbuildable, and that
+# is why this workspace's crates went ungated for so long — no CI runner has a patala sibling.
+# `default-members` narrows what gets BUILT; only `exclude` removes a crate from RESOLUTION.
+# SlipScan documented this same empirical finding independently (see its root Cargo.toml), and
+# ephor hit it too; three repos, one lesson.
+#
+# Build the adapter on its own, which now needs the patala sibling present:
+#   cargo build --manifest-path crates/dmtap-postage-patala/Cargo.toml
 default-members = [
     "node",
     "integration",
@@ -50,8 +62,6 @@ default-members = [
     "crates/dmtap-p2p",
     "crates/dmtap-seam",
     "crates/dmtap-send",
-    "crates/dmtap-sync",
-    "crates/dmtap-sync-wasm",
     "crates/downgrade-tests",
     "crates/netsim",
 ]
@@ -62,11 +72,64 @@ default-members = [
 # dmtap_mail::…` source unchanged via cargo's dependency-rename (`package = "kotva-core"`). The
 # legacy mail gateway moved to the Ephor broker repo (the `gateway` coordinator kind); envoir is
 # now node-only.
+#
+# THE CARVE-OUT IS NOW FINISHED. `crates/dmtap-sync`, `crates/dmtap-sync-wasm` and `bindings/go`
+# have ALSO left this repo, for the KOTVA repo, as `kotva-sync` / `kotva-sync-wasm` /
+# `github.com/vul-os/kotva/bindings/go`. They were the last reason an outside adopter's manifest
+# read `git = "https://github.com/vul-os/envoir"` to obtain a CRDT library — a product importing a
+# product, which is the one arrangement the suite rule forbids. Sync is a SUBSTRATE capability
+# (`substrate/SYNC.md`), so under the naming ruling (substrate -> `kotva-*`, mail profile ->
+# `dmtap-*`) it is `kotva-sync`. Nothing in this repo's SOURCE moved with it: `use dmtap_sync::…`
+# still compiles, via the same dependency-rename used for core and mail.
 [workspace.dependencies]
 dmtap-core = { package = "kotva-core", git = "https://github.com/vul-os/kotva", tag = "core-v0.2.0" }
 dmtap-mail = { package = "kotva-mail", git = "https://github.com/vul-os/kotva", tag = "core-v0.2.0" }
+# TRANSITIONAL — a PATH dep, and it should not stay one. The target is the same tag-pinned git form
+# as its two neighbours above (and a plain `version` once `kotva-sync` is on crates.io):
+#
+#   dmtap-sync = { package = "kotva-sync", git = "https://github.com/vul-os/kotva", tag = "sync-v0.1.0" }
+#
+# It cannot be written that way today for a checkable reason, not a stylistic one: no such tag
+# exists yet — `kotva-sync` was created by this very change and has never been pushed or tagged, and
+# `kotva-core` is itself not on crates.io, which is what blocks publishing `kotva-sync` (cargo
+# refuses to publish a crate with a version-less dependency). So the sequence is: publish/tag
+# kotva-core, then kotva-sync, then replace this line.
+#
+# BE CLEAR ABOUT WHAT THIS COSTS IN THE MEANTIME, because this workspace has already paid it once
+# and documented the lesson twenty lines above: a path dep on a SIBLING REPO makes a bare `git
+# clone` of envoir unbuildable without `../kotva` checked out beside it — `cargo metadata` fails,
+# not just `cargo build`. That is precisely the failure the `exclude` of `dmtap-postage-patala`
+# exists to prevent. The difference, and the only reason it is tolerable here rather than being
+# excluded too, is that `dmtap-sync` is a HARD dependency of `node` (`syncserve`) while
+# `dmtap-postage-patala` is an optional adapter: excluding it would not make the tree resolvable,
+# it would make the node not build at all. CI already checks KOTVA out beside this repo
+# (`.github/workflows/ci.yml`) for the conformance vectors, so CI is unaffected; a fresh clone is
+# not. Replace this line the day the tag exists.
+dmtap-sync = { package = "kotva-sync", path = "../kotva/crates/kotva-sync" }
 
 [workspace.metadata.dmtap]
 spec = "../kotva/"   # the DMTAP spec repo (sibling; the spec no longer lives in this repo, and
                      # the repo itself was renamed dmtap -> kotva)
 license = "MIT OR Apache-2.0"
+
+# --- TRANSITIONAL, and it must be deleted the day `kotva-sync` is tagged -------------------------
+# Why this exists, measured rather than asserted. `dmtap-sync` above is a PATH dep on the sibling
+# kotva worktree; `dmtap-core`/`dmtap-mail` are GIT deps pinned at `core-v0.2.0`. Cargo treats those
+# as two different sources for the same package, so `kotva-core` appears TWICE in one graph and the
+# node stops compiling with an error that reads like a type error and is not one:
+#
+#   error[E0308]: `?` operator cannot convert from `ContentId` to `kotva_core::id::ContentId`
+#   note: there are multiple different versions of crate `kotva_core` in the dependency graph
+#
+# That is the exact failure the [workspace.dependencies] comment predicted for a drifting duplicate
+# pin. `[patch]` collapses the two onto one source so there is a single `kotva-core`.
+#
+# BE HONEST ABOUT THE COST: this takes envoir OFF the tag pin and onto the sibling worktree's HEAD
+# for the whole substrate, which is precisely the moving-path-dependency arrangement the isango
+# lesson forbids. It is accepted here only because it is strictly temporary and strictly local — no
+# tag containing `kotva-sync` exists yet, so there is nothing to pin to. The moment
+# `kotva-core`/`kotva-sync` are tagged together, DELETE this whole block and set all three
+# workspace deps to that one tag. Do not let it become the arrangement.
+[patch."https://github.com/vul-os/kotva"]
+kotva-core = { path = "../kotva/crates/kotva-core" }
+kotva-mail = { path = "../kotva/crates/kotva-mail" }

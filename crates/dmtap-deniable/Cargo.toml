@@ -1,11 +1,14 @@
 [package]
 name = "dmtap-deniable"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
 description = "DMTAP optional deniable 1:1 mode (spec §5.2.1) — X3DH handshake over a dedicated IK-certified X25519 idk, a Double Ratchet, and shared-key-MAC (AEAD-tag) authentication for cryptographic repudiation"
-repository = "https://example.invalid/envoir"
+repository = "https://github.com/vul-os/envoir"
+homepage = "https://github.com/vul-os/envoir"
+keywords = ["dmtap", "deniability", "messaging", "cryptography", "privacy"]
+readme = "README.md"
 
 [dependencies]
 # The wire objects (DeniablePrekeyBundle / DeniableInit / DeniableFrame / DeniableMessage /

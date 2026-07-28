@@ -1,11 +1,14 @@
 [package]
 name = "dmtap-namechain-rpc"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
 description = "Real network-backed DMTAP name-chain resolvers (spec §3.12.5): ENS (.eth) over Ethereum JSON-RPC (EIP-137 namehash, eth_call, structural CCIP-Read/ENSIP-10) and SNS (.sol) over Solana JSON-RPC (self-derived Bonfida name-registry PDA). Implements dmtap-naming's NameChainClient trait; network sits behind an injectable HttpTransport so the pure logic is unit-tested offline"
-repository = "https://example.invalid/envoir"
+repository = "https://github.com/vul-os/envoir"
+homepage = "https://github.com/vul-os/envoir"
+keywords = ["dmtap", "naming", "rpc", "namechain", "resolver"]
+readme = "README.md"
 
 [dependencies]
 # The trait we implement (`NameChainClient`) + the `Chain` discriminant live here; we are a real

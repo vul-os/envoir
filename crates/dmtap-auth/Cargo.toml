@@ -1,11 +1,14 @@
 [package]
 name = "dmtap-auth"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
 description = "DMTAP-Auth (spec §13) — sovereign, decentralized web login: the native origin-bound login ceremony, cnf/proof-of-possession session binding, and DPoP-style key-bound sessions. Reference implementation of the RP + client crypto core; the WebAuthn/PRF front-end and HTTP layer slot in through documented seams."
-repository = "https://example.invalid/envoir"
+repository = "https://github.com/vul-os/envoir"
+homepage = "https://github.com/vul-os/envoir"
+keywords = ["dmtap", "authentication", "webauthn", "dpop", "decentralized"]
+readme = "README.md"
 
 [dependencies]
 # The identity/crypto substrate DMTAP-Auth reuses (spec §13.2): IK/device Ed25519 signing,

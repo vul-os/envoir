@@ -130,6 +130,14 @@ fn identity_declaring_only_unsupported_suite_is_rejected_not_downgraded() {
         prev: None,
         ts: 0,
         sig: vec![vec![0u8; 64]], // bogus — but suite rejection MUST fire before the sig is even checked
+        // Keys 12/13, added to `Identity` by §1.2.0/§1.3 after this test was written. The anchor is
+        // set to the SAME reserved PQ suite so the case still reads "declares ONLY 0x02": an
+        // Identity anchored on 0x01 would be a different, weaker fixture (a classical anchor the
+        // reference CAN validate), and the invariant under test is that an implementation which
+        // cannot check the declared suite rejects rather than silently downgrading. `iks` already
+        // holds the 0x02 entry the anchor requires. Nothing is retired.
+        anchor_suite: Suite::PqHybrid,
+        classical_retired: vec![],
     };
     assert_eq!(id.verify(None), Err(IdentityError::UnsupportedSuite(0x02)));
 }

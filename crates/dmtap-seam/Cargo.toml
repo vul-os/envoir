@@ -1,8 +1,12 @@
 [package]
 name = "dmtap-seam"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/vul-os/envoir"
+homepage = "https://github.com/vul-os/envoir"
+keywords = ["dmtap", "seam", "operator", "postage", "extension"]
+readme = "README.md"
 description = "The DMTAP operator seam — metering, provisioning, policy, gateway-authz, and an optional billing-export hook, all with fully-functional self-host defaults, for any third-party operator over a documented contract"
 
 # std-only scaffold; no external deps so it builds offline.

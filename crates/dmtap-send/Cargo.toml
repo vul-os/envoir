@@ -1,11 +1,14 @@
 [package]
 name = "dmtap-send"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
 description = "Envoir Send — a Resend-style programmatic mail-send API built on DMTAP capability tokens: an API key IS a scoped, rotatable, revocable UCAN-style capability (spec §13.5.1), and a send builds + seals a real MOTE to the resolved recipient (spec §2). A sovereign/private Resend."
-repository = "https://example.invalid/envoir"
+repository = "https://github.com/vul-os/envoir"
+homepage = "https://github.com/vul-os/envoir"
+keywords = ["dmtap", "send", "mote", "messaging", "client"]
+readme = "README.md"
 
 [dependencies]
 # The DMTAP core primitives: the capability token (§13.5/§18.7.3), the identity key (§1),
