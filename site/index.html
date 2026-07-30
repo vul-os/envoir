@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Envoir — sovereign mail, chat &amp; files on one key</title>
-<meta name="description" content="Envoir is the open-source reference of DMTAP: mail, chat, files and login on one keypair identity, held by a node you run, moving through a mesh and mixnet that hides who talks to whom. No crypto, no token — an open protocol with a legacy-email bridge.">
+<meta name="description" content="Envoir is the open-source reference of DMTAP: mail, chat, files and login on one keypair identity, held by a node you run, designed to move through a mesh and mixnet that hides who talks to whom. No crypto, no token — an open protocol with a legacy-email bridge.">
 <meta name="color-scheme" content="dark light">
 
 <!-- Favicons — the Envoir mark (leaning e/at, Aurora Indigo gradient tile), see brand/README.md -->
@@ -19,7 +19,7 @@
 <link rel="stylesheet" href="css/style.css">
 
 <meta property="og:title" content="Envoir — your key is your identity">
-<meta property="og:description" content="Sovereign, metadata-private mail, chat, files and login on one keypair — over a peer mesh, honest about what it protects. Open source, MIT, self-hostable. The reference implementation of DMTAP.">
+<meta property="og:description" content="Sovereign mail, chat, files and login on one keypair — metadata-private by design over a peer mesh, honest about what's real today. Open source, MIT, self-hostable. The reference implementation of DMTAP.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Envoir">
 <meta property="og:image" content="assets/og-image.png">
@@ -27,7 +27,7 @@
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Envoir — your key is your identity">
-<meta name="twitter:description" content="Sovereign, metadata-private mail, chat, files and login on one keypair — over a peer mesh, honest about what it protects. Open source, MIT, self-hostable.">
+<meta name="twitter:description" content="Sovereign mail, chat, files and login on one keypair — metadata-private by design over a peer mesh, honest about what's real today. Open source, MIT, self-hostable.">
 <meta name="twitter:image" content="assets/og-image.png">
 <meta name="theme-color" content="#0a0c11" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f4f2ee" media="(prefers-color-scheme: light)">
@@ -87,8 +87,9 @@
         <p class="lede">
           Envoir is the open-source reference implementation of <strong>DMTAP</strong> —
           mail, chat, and files reachable at one <span class="mono">name@domain</span>, all
-          bound to a single keypair identity held on a node you run, moving through a peer
-          mesh and mixnet designed so that watching the wires never reveals who's talking to whom.
+          bound to a single keypair identity held on a node you run, designed to move through a
+          peer mesh and mixnet so that watching the wires never reveals who's talking to whom.
+          <a href="#privacy">What's real today, honestly, below ↓</a>
         </p>
         <div class="hero-ctas">
           <a class="btn btn-primary" href="https://github.com/vul-os/envoir" target="_blank" rel="noopener">Get the code</a>
@@ -248,9 +249,9 @@
           <img src="assets/screens/mail-dark.png" loading="lazy" alt="Envoir mail — three-pane inbox showing a verified sender, a legacy-origin label, and the transport-path provenance panel open on a received message.">
         </div>
         <div class="feature-copy">
-          <span class="feature-tag mono">kind = mail · private tier by default</span>
+          <span class="feature-tag mono">kind = mail · private tier is the design default</span>
           <h3>Mail</h3>
-          <p>Three-pane inbox, threading, folders and color labels, star/archive/snooze, scheduled and undo send, rich compose — over the same MOTE substrate as everything else, sealed and mixnet-routed by default.</p>
+          <p>Three-pane inbox, threading, folders and color labels, star/archive/snooze, scheduled and undo send, rich compose — over the same MOTE substrate as everything else, sealed end-to-end always; mixnet-routed once the mix workstream lands (today, delivery runs on the direct <span class="mono">fast</span> tier — see <a href="#privacy">Privacy, honestly</a>).</p>
           <ul class="feature-points">
             <li>Real client protocols: JMAP natively, plus a genuinely complete IMAP/POP3/SMTP-submission surface (CONDSTORE, SEARCHRES, SORT/THREAD…) so existing mail apps just work.</li>
             <li>A <b>verified ✓</b> badge once you've checked a sender's safety number, and a plain <b>legacy-origin</b> marker on anything that crossed the gateway.</li>
@@ -413,8 +414,9 @@
             <li>Large-file bulk transfer trades some of that protection for speed (the <span class="mono">fast</span>/onion tier, not the full mixnet) — a disclosed tradeoff, not a hidden one.</li>
             <li>A seized or keylogged device exposes its whole synced mailbox, not a slice — mitigated by at-rest encryption and recovery, not eliminated.</li>
             <li>v0 key transparency is tamper-evident, not yet equivocation-proof across multiple logs — a real, stated tension while KT gossip matures.</li>
+            <li><strong>Today, only the <span class="mono">fast</span> tier actually runs end-to-end.</strong> <code>node/src/onion.rs</code>'s Sphinx onion-wrap is a structural, keyed-BLAKE3 stand-in for the real mix cryptography (X25519/ChaCha20-Poly1305/LIONESS) — it models the cell layout and replay-freshness contract, not live mix crypto, and no mix network is deployed. The <span class="mono">private</span> tier below is this project's design target, tracked as the top roadmap item, not something delivered yet.</li>
           </ul>
-          <p>Messages default to <strong>private</strong> (full mixnet, minutes); <strong>fast</strong> (fewer hops, seconds) is opt-in and costs some of that protection. Honest, disclosed limits beat a marketing promise of "perfectly anonymous."</p>
+          <p>The protocol is specified so that <strong>private</strong> (full mixnet, minutes) is the eventual default and <strong>fast</strong> (direct, seconds) is the disclosed-cost opt-in; until the mixnet workstream above lands, every message actually ships on the <strong>fast</strong> tier. Honest, disclosed limits beat a marketing promise of "perfectly anonymous."</p>
         </div>
       </div>
     </div>
@@ -435,14 +437,14 @@
           <span class="price mono">$0 · your hardware</span>
           <ul>
             <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Run the node on a Pi, NAS, old laptop, or $2 VPS</li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Full protocol: mesh, mixnet, MLS, DMTAP-Auth — nothing gated</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Full protocol surface: mesh, mail/chat/files, MLS, DMTAP-Auth — nothing gated (the mixnet is a design target, not yet real — see Privacy, honestly)</li>
             <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Unlimited by default — the operator seam's self-host implementation is a no-op</li>
             <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>MIT license, auditable top to bottom</li>
           </ul>
         </div>
         <div class="col hosted reveal">
           <h3>Hosted operator</h3>
-          <span class="price mono">optional · e.g. Envoir Cloud</span>
+          <span class="price mono">optional · none run today</span>
           <ul>
             <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Someone else runs the always-on node for you</li>
             <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Billing, quotas, and multi-tenant management</li>
