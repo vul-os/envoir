@@ -15,6 +15,18 @@
 #     states it reasons about, so its "proofs" have gone vacuous while still
 #     reporting success. See EXPECTED.txt for why that is the worse case.
 #
+# A THIRD direction also matters and used to go unchecked: the loop below only
+# walks EXPECTED.txt looking for a matching RESULT line, so it only ever notices
+# a query going MISSING or MISMATCHing. A *new* query — a `.pv` file edited to
+# add one, or added to run.sh's MODELS list — produces a RESULT line that never
+# gets compared to anything, so it could come back "false" (a broken security
+# property) and the gate would still print "all N expected verdicts hold". That
+# is the exact "examines only part of its subject" shape this gate exists to
+# rule out elsewhere. So this script also runs the walk in reverse: every actual
+# RESULT line must be claimed by some EXPECTED.txt row, and the two counts
+# (rows in EXPECTED.txt, RESULT lines actually produced) must be equal — an
+# EXPECT_ROWS-style assertion, not just a per-row diff.
+#
 # Usage:  ./check.sh          # run models, then gate
 #         ./check.sh <log>    # gate an existing run.sh log without re-running
 # Exit:   0 all verdicts as expected; 1 otherwise.
@@ -66,10 +78,46 @@ while IFS= read -r line; do
   fi
 done < "$EXPECTED"
 
+# Reverse pass: every RESULT line actually produced must be claimed by some row
+# in EXPECTED.txt (same model, substring match on the query text). A line that
+# claims none is a query EXPECTED.txt has never seen — new, renamed, or moved to
+# a different model — and it is running completely ungated: nothing above this
+# point ever compared its true/false verdict to anything.
+produced=0
+unexpected=0
+while IFS= read -r aline; do
+  [ -z "$aline" ] && continue
+  produced=$((produced + 1))
+  amodel=$(printf '%s' "$aline" | awk -F'\t' '{print $1}')
+  atext=$(printf '%s'  "$aline" | awk -F'\t' '{print $2}')
+  claimed=0
+  while IFS= read -r eline; do
+    case "$eline" in ''|\#*) continue ;; esac
+    emodel=$(printf '%s' "$eline" | awk '{print $1}')
+    equery=$(printf '%s' "$eline" | sed -E 's/^[^ ]+ +[^ ]+ +//')
+    [ "$emodel" = "$amodel" ] || continue
+    case "$atext" in *"$equery"*) claimed=1; break ;; esac
+  done < "$EXPECTED"
+  if [ "$claimed" -eq 0 ]; then
+    echo "UNEXPECTED $amodel :: $atext"
+    echo "           this RESULT line matches no row in EXPECTED.txt — a new or"
+    echo "           renamed query is running with NOTHING gating its verdict."
+    fail=1
+    unexpected=$((unexpected + 1))
+  fi
+done <<< "$ACTUAL"
+
+if [ "$produced" -ne "$checked" ]; then
+  echo "COUNT MISMATCH: EXPECTED.txt has $checked row(s), the run produced $produced RESULT line(s)."
+  echo "         Every declared query must have exactly one row here — add one (or remove a stale"
+  echo "         one) rather than letting the counts drift apart silently."
+  fail=1
+fi
+
 echo "----------------------------------------------------------------------"
 if [ "$fail" -eq 0 ]; then
-  echo "formal: all $checked expected verdicts hold"
+  echo "formal: all $checked expected verdicts hold ($produced RESULT lines produced, $unexpected unclaimed)"
 else
-  echo "formal: DEVIATION — see above ($checked verdicts checked)"
+  echo "formal: DEVIATION — see above ($checked expected, $produced produced, $unexpected unclaimed)"
 fi
 exit "$fail"
