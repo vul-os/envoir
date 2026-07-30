@@ -1865,12 +1865,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "kotva-cbor"
-version = "0.1.0"
-
-[[package]]
 name = "kotva-core"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "603f64f944ed7357b4a4f77ac122ccd6d7e94fd2eef4c6adddd4c954c9172dd9"
 dependencies = [
  "blake3",
  "chacha20poly1305",
@@ -1878,7 +1876,6 @@ dependencies = [
  "ed25519-dalek",
  "hkdf",
  "hpke",
- "kotva-cbor",
  "ml-dsa",
  "rand_core 0.6.4",
  "serde",
@@ -1892,6 +1889,8 @@ dependencies = [
 [[package]]
 name = "kotva-mail"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b29526caa3153c37f1004972f435f6e970b3dc5bbd1d402929a8b5f9ae23a1a"
 dependencies = [
  "kotva-core",
  "serde",
@@ -1902,6 +1901,8 @@ dependencies = [
 [[package]]
 name = "kotva-sync"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f67a0a0ba142ac67a83885a843d0a4169eff60b687970c4e54d7bdba50764a19"
 dependencies = [
  "kotva-core",
 ]

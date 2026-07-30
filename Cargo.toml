@@ -66,70 +66,40 @@ default-members = [
     "crates/netsim",
 ]
 
-# The substrate core + mail-protocol layer were carved OUT of this repo into the KOTVA repo
-# (`kotva-core` / `kotva-mail`) and are now consumed as a *tag-pinned* dependency, never a moving
-# path dep (the isango churn lesson). envoir keeps its existing `use dmtap_core::…` / `use
-# dmtap_mail::…` source unchanged via cargo's dependency-rename (`package = "kotva-core"`). The
-# legacy mail gateway moved to the Ephor broker repo (the `gateway` coordinator kind); envoir is
-# now node-only.
+# The substrate core + mail-protocol + sync layers were carved OUT of this repo into the KOTVA
+# repo (`kotva-core` / `kotva-mail` / `kotva-sync`) and are now consumed as PUBLISHED CRATES.IO
+# DEPENDENCIES, never a path dep across repos (the isango churn lesson, owner directive #1). envoir
+# keeps its existing `use dmtap_core::…` / `use dmtap_mail::…` / `use dmtap_sync::…` source
+# unchanged via cargo's dependency-rename (`package = "kotva-core"` etc). The legacy mail gateway
+# moved to the Ephor broker repo (the `gateway` coordinator kind); envoir is now node-only.
 #
-# THE CARVE-OUT IS NOW FINISHED. `crates/dmtap-sync`, `crates/dmtap-sync-wasm` and `bindings/go`
-# have ALSO left this repo, for the KOTVA repo, as `kotva-sync` / `kotva-sync-wasm` /
-# `github.com/vul-os/kotva/bindings/go`. They were the last reason an outside adopter's manifest
-# read `git = "https://github.com/vul-os/envoir"` to obtain a CRDT library — a product importing a
-# product, which is the one arrangement the suite rule forbids. Sync is a SUBSTRATE capability
-# (`substrate/SYNC.md`), so under the naming ruling (substrate -> `kotva-*`, mail profile ->
-# `dmtap-*`) it is `kotva-sync`. Nothing in this repo's SOURCE moved with it: `use dmtap_sync::…`
-# still compiles, via the same dependency-rename used for core and mail.
+# THE CONVERSION IS NOW FINISHED (2026-07-30): all three of `kotva-core`, `kotva-mail`, `kotva-sync`
+# are live on crates.io (0.2.0, 0.2.0, 0.1.0) and every workspace dep below resolves from the
+# registry — no `git`, no `path`, no sibling `../kotva` checkout required to build this repo.
+# `cargo metadata`/`cargo build` now succeed from a bare `git clone` of envoir alone.
+#
+# ONE CAVEAT WORTH RECORDING, found while doing this conversion, not invented by it: the crates.io
+# `kotva-core`/`kotva-mail` 0.2.0 packages were cut from kotva commit `d6b9e7f` (2026-07-28),
+# which is AHEAD of the git tag `core-v0.2.0` this repo used to pin to (`a4a6ca5`, 2026-07-23) —
+# same version string, different (superset) content, e.g. `kotva-core::ack` and the §25.3.4 NFC
+# check landed in that gap without a version bump on kotva's side. That is a kotva release-hygiene
+# gap, not an envoir bug, but it means this conversion is not purely mechanical: it moves envoir
+# onto slightly newer substrate code than the tag it tested against before. Verified building and
+# testing clean against it (see the commit this comment ships with for real output).
 [workspace.dependencies]
-dmtap-core = { package = "kotva-core", git = "https://github.com/vul-os/kotva", tag = "core-v0.2.0" }
-dmtap-mail = { package = "kotva-mail", git = "https://github.com/vul-os/kotva", tag = "core-v0.2.0" }
-# TRANSITIONAL — a PATH dep, and it should not stay one. The target is the same tag-pinned git form
-# as its two neighbours above (and a plain `version` once `kotva-sync` is on crates.io):
-#
-#   dmtap-sync = { package = "kotva-sync", git = "https://github.com/vul-os/kotva", tag = "sync-v0.1.0" }
-#
-# It cannot be written that way today for a checkable reason, not a stylistic one: no such tag
-# exists yet — `kotva-sync` was created by this very change and has never been pushed or tagged, and
-# `kotva-core` is itself not on crates.io, which is what blocks publishing `kotva-sync` (cargo
-# refuses to publish a crate with a version-less dependency). So the sequence is: publish/tag
-# kotva-core, then kotva-sync, then replace this line.
-#
-# BE CLEAR ABOUT WHAT THIS COSTS IN THE MEANTIME, because this workspace has already paid it once
-# and documented the lesson twenty lines above: a path dep on a SIBLING REPO makes a bare `git
-# clone` of envoir unbuildable without `../kotva` checked out beside it — `cargo metadata` fails,
-# not just `cargo build`. That is precisely the failure the `exclude` of `dmtap-postage-patala`
-# exists to prevent. The difference, and the only reason it is tolerable here rather than being
-# excluded too, is that `dmtap-sync` is a HARD dependency of `node` (`syncserve`) while
-# `dmtap-postage-patala` is an optional adapter: excluding it would not make the tree resolvable,
-# it would make the node not build at all. CI already checks KOTVA out beside this repo
-# (`.github/workflows/ci.yml`) for the conformance vectors, so CI is unaffected; a fresh clone is
-# not. Replace this line the day the tag exists.
-dmtap-sync = { package = "kotva-sync", path = "../kotva/crates/kotva-sync" }
+dmtap-core = { package = "kotva-core", version = "0.2.0" }
+dmtap-mail = { package = "kotva-mail", version = "0.2.0" }
+dmtap-sync = { package = "kotva-sync", version = "0.1.0" }
 
 [workspace.metadata.dmtap]
 spec = "../kotva/"   # the DMTAP spec repo (sibling; the spec no longer lives in this repo, and
                      # the repo itself was renamed dmtap -> kotva)
 license = "MIT OR Apache-2.0"
 
-# --- TRANSITIONAL, and it must be deleted the day `kotva-sync` is tagged -------------------------
-# Why this exists, measured rather than asserted. `dmtap-sync` above is a PATH dep on the sibling
-# kotva worktree; `dmtap-core`/`dmtap-mail` are GIT deps pinned at `core-v0.2.0`. Cargo treats those
-# as two different sources for the same package, so `kotva-core` appears TWICE in one graph and the
-# node stops compiling with an error that reads like a type error and is not one:
-#
-#   error[E0308]: `?` operator cannot convert from `ContentId` to `kotva_core::id::ContentId`
-#   note: there are multiple different versions of crate `kotva_core` in the dependency graph
-#
-# That is the exact failure the [workspace.dependencies] comment predicted for a drifting duplicate
-# pin. `[patch]` collapses the two onto one source so there is a single `kotva-core`.
-#
-# BE HONEST ABOUT THE COST: this takes envoir OFF the tag pin and onto the sibling worktree's HEAD
-# for the whole substrate, which is precisely the moving-path-dependency arrangement the isango
-# lesson forbids. It is accepted here only because it is strictly temporary and strictly local — no
-# tag containing `kotva-sync` exists yet, so there is nothing to pin to. The moment
-# `kotva-core`/`kotva-sync` are tagged together, DELETE this whole block and set all three
-# workspace deps to that one tag. Do not let it become the arrangement.
-[patch."https://github.com/vul-os/kotva"]
-kotva-core = { path = "../kotva/crates/kotva-core" }
-kotva-mail = { path = "../kotva/crates/kotva-mail" }
+# The `[patch."https://github.com/vul-os/kotva"]` block that used to live here is DELETED
+# (2026-07-30): it existed only to collapse a git-sourced `kotva-core`/`kotva-mail` and a
+# path-sourced `kotva-sync` onto one source so cargo didn't see two different `kotva-core`s in one
+# graph (the classic "multiple different versions of crate" duplicate-source error). Now that all
+# three deps above resolve from the SAME source (crates.io), that duplicate-source condition can't
+# occur and the patch has nothing left to do — kept deleted rather than left inert, per its own
+# instruction ("the moment kotva-core/kotva-sync are tagged together, DELETE this whole block").
