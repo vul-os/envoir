@@ -103,6 +103,18 @@ pub trait UsageSink {
 /// The reference [`UsageSink`]: sums usage per `(account, kind)` in memory. [`Accumulator::export_to`]
 /// hands each running total to a [`dmtap_seam::BillingSink`] — [`dmtap_seam::NullBillingSink`] by
 /// default, so exporting with nothing attached is a documented no-op, not an error.
+///
+/// **SUMMING IS THE CONTRACT, not an implementation detail**, and it is load-bearing for what users
+/// are charged. For increment dimensions ([`UsageKind::GatewaySend`], [`UsageKind::InboundLegacy`],
+/// [`UsageKind::RelayBytes`], [`UsageKind::MessagesSent`]) summing per event is exactly right. For the
+/// *level* dimensions — [`UsageKind::StorageBytes`] and [`UsageKind::VanityDomain`] — it means a
+/// producer MUST emit **at most one event per account per billing period**: two events carrying the
+/// same stored-bytes level bill it twice. See [`UsageKind::StorageBytes`] for the full contract and
+/// `envoir_node::usage::StoredBytesLevel` for the reference producer-side guard.
+///
+/// Changing this to last-write-wins would silently re-price every level dimension, so it is a
+/// deliberate reviewed change and not a refactor; `sums_rather_than_overwrites_a_level_dimension`
+/// below fails if it happens by accident.
 #[derive(Debug, Default)]
 pub struct Accumulator {
     totals: HashMap<(AccountId, UsageKind), u64>,
@@ -508,6 +520,52 @@ mod tests {
         assert_eq!(acc.total(&"b".to_string(), UsageKind::GatewaySend), 3);
         assert_eq!(acc.total(&"a".to_string(), UsageKind::StorageBytes), 0);
         assert_eq!(acc.len(), 2);
+    }
+
+    /// PINS THE MONEY-RELEVANT SEMANTICS. `StorageBytes` is a *level* dimension, and this sink ADDS
+    /// rather than OVERWRITES. That is why a producer of levels must emit at most one event per
+    /// account per billing period: below, the same 10 GiB level arriving 30 times (a nightly bridge
+    /// against a 30-day period) is billed 30×, which is a real over-charge and not a rounding
+    /// artifact.
+    ///
+    /// If someone later makes the accumulator last-write-wins, this test fails and forces the change
+    /// to be a deliberate, reviewed re-pricing of every level dimension rather than a quiet refactor.
+    /// The producer-side guard that keeps a bridge on the correct side of this is
+    /// `envoir_node::usage::StoredBytesLevel`.
+    #[test]
+    fn sums_rather_than_overwrites_a_level_dimension() {
+        const LEVEL: u64 = 10 * 1024 * 1024 * 1024; // a 10 GiB stored-bytes level
+        let acct = "a".to_string();
+
+        // Correct: one report for the period.
+        let mut once = Accumulator::default();
+        once.record(&QueuedUsage {
+            id: None,
+            account: acct.clone(),
+            kind: UsageKind::StorageBytes,
+            amount: LEVEL,
+            ts_ms: 1,
+        });
+        assert_eq!(once.total(&acct, UsageKind::StorageBytes), LEVEL);
+
+        // Wrong: the same level sampled nightly. Nothing here averages or overwrites.
+        let mut nightly = Accumulator::default();
+        for day in 0..30u64 {
+            nightly.record(&QueuedUsage {
+                id: None,
+                account: acct.clone(),
+                kind: UsageKind::StorageBytes,
+                amount: LEVEL,
+                ts_ms: day * 86_400_000,
+            });
+        }
+        assert_eq!(
+            nightly.total(&acct, UsageKind::StorageBytes),
+            LEVEL * 30,
+            "the accumulator SUMS: 30 nightly samples of one level bill 30x the level. If this ever \
+             reads LEVEL instead, the sink became last-write-wins and every level dimension was \
+             silently re-priced."
+        );
     }
 
     #[test]

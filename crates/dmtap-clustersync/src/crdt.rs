@@ -536,7 +536,7 @@ impl ClusterState {
                 Cv::Array(vec![Cv::Text(t.clone()), Cv::Text(f.clone()), v.clone()])
             })
             .collect();
-        cells.sort_by(|a, b| cbor::encode(a).cmp(&cbor::encode(b)));
+        cells.sort_by_key(cbor::encode);
         // The observable output of the death dimension: each durably-deleted object with its class
         // token. A `Live` certificate contributes nothing (observationally identical to no cert), so
         // two replicas that converge on presence produce byte-identical snapshots.
@@ -700,7 +700,7 @@ mod tests {
         let reclaimed = s.prune_stable(&cut);
         assert_eq!(reclaimed, 1, "the one stable dead tag is reclaimed");
         // The dead element's metadata is gone entirely; the live element is untouched.
-        assert!(s.set.adds.get("m").is_none() && s.set.tombstones.get("m").is_none());
+        assert!(!s.set.adds.contains_key("m") && !s.set.tombstones.contains_key("m"));
         assert_eq!(s.set.adds.get("keep").map(|t| t.len()), Some(1));
 
         // Observable state is byte-identical before and after GC (SEC preserved).
@@ -960,7 +960,7 @@ mod tests {
 
     #[test]
     fn crdt_merge_converges_under_random_schedules_and_d3_holds() {
-        let mut rng = Rng(0xC0FFEE_5E6);
+        let mut rng = Rng(0xC0FFEE5E6);
         for _ in 0..20_000 {
             let n = 1 + rng.below(24);
             let ops: Vec<ClusterOp> = (0..n).map(|_| gen_op(&mut rng)).collect();

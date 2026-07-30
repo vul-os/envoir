@@ -303,7 +303,7 @@ impl DeniableState {
 /// X3DH `accept` consumes a one-time prekey (OPK) from the responder's published bundle *before* the
 /// first message can be authenticated — a `DeniableInit` is only authenticated by the ratchet MAC it
 /// establishes, and its `idk_a_cert` chain is **self-signable** (an attacker mints their own root IK
-/// + deniable IK and self-certifies a valid [`CertifiedInit`]). So a burst of unsolicited inits from
+/// and deniable IK, then self-certifies a valid [`CertifiedInit`]). So a burst of unsolicited inits from
 /// throwaway identities can burn every OPK, forcing legitimate initiators onto the reused
 /// **last-resort** prekey (weaker replay properties, §5.2.1).
 ///

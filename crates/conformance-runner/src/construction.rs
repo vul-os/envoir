@@ -2452,8 +2452,8 @@ fn cad_no_index_is_authoritative() -> Result<(), String> {
 }
 
 /// DMTAP-CADASM-01 (§23.6.1/§23.6.2): an `AssemblyStructure` with zero children, and one whose sole
-/// child carries `quantity = 0`, are both malformed for this profile — `children` is REQUIRED with
-/// >= 1 entry, and a zero count is expressed by omitting the child, never by a zero quantity.
+/// child carries `quantity = 0`, are both malformed for this profile — `children` is REQUIRED with at
+/// least one entry, and a zero count is expressed by omitting the child, never by a zero quantity.
 /// Positive control: a well-formed single-child assembly decodes.
 fn cad_assembly_empty_or_zero_quantity_rejected() -> Result<(), String> {
     // Positive control: >= 1 child, quantity >= 1, decodes cleanly.

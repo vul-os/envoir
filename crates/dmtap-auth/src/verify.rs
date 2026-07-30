@@ -19,9 +19,9 @@ use crate::AUTH_ASSERTION_DS;
 ///    origin (a look-alike site) is rejected here ([`AuthError::OriginMismatch`]).
 /// 2. `aud == expected_aud` — audience binding ([`AuthError::AudienceMismatch`]).
 /// 3. Every echoed field equals the issued challenge ([`AuthError::ChallengeMismatch`]).
-/// 3b. The echoed `scope` equals the issued challenge's scope — the scope-elevation defense
-///    ([`AuthError::ScopeMismatch`]); `scope` is inside the signed preimage (§18.9.8), so a
-///    broader granted scope also fails the signature check.
+///    - Including `scope`: the echoed scope must equal the issued challenge's scope — the
+///      scope-elevation defense ([`AuthError::ScopeMismatch`]). `scope` is inside the signed
+///      preimage (§18.9.8), so a broader granted scope also fails the signature check.
 /// 4. Not expired against the RP clock ([`AuthError::Expired`]).
 /// 5. `from` is an `IK`-authorized signer for `pinned_ik` ([`AuthError::UnauthorizedSigner`] —
 ///    the wrong-identity-key / unauthorized-device rejection).

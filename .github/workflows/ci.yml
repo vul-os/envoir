@@ -149,23 +149,88 @@ jobs:
       # 24 frozen SYNC.md §10 vectors through `kotva-sync` as envoir consumes it.
       # The KOTVA checkout above is still required for exactly that.
 
-      # NON-BLOCKING, deliberately. Both currently fail on pre-existing debt:
-      # ~2600 rustfmt diffs and ~79 clippy findings, none introduced by the work
-      # that added this CI. Gating on them today would mean landing a 2600-diff
-      # reformat as a prerequisite — a commit that buries real changes and makes
-      # `git blame` useless across the whole crate tree. A gate whose precondition
-      # is that commit is not a gate, it is a blocker.
+      # RE-MEASURED 2026-07-30. The block that used to sit here said "~2600 rustfmt
+      # diffs and ~79 clippy findings" and marked BOTH steps `continue-on-error`.
+      # Those figures predated 620a68c (which carved envoir to node-only and
+      # deleted most of the code they were measured over), so they were re-counted
+      # against HEAD on rustc/clippy 1.94.0 before touching either step:
       #
-      # So they report and do not fail. Promote to blocking (drop the
-      # continue-on-error) once the debt is paid down in its own commit, which is
-      # tracked in ../DMTAP-BACKLOG.md.
-      - name: Format (report only)
-        continue-on-error: true
-        run: cargo fmt --all -- --check
-
-      - name: Clippy (report only)
-        continue-on-error: true
+      #   clippy, `--all-targets` over the default members:  26 findings (was ~79)
+      #   rustfmt, this repo's own files only:             1701 hunks / 113 files
+      #
+      # The two numbers moved in opposite directions and so the two steps get
+      # opposite treatment. Do not "tidy" them back into one policy.
+      #
+      # CLIPPY IS NOW A REAL GATE. All 26 findings were fixed (mostly
+      # `doc_lazy_continuation` from `+`/`>` starting a doc line, plus a handful of
+      # mechanical suggestions); one `#[allow]` remains, at
+      # `dmtap-mls/src/committer.rs::adopt_confirmed`, with its reasoning written
+      # at the site. `cargo clippy --all-targets -- -D warnings` exits 0 at HEAD,
+      # so `continue-on-error` is gone: a new lint fails the build.
+      - name: Clippy (blocking — 0 findings at HEAD)
         run: cargo clippy --all-targets -- -D warnings
+
+      # RUSTFMT IS STILL NOT A GATE, and this is the honest reason, not deferral.
+      #
+      # 1. The debt is real and large: 1701 hunks across 113 files. Gating today
+      #    still means landing that reformat first, which is the blame-destroying
+      #    commit the previous note rightly refused.
+      # 2. It is a STYLE MISMATCH more than sloppiness, so "just run cargo fmt" is
+      #    a decision, not a cleanup. This tree writes compact single-line struct
+      #    literals and ~110-column lines; rustfmt's defaults explode them. Measured
+      #    over this repo's files: 2908 hunks at rustfmt defaults, 2444 at
+      #    `max_width = 110`, 1171 at `max_width = 110` + `use_small_heuristics =
+      #    "Max"`. No config makes the tree clean, so adopting rustfmt means
+      #    adopting its layout, and that choice belongs to a human.
+      # 3. CONSEQUENTLY A RATCHET WOULD BE WRONG TOO: new code written in this
+      #    tree's house style ADDS rustfmt hunks, so a "count must not grow" gate
+      #    would redden correct commits.
+      #
+      # What IS fixed here: the step used to be unable to fail for ANY reason,
+      # including rustfmt not being installed — the invisible-skip pathology this
+      # file's header is otherwise careful about. It now fails closed if rustfmt
+      # cannot run or produces no output, and only the diff itself is tolerated.
+      # It also scopes its report to THIS repo: `cargo fmt --all` reaches into path
+      # dependencies, so it was silently reporting on the sibling KOTVA checkout as
+      # well (1243 of the 2944 hunks it printed were kotva's, unfixable from here).
+      - name: Format (reports; fails only if rustfmt cannot run)
+        run: |
+          # NOTE: no `pipefail` in this step on purpose. Every count below is a
+          # `grep | wc` whose grep legitimately matches nothing on a clean tree, and
+          # under pipefail that would fail the step for the one outcome we want most.
+          #
+          # Fail closed on a missing/broken component rather than "passing" the way a
+          # continue-on-error step did, including when rustfmt was never installed.
+          cargo fmt --version || {
+            echo "::error::rustfmt is not available, so formatting was NOT checked"; exit 1; }
+
+          # `|| true`: a nonzero exit here means "diffs exist", which is expected.
+          cargo fmt --all -- --check > /tmp/fmt.txt 2>&1 || true
+          if [ ! -s /tmp/fmt.txt ]; then
+            echo "rustfmt reported no diffs at all. If that is real, this step can become a"
+            echo "blocking gate — drop the tolerance and just run 'cargo fmt --all -- --check'."
+            exit 0
+          fi
+
+          grep '^Diff in' /tmp/fmt.txt > /tmp/fmt-hunks.txt || true
+          if [ ! -s /tmp/fmt-hunks.txt ]; then
+            echo "::error::rustfmt produced output but no 'Diff in' lines. Its output format" \
+                 "changed, so these counts would be meaningless: re-read this step."
+            cat /tmp/fmt.txt | head -20
+            exit 1
+          fi
+
+          # Only this repo's files. `cargo fmt --all` reaches into path dependencies,
+          # so the sibling KOTVA checkout shows up here and cannot be fixed from a
+          # commit in this repo.
+          mine=$(grep -v "/kotva/" /tmp/fmt-hunks.txt | wc -l | tr -d ' ')
+          theirs=$(grep -c "/kotva/" /tmp/fmt-hunks.txt || true)
+          files=$(grep -v "/kotva/" /tmp/fmt-hunks.txt \
+                  | sed 's/^Diff in //; s/:[0-9]*:$//' | sort -u | wc -l | tr -d ' ')
+          echo "rustfmt: $mine hunks across $files of this repo's files (1701 / 113 measured at HEAD)"
+          echo "rustfmt: $theirs hunks ignored — they belong to the sibling KOTVA checkout"
+          grep -v "/kotva/" /tmp/fmt-hunks.txt | head -50
+          echo "NOT A GATE: see the comment above this step for why, with the numbers."
 
       # The postage seam must stay provider-agnostic: the DEFAULT build carries no
       # payment provider at all. This is the one property the seam exists for, so

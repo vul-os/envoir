@@ -1,6 +1,5 @@
 //! Gateway authorization — a fail-closed reference implementation of `dmtap-seam`'s
-//! [`dmtap_seam::GatewayAuthz`], ported bit-for-bit (logic unchanged) from an earlier, retired
-//! control-plane prototype. This module never computes a price and never references billing —
+//! [`dmtap_seam::GatewayAuthz`]. This module never computes a price and never references billing —
 //! accountability and quota are separate concerns (see [`crate::policy`] for quota).
 //!
 //! This ties to the fairness/accountability model (spec §7.7, §9): a gateway attributes abuse to

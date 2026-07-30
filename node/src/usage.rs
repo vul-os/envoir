@@ -13,6 +13,24 @@
 //!    (stored-bytes delta / eviction / message-accepted) an operator may turn into a bill if they
 //!    choose to. The self-host default ([`NullUsageMeter`]) is a no-op.
 //!
+//! ## Bridging these events to an operator's meter — read the contract before you write one
+//!
+//! **No such meter exists in this suite today.** The hosted control plane these counters were
+//! originally shaped for (envoir-cloud) no longer exists, and reachability — the only operator
+//! role that remains — is Ephor, which bills nothing. So nothing here is wired to a bridge, and
+//! nothing should be: these are LOCAL counters a node keeps about itself.
+//!
+//! The contract below is written down anyway, because the failure it prevents is expensive and
+//! silent. A previous version of this doc instructed an implementor to forward a level to a
+//! summing meter, which over-bills by the number of samples taken — roughly 30x for nightly
+//! sampling. If anyone ever does build a bridge, these are the terms.
+//! The events here are **deltas**; a hosted-storage meter is a **level**; and the reference
+//! operator-side rater in this workspace (`dmtap_operator::queue::Accumulator`) **sums** the events
+//! it receives. Those three facts only add up to a correct bill if the level is reported **once per
+//! billing period** — sampling more often multiplies the bill by the number of samples. The full
+//! contract is on [`UsageEvent::Stored`], and [`StoredBytesLevel`] is the guard that enforces it so a
+//! bridge does not have to.
+//!
 //! ## No money, no plans, no pricing here
 //! The seam carries **events and a yes/no** — nothing about currency, plans, or prices. The node
 //! links **no** billing crate; an operator's own tooling *drops into* these traits from the
@@ -107,12 +125,35 @@ impl StorageQuota for UnlimitedStorage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UsageEvent {
     /// A MOTE/file was durably accepted into the mailbox: `delta_bytes` were added. This is the
-    /// primary "node usage" (hosted-mailbox storage) signal a cloud samples into GB-month (§12.4).
-    /// CONTRACT for a node→cloud bridge: the cloud's `NodeStorageBytes` meter accumulates a *level*,
-    /// so a bridge MUST forward the current stored-bytes level (the running sum of
-    /// [`UsageEvent::stored_delta`], i.e. `Stored − Evicted`), NOT raw per-accept `Stored` deltas —
-    /// otherwise a churny mailbox is
-    /// over-billed and bytes held across months under-billed.
+    /// primary "node usage" (hosted-mailbox storage) signal an operator samples into GB-month
+    /// (§12.4).
+    ///
+    /// # CONTRACT for any future usage bridge — both halves, or users are billed wrongly
+    /// (No bridge exists today; see the module doc. These are local counters.)
+    ///
+    /// 1. **Forward the LEVEL, not the deltas.** A storage meter is a *level* meter: forward the
+    ///    current stored-bytes level (the running signed sum of [`UsageEvent::stored_delta`], i.e.
+    ///    `Stored − Evicted`), NOT raw per-accept `Stored` deltas. Forwarding deltas over-bills a
+    ///    churny mailbox and under-bills bytes held across periods.
+    /// 2. **Forward that level AT MOST ONCE PER BILLING PERIOD.** An operator-side storage meter
+    ///    (the `StorageBytes` dimension of `dmtap-seam`, whose reference rater
+    ///    `dmtap_operator::queue::Accumulator` **sums** every matching event for an account) turns
+    ///    the events it receives into a *total*. Sending a level `N` times in one period therefore
+    ///    bills `N × level`: a nightly sample against a 30-day period over-bills by **~30×**. A sum
+    ///    of samples is neither an average nor a level.
+    ///
+    /// Rule 2 is what makes rule 1 safe, and it is the rule that costs money when missed. A level
+    /// fed to a summing meter is correct **iff exactly one sample lands per period** — so a bridge
+    /// samples on a period boundary, not on a cron interval it picked for freshness.
+    ///
+    /// Do not re-derive this: [`StoredBytesLevel`] folds the deltas *and* refuses to emit a second
+    /// report for a period, so the once-per-period rule is structural rather than remembered. The
+    /// end-to-end consequence — the same level through a real summing rater, once versus nightly —
+    /// is pinned by `integration/tests/storage_level_billing_contract.rs`.
+    ///
+    /// If an operator's meter is instead last-write-wins (a true level meter that overwrites), that
+    /// is a *different* contract and switching to it is a deliberate, reviewed change on the meter's
+    /// side — never something a bridge may assume.
     Stored { account: Vec<u8>, delta_bytes: u64, at: TimestampMs },
     /// Durably-stored bytes were released (expunge/retention eviction): `delta_bytes` were freed. The
     /// running signed sum of `Stored − Evicted` is the current stored-bytes level a GB-month sample
@@ -208,6 +249,150 @@ impl NodeUsageMeter for CountingUsageMeter {
     }
 }
 
+// ── Reporting the stored-bytes LEVEL into a SUMMING meter (§12.4) ──────────────────────────────
+
+/// A billing-period ordinal: any integer that increases by at least one per billing period and never
+/// decreases (months since an epoch, `year * 12 + month`, a period row id — the bridge chooses).
+///
+/// It is deliberately not a timestamp. [`StoredBytesLevel`] compares ordinals for equality and
+/// monotonicity to decide whether a report has already been made, and a wall-clock millisecond value
+/// would make every sample a "new period".
+pub type PeriodOrdinal = u64;
+
+/// What a bridge should do with a [`StoredBytesLevel::report_for_period`] call. Only
+/// [`LevelReport::Report`] means "send an event"; both other variants mean **send nothing**, which is
+/// the fail-closed direction — a missed report under-bills once, a duplicated report multiplies the
+/// bill for the whole period.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LevelReport {
+    /// Send exactly this many bytes to the operator's storage meter, once, for the requested period.
+    Report(u64),
+    /// This period's level was already reported. **Send nothing** — a summing meter would add the
+    /// level a second time and bill twice.
+    AlreadyReported { period: PeriodOrdinal },
+    /// The period ordinal went backwards (clock skew, a restart reading a stale cursor, two bridges
+    /// racing). **Send nothing**: the earlier period may already be closed and re-reporting into it
+    /// bills it again.
+    PeriodWentBackwards { period: PeriodOrdinal, last_reported: PeriodOrdinal },
+}
+
+impl LevelReport {
+    /// The bytes to send, or `None` if nothing must be sent. `let Some(b) = r.bytes_to_report()` is
+    /// the whole correct usage of this type.
+    pub fn bytes_to_report(&self) -> Option<u64> {
+        match self {
+            LevelReport::Report(bytes) => Some(*bytes),
+            LevelReport::AlreadyReported { .. } | LevelReport::PeriodWentBackwards { .. } => None,
+        }
+    }
+}
+
+/// The once-per-period stored-bytes **level** reporter — the guard that makes the
+/// [`UsageEvent::Stored`] bridge contract structural instead of remembered.
+///
+/// A hosted-storage meter is a level, but the operator-side rater that receives events **sums** them
+/// (`dmtap_operator::queue::Accumulator` is the reference one). Those two facts are only compatible
+/// if exactly one level report lands per billing period. This type enforces that: it folds every
+/// [`UsageEvent`] into a running level and hands the level out **at most once per
+/// [`PeriodOrdinal`]**, so a bridge that samples nightly emits one report per period rather than
+/// thirty and cannot over-bill by 30× through this API.
+///
+/// It is **per account** by construction — a level is billed to one account, and a stream a bridge
+/// consumes may name more than one (each event carries its own [`UsageEvent::account`]).
+/// [`Self::observe`] ignores events for any other account and says so in its return value, so a
+/// bridge cannot accidentally bill one account for another's bytes.
+///
+/// It is state a bridge must persist across restarts if it wants the guarantee across restarts —
+/// [`Self::last_reported_period`] and [`Self::level`] are the two values to store, and
+/// [`Self::resume`] restores them.
+///
+/// ```
+/// use dmtap::usage::{LevelReport, StoredBytesLevel, UsageEvent};
+///
+/// let mut lvl = StoredBytesLevel::new(b"account-a".to_vec());
+/// lvl.observe(&UsageEvent::Stored { account: b"account-a".to_vec(), delta_bytes: 1_000, at: 1 });
+/// lvl.observe(&UsageEvent::Evicted { account: b"account-a".to_vec(), delta_bytes: 400, at: 2 });
+/// // Another account's bytes are not this account's level.
+/// assert!(!lvl.observe(&UsageEvent::Stored { account: b"b".to_vec(), delta_bytes: 9, at: 3 }));
+///
+/// // One report per period: this is the amount to send to a summing storage meter.
+/// assert_eq!(lvl.report_for_period(2026 * 12 + 7), LevelReport::Report(600));
+/// // A nightly cron asking again inside the same period gets nothing to send.
+/// assert_eq!(lvl.report_for_period(2026 * 12 + 7).bytes_to_report(), None);
+/// // The next period reports the level again (bytes held across periods are billed again).
+/// assert_eq!(lvl.report_for_period(2026 * 12 + 8), LevelReport::Report(600));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredBytesLevel {
+    account: Vec<u8>,
+    level: i64,
+    last_reported_period: Option<PeriodOrdinal>,
+}
+
+impl StoredBytesLevel {
+    /// A fresh reporter for one `account`: level `0`, nothing reported yet.
+    pub fn new(account: impl Into<Vec<u8>>) -> Self {
+        Self { account: account.into(), level: 0, last_reported_period: None }
+    }
+
+    /// Restore a persisted reporter so the once-per-period guarantee survives a restart. `level` is
+    /// the last observed level; `last_reported_period` is [`Self::last_reported_period`] as stored.
+    pub fn resume(
+        account: impl Into<Vec<u8>>,
+        level: i64,
+        last_reported_period: Option<PeriodOrdinal>,
+    ) -> Self {
+        Self { account: account.into(), level, last_reported_period }
+    }
+
+    /// The account this level is billed to.
+    pub fn account(&self) -> &[u8] {
+        &self.account
+    }
+
+    /// Fold one node usage event into the running level (`Stored` adds, `Evicted` subtracts,
+    /// `MessageAccepted` is size-neutral — see [`UsageEvent::stored_delta`]).
+    ///
+    /// Returns whether the event belonged to [`Self::account`] and was folded in. `false` means it
+    /// was for a different account and was ignored — a bridge feeding a whole node's stream through
+    /// one reporter per account gets the right per-account levels and no cross-billing.
+    pub fn observe(&mut self, event: &UsageEvent) -> bool {
+        if event.account() != self.account.as_slice() {
+            return false;
+        }
+        self.level += event.stored_delta();
+        true
+    }
+
+    /// The current signed level. Negative is a bug in the caller's event stream (more evicted than
+    /// stored), never something to bill; [`Self::report_for_period`] clamps it to `0`.
+    pub fn level(&self) -> i64 {
+        self.level
+    }
+
+    /// The last period a report was handed out for, if any — persist this alongside [`Self::level`].
+    pub fn last_reported_period(&self) -> Option<PeriodOrdinal> {
+        self.last_reported_period
+    }
+
+    /// The level to report for `period`, **once**. Returns [`LevelReport::Report`] only the first
+    /// time it is called with a period strictly greater than the last reported one; every repeat
+    /// call inside the same period, and any call for an earlier period, returns a variant whose
+    /// [`LevelReport::bytes_to_report`] is `None`.
+    pub fn report_for_period(&mut self, period: PeriodOrdinal) -> LevelReport {
+        match self.last_reported_period {
+            Some(last) if period == last => LevelReport::AlreadyReported { period },
+            Some(last) if period < last => {
+                LevelReport::PeriodWentBackwards { period, last_reported: last }
+            }
+            _ => {
+                self.last_reported_period = Some(period);
+                LevelReport::Report(self.level.max(0) as u64)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,6 +430,117 @@ mod tests {
         assert_eq!(m.count(), 5);
         assert_eq!(m.stored_bytes(&a), 1000 + 500 - 200, "signed level, message-count is neutral");
         assert_eq!(m.stored_bytes(&b), 7, "levels are per-account");
+    }
+
+    /// The whole point of [`StoredBytesLevel`]: a bridge sampling nightly must still emit ONE
+    /// report per period. Sending 30 reports of the same level to a summing meter bills 30×.
+    #[test]
+    fn nightly_sampling_yields_exactly_one_report_per_period() {
+        let mut lvl = StoredBytesLevel::new(b"acct".to_vec());
+        lvl.observe(&UsageEvent::Stored { account: b"acct".to_vec(), delta_bytes: 10_000, at: 1 });
+
+        let period = 2026 * 12 + 7;
+        let mut reported: Vec<u64> = Vec::new();
+        for _night in 0..30 {
+            if let Some(bytes) = lvl.report_for_period(period).bytes_to_report() {
+                reported.push(bytes);
+            }
+        }
+        assert_eq!(
+            reported,
+            vec![10_000],
+            "30 nightly samples inside one period must produce ONE report; a summing meter would \
+             otherwise be handed the level 30 times and bill 30x"
+        );
+    }
+
+    #[test]
+    fn a_repeat_call_in_the_same_period_reports_nothing() {
+        let mut lvl = StoredBytesLevel::new(b"acct".to_vec());
+        lvl.observe(&UsageEvent::Stored { account: b"acct".to_vec(), delta_bytes: 512, at: 1 });
+        assert_eq!(lvl.report_for_period(10), LevelReport::Report(512));
+        assert_eq!(lvl.report_for_period(10), LevelReport::AlreadyReported { period: 10 });
+        assert_eq!(lvl.report_for_period(10).bytes_to_report(), None);
+    }
+
+    #[test]
+    fn each_new_period_reports_the_level_again() {
+        let mut lvl = StoredBytesLevel::new(b"acct".to_vec());
+        lvl.observe(&UsageEvent::Stored { account: b"acct".to_vec(), delta_bytes: 1_000, at: 1 });
+        assert_eq!(lvl.report_for_period(1), LevelReport::Report(1_000));
+        // Bytes held across a period boundary are billed again — that is what a level meter means.
+        assert_eq!(lvl.report_for_period(2), LevelReport::Report(1_000));
+        // A delta inside the new period moves the level the next report carries.
+        lvl.observe(&UsageEvent::Evicted { account: b"acct".to_vec(), delta_bytes: 400, at: 2 });
+        assert_eq!(lvl.report_for_period(3), LevelReport::Report(600));
+    }
+
+    #[test]
+    fn a_backwards_period_reports_nothing_and_does_not_move_the_cursor() {
+        let mut lvl = StoredBytesLevel::new(b"acct".to_vec());
+        lvl.observe(&UsageEvent::Stored { account: b"acct".to_vec(), delta_bytes: 77, at: 1 });
+        assert_eq!(lvl.report_for_period(5), LevelReport::Report(77));
+        assert_eq!(
+            lvl.report_for_period(4),
+            LevelReport::PeriodWentBackwards { period: 4, last_reported: 5 },
+            "clock skew or a stale cursor must not re-bill a closed period"
+        );
+        assert_eq!(lvl.last_reported_period(), Some(5), "a refused report leaves the cursor alone");
+        assert_eq!(lvl.report_for_period(6), LevelReport::Report(77), "and does not wedge it");
+    }
+
+    #[test]
+    fn resume_carries_the_guarantee_across_a_restart() {
+        let mut before = StoredBytesLevel::new(b"acct".to_vec());
+        before.observe(&UsageEvent::Stored { account: b"acct".to_vec(), delta_bytes: 2_048, at: 1 });
+        assert_eq!(before.report_for_period(9), LevelReport::Report(2_048));
+
+        // A bridge that persists (level, last_reported_period) and restarts mid-period must not
+        // report period 9 a second time.
+        let mut after =
+            StoredBytesLevel::resume(b"acct".to_vec(), before.level(), before.last_reported_period());
+        assert_eq!(after.report_for_period(9).bytes_to_report(), None);
+        assert_eq!(after.report_for_period(10), LevelReport::Report(2_048));
+    }
+
+    #[test]
+    fn a_negative_level_reports_zero_rather_than_a_huge_number() {
+        let mut lvl = StoredBytesLevel::new(b"acct".to_vec());
+        // More evicted than stored is a caller bug; it must not become u64::MAX-ish on the bill.
+        lvl.observe(&UsageEvent::Evicted { account: b"acct".to_vec(), delta_bytes: 5, at: 1 });
+        assert_eq!(lvl.level(), -5);
+        assert_eq!(lvl.report_for_period(1), LevelReport::Report(0));
+    }
+
+    #[test]
+    fn a_reporter_ignores_another_accounts_events() {
+        let mut a = StoredBytesLevel::new(b"account-a".to_vec());
+        let mut b = StoredBytesLevel::new(b"account-b".to_vec());
+        let stream = [
+            UsageEvent::Stored { account: b"account-a".to_vec(), delta_bytes: 100, at: 1 },
+            UsageEvent::Stored { account: b"account-b".to_vec(), delta_bytes: 7, at: 2 },
+            UsageEvent::Evicted { account: b"account-a".to_vec(), delta_bytes: 40, at: 3 },
+        ];
+        for e in &stream {
+            a.observe(e);
+            b.observe(e);
+        }
+        assert_eq!(a.report_for_period(1), LevelReport::Report(60));
+        assert_eq!(b.report_for_period(1), LevelReport::Report(7), "no cross-account billing");
+        assert!(!b.observe(&stream[0]), "a foreign event is reported as ignored, not folded");
+    }
+
+    #[test]
+    fn observing_folds_exactly_the_signed_stored_delta() {
+        let mut lvl = StoredBytesLevel::new(b"acct".to_vec());
+        for e in [
+            UsageEvent::Stored { account: b"acct".to_vec(), delta_bytes: 100, at: 1 },
+            UsageEvent::MessageAccepted { account: b"acct".to_vec(), at: 2 },
+            UsageEvent::Evicted { account: b"acct".to_vec(), delta_bytes: 30, at: 3 },
+        ] {
+            lvl.observe(&e);
+        }
+        assert_eq!(lvl.level(), 70, "message counts are size-neutral in the storage level");
     }
 
     #[test]

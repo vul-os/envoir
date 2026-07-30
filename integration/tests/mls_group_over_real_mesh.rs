@@ -35,12 +35,14 @@ fn tcp_listener(t: &Libp2pTransport) -> libp2p::Multiaddr {
         .expect("a bound TCP listen addr")
 }
 
+/// What [`Node::poll_group_messages`] hands back: for each buffered group message, the sender's
+/// identity bytes and either the decrypted plaintext or the reason decryption failed.
+type GroupMessages = Vec<(Vec<u8>, Result<Vec<u8>, GroupError>)>;
+
 /// Poll the real transport until at least one group application message has been buffered and
 /// decrypted, or the deadline passes. `poll_group_messages` drains its buffer, so this loop must
 /// call it exactly once per iteration rather than in the predicate itself.
-fn wait_for_group_message(
-    node: &mut Node<Libp2pTransport>,
-) -> Vec<(Vec<u8>, Result<Vec<u8>, GroupError>)> {
+fn wait_for_group_message(node: &mut Node<Libp2pTransport>) -> GroupMessages {
     let deadline = Instant::now() + SPIN;
     loop {
         node.poll();

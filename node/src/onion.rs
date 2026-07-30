@@ -232,12 +232,9 @@ pub fn wrap(inner: &[u8], path: &MixPath, alpha_seed: &[u8; 32]) -> Result<Onion
 /// The smallest bucket-ladder cell count (§4.4.1, §16.3: {1, 4, 16, 32}) that holds `len` fragment
 /// bytes, or `None` if `len` exceeds the top rung.
 fn ladder(len: usize) -> Option<u16> {
-    for &n in &[1u16, 4, 16, 32] {
-        if len <= n as usize * FRAGMENT_DATA_LEN {
-            return Some(n);
-        }
-    }
-    None
+    [1u16, 4, 16, 32]
+        .into_iter()
+        .find(|&n| len <= n as usize * FRAGMENT_DATA_LEN)
 }
 
 /// BLAKE3-256 of the concatenated parts, as a raw 32-byte value (the multihash prefix stripped).

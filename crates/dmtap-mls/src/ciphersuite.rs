@@ -113,11 +113,13 @@ pub fn is_pq_ciphersuite(cs: u16) -> bool {
 
 /// The **security level** of an MLS ciphersuite for high-water-mark ordering (spec §5.1).
 ///
-/// MLS ciphersuite `u16` code points are **not** ordered by strength (e.g. classical ChaCha `0x0003`
-/// > PQ X-Wing `0x004D` numerically would be nonsense), so the ratchet cannot compare the raw code
-/// the way `dmtap_core::suite::SuiteRatchet` compares the `Envelope.suite` byte. Instead the mark is
-/// a monotone **security ladder**, PQ strictly above classical, and (within classical) 256-bit above
-/// 128-bit:
+/// MLS ciphersuite `u16` code points are **not** ordered by strength: the IANA registry assigns them
+/// in registration order, so any *unregistered or future* code point can land numerically above
+/// X-Wing `0x004D` while being weaker than the 128-bit floor. Comparing raw code points would make
+/// such a suite a silent *upgrade* — the one thing a downgrade guard must never allow. So the ratchet
+/// cannot compare the raw code the way `dmtap_core::suite::SuiteRatchet` compares the
+/// `Envelope.suite` byte. Instead the mark is a monotone **security ladder**, PQ strictly above
+/// classical, and (within classical) 256-bit above 128-bit:
 ///
 /// | level | ciphersuites |
 /// |------:|--------------|
@@ -131,7 +133,7 @@ pub fn is_pq_ciphersuite(cs: u16) -> bool {
 pub fn security_level(cs: u16) -> u8 {
     if is_pq_ciphersuite(cs) {
         2
-    } else if matches!(cs, 0x0004 | 0x0005 | 0x0006 | 0x0007) {
+    } else if matches!(cs, 0x0004..=0x0007) {
         1 // 256-bit classical (P-521 / X448 / P-384)
     } else {
         0 // 128-bit classical (0x0001..=0x0003) or any unknown/unregistered code

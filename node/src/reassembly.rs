@@ -436,7 +436,7 @@ mod tests {
         assert_eq!(c.accept(CONN, &hdr([1; 8], 4, 4, 10), &cell(0), 0), Reassembled::Rejected);
         // Wrong data length.
         assert_eq!(
-            c.accept(CONN, &hdr([1; 8], 0, 4, 10), &vec![0u8; 10], 0),
+            c.accept(CONN, &hdr([1; 8], 0, 4, 10), &[0u8; 10], 0),
             Reassembled::Rejected
         );
         // total_len larger than the cell count can hold.

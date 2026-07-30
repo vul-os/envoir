@@ -4,8 +4,8 @@
 //! Everything above this seam (shaping a Cloudflare `dns_records` upsert, decoding its JSON
 //! envelope) is pure and offline-testable; the transport is abstracted behind [`HttpTransport`] so
 //! unit tests inject canned bytes and never open a socket. This mirrors the sibling
-//! `dmtap-namechain-rpc` crate's `HttpTransport`/`UreqTransport` split (and the retired
-//! `envoir-cloud` prototype this module was ported from) exactly. The sole real implementation,
+//! `dmtap-namechain-rpc` crate's `HttpTransport`/`UreqTransport` split exactly (it is also the split
+//! this module already had where it was first written — see the crate docs). The sole real implementation,
 //! [`UreqTransport`], is a small blocking rustls client behind the non-default `net` feature; the
 //! offline build ships only the trait + the pure shaping.
 //!

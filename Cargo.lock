@@ -1769,7 +1769,9 @@ version = "0.1.0"
 dependencies = [
  "dmtap-deniable",
  "dmtap-naming",
+ "dmtap-operator",
  "dmtap-p2p",
+ "dmtap-seam",
  "envoir-node",
  "kotva-core",
  "kotva-mail",

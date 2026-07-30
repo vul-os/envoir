@@ -11,7 +11,7 @@
 //!
 //! ## Transport
 //! The same framework-free `std`/`tokio` HTTP/1.1 approach the Envoir Send API uses (a `TcpListener`
-//! + [`crate::send_api::read_request`]). A [`Node`] is **not `Send`**, so the listener runs on the
+//! plus [`crate::send_api::read_request`]). A [`Node`] is **not `Send`**, so the listener runs on the
 //! daemon's *own* current-thread task ([`run_loop_with_apis`]), handling each connection inline with
 //! the live `&mut Node`.
 //!

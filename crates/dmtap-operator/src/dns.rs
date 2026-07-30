@@ -29,9 +29,9 @@
 //! only *operational* records — it never touches, gates, or is required by any privacy/crypto
 //! feature; a self-hoster who never brings a vanity domain online never uses this module.
 //!
-//! Ported from an earlier, retired control-plane prototype (`envoir-cloud`) — this module was
-//! already billing-free (DNS record shape has no notion of price), so nothing besides the license
-//! header and this note changed.
+//! First written for `envoir-cloud`, an earlier control-plane prototype that no longer exists (see
+//! the crate docs) — DNS record shape has no notion of price, so this module was billing-free
+//! already and nothing besides the license header and this note changed on the way in.
 
 use serde_json::Value;
 

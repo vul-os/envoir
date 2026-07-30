@@ -27,6 +27,23 @@ pub enum UsageKind {
     /// Legacy ingress: one message accepted SMTP → DMTAP and delivered.
     InboundLegacy,
     /// Hosted storage, in bytes (mailbox + files) for a managed node.
+    ///
+    /// **This is a LEVEL fed into an ADDING pipeline, which is the one combination that silently
+    /// over-charges.** Every rater in this workspace — [`crate::UsageTotal`] via
+    /// `dmtap_operator::queue::Accumulator` — *sums* the `amount` of every matching event for an
+    /// account, so `N` events each carrying the current stored-bytes level bill `N × level`. A bridge
+    /// that samples a node's stored-bytes level nightly and emits one event per sample over-bills a
+    /// 30-day period by ~30×.
+    ///
+    /// The constraint, therefore, and it is a MUST rather than a convention: **at most one
+    /// `StorageBytes` event per account per billing period**, carrying the level as of that period.
+    /// `envoir_node::usage::StoredBytesLevel` (`node/src/usage.rs`) is the reference guard that makes
+    /// this structural for a node→operator bridge; the end-to-end consequence is pinned by
+    /// `integration/tests/storage_level_billing_contract.rs`.
+    ///
+    /// Every other variant here is an *increment* (a send, an inbound message, relayed bytes), for
+    /// which summing per event is exactly right and no such constraint applies. `VanityDomain` is the
+    /// other per-period variant: one event per domain per period.
     StorageBytes,
     /// Bytes relayed on behalf of the account (bandwidth).
     RelayBytes,

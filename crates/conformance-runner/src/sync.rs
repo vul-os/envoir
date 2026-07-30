@@ -77,7 +77,7 @@ fn hex_list(v: &Value, path: &str) -> Result<Vec<Vec<u8>>, String> {
     arr(v, path)?
         .iter()
         .map(|e| e.as_str().ok_or_else(|| format!("`{path}` element is not a string")))
-        .map(|r| r.and_then(|h| unhex(h)))
+        .map(|r| r.and_then(unhex))
         .collect()
 }
 
@@ -122,10 +122,8 @@ fn ingest_all(ops: &[SyncOp]) -> Result<SyncState, String> {
 // --- SYNC-OP-01 ------------------------------------------------------------------------------
 
 fn op_encode(v: &Vector) -> Result<Verdict, String> {
-    let value = match v.input.get("value_tstr").and_then(Value::as_str) {
-        Some(t) => Some(SVal::Text(t.to_string())),
-        None => None,
-    };
+    let value =
+        v.input.get("value_tstr").and_then(Value::as_str).map(|t| SVal::Text(t.to_string()));
     let op = SyncOp {
         kind: v.input.get("kind").and_then(Value::as_u64).ok_or("missing kind")? as u8,
         ns: s(&v.input, "ns")?.to_string(),
@@ -561,7 +559,7 @@ fn tree_move_replay(v: &Vector) -> Result<Verdict, String> {
         .map(|e| op_from_hex(e.as_str().ok_or("non-string op")?))
         .collect::<Result<_, String>>()?;
     let (h1, h2) = (colliding[0].hlc.clone(), colliding[1].hlc.clone());
-    if !(h1 < h2) {
+    if h1 >= h2 {
         return Err("vector premise broken: h1 must sort before h2".into());
     }
 

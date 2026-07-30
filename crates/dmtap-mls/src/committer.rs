@@ -314,6 +314,13 @@ impl Committer {
     /// Only one partition can ever hold the `> n/2` quorum, so in a real partition the fork branch is
     /// reached only if a committer confirmed a Commit it had no quorum for — which the quorum rule
     /// prevents. The fork arm is retained as the fail-closed check, not an expected path.
+    // `ForkEvidence` is large (it carries BOTH disagreeing handshakes, which is the whole point —
+    // evidence a caller can publish) and this returns it by value. That is deliberate: `0x0404` is a
+    // `HALT_ALERT` path taken at most once in a group's life, so paying the width on the `Ok` return
+    // of a cold healing call is cheaper than boxing (an allocation on the alert path) and keeps the
+    // evidence a plain value callers can compare and serialize. Scoped to this one signature: any
+    // *other* oversized `Err` in this workspace still fails the clippy gate.
+    #[allow(clippy::result_large_err)]
     pub fn adopt_confirmed(
         &mut self,
         seq: u64,

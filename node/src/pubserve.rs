@@ -578,7 +578,7 @@ const B64URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
 
 /// Encode bytes as unpadded base64url (§22.5.1 `{pub}`/`{id}`/`{h}`).
 pub fn b64url_encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity((bytes.len() * 4 + 2) / 3);
+    let mut out = String::with_capacity((bytes.len() * 4).div_ceil(3));
     for chunk in bytes.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = chunk.get(1).copied().unwrap_or(0) as u32;

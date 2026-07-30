@@ -87,8 +87,8 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(5);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Upper bound on a single wire request (a [`WireFrame`]) the frame protocol will read off the
 /// wire. Spec §16.4 inlines a MOTE body up to the "Normal" file tier (4 MiB) before a file falls
-/// back to the chunked bulk path, so the cap must clear that with headroom for the CBOR envelope
-/// + `from` field; anything larger is presumed hostile/malformed and the codec fails the read
+/// back to the chunked bulk path, so the cap must clear that with headroom for the CBOR envelope and
+/// the `from` field; anything larger is presumed hostile/malformed and the codec fails the read
 /// closed (never allocates past this bound). Deliberately well under the raw-TCP transport's own
 /// 16 MiB `MAX_FRAME` bound (`envoir_node::transport`) so the two transports' failure envelopes
 /// agree in spirit without coupling the crates.
@@ -580,6 +580,7 @@ fn handle_command(swarm: &mut Swarm<MeshBehaviour>, pending: &mut PendingKad, cm
 ///     `from` still refreshes routing; explicit [`add_peer`](Libp2pTransport::add_peer)s are never
 ///     gated here), and
 ///   * the frame is dropped rather than enqueued once the inbox is at [`MAX_INBOX_FRAMES`].
+///
 /// Neither structure can grow without bound no matter how many frames a hostile peer sends.
 fn enqueue_inbound(
     inbox: &Arc<Mutex<VecDeque<InboundFrame>>>,

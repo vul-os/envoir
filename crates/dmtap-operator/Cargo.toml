@@ -1,8 +1,8 @@
 # dmtap-operator — reference machinery for a third-party DMTAP operator: usage tracking, flat
-# quotas, fail-closed gateway authorization, and gateway-domain DNS automation. Folded in from an
-# earlier, retired control-plane prototype (envoir-cloud) — everything commercial (price book,
-# invoicing, proration, dunning, payment-processor integration, multi-tenant superadmin) was
-# dropped; only the load-bearing, non-commercial operator machinery survived. See src/lib.rs.
+# quotas, fail-closed gateway authorization, and gateway-domain DNS automation. Parts of it were
+# first written for an earlier control-plane prototype (envoir-cloud) that no longer exists; only the
+# non-commercial operator machinery is here. Nothing in this workspace depends on that or any other
+# control plane, and no module here computes a price or talks to a payment processor. See src/lib.rs.
 [package]
 name = "dmtap-operator"
 version = "0.1.0"

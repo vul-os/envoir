@@ -22,6 +22,9 @@ description = "Cross-component end-to-end integration tests for the Envoir DMTAP
 #     rejected; the resolved (real, `dmtap-core`-signing-capable) key mints/verifies a capability token
 #   - deniable repudiation: a dmtap-deniable 1:1 exchange proven repudiable at the real wire level
 #     (dmtap-core::deniable::DeniableFrame), not just as in-memory structs
+#   - storage-level billing contract: the node's real UsageEvent stream through the real operator-side
+#     summing rater (dmtap-operator's Accumulator), proving the once-per-period rule that keeps a
+#     node→operator bridge from over-billing a level dimension by the number of samples it takes
 
 [lib]
 path = "src/lib.rs"
@@ -35,6 +38,12 @@ dmtap-mail = { workspace = true }
 dmtap-p2p = { path = "../crates/dmtap-p2p" }
 dmtap-naming = { path = "../crates/dmtap-naming" }
 dmtap-deniable = { path = "../crates/dmtap-deniable" }
+# The operator side of the metering seam, for `storage_level_billing_contract.rs`. This is the ONLY
+# place the node's usage events and the operator's summing rater meet inside this workspace — the node
+# deliberately depends on neither crate (it links no billing code, §12.2), so a cross-seam contract
+# test has to live in this test-only crate or nowhere.
+dmtap-seam = { path = "../crates/dmtap-seam" }
+dmtap-operator = { path = "../crates/dmtap-operator" }
 serde_json = "1"
 # Only for the `Multiaddr`/`Protocol` types used to pick the bound TCP listen address in
 # `p2p_delivery.rs`; `dmtap-p2p` does the actual networking. Version pinned to match `dmtap-p2p`'s
