@@ -1,30 +1,41 @@
 # Self-hosting Envoir
 
-This directory is a self-contained deployment scaffold for the Envoir reference implementation
-of **[DMTAP](../../dmtap/)** (the Decentralized Message Transfer & Access Protocol) — Dockerfiles,
-a `docker-compose.yml`, an env-var reference, and a one-command wrapper script.
+This directory is a self-contained deployment scaffold for the **node** half of the Envoir
+reference implementation of **[DMTAP](https://github.com/vul-os/kotva)** (the Decentralized
+Message Transfer & Access Protocol, KOTVA's mail profile) — a Dockerfile, a `docker-compose.yml`,
+an env-var reference, and a one-command wrapper script.
+
+**The legacy SMTP/IMAP/POP3 gateway is not part of this workspace or this scaffold.** It moved
+permanently to the separate, external **[Ephor broker repo](https://github.com/vul-os/ephor)**
+(its `gateway` coordinator kind), with zero crate dependency on `envoir` in either direction. If
+you correspond with the legacy email world, build `ephor-gateway` from that repo, run it as its
+own process (a container of your own, a bare-metal service, whatever you prefer), and point this
+node's dispatch shim at the resulting binary with `ENVOIR_GATEWAY_BIN` — see "The gateway
+(external, optional)" below. A node with no legacy correspondents never needs to touch any of
+this.
 
 **Status: pre-alpha reference implementation, not audited.** Nothing here has had a security
 review. Several pieces are honestly-labelled demo/seam behavior rather than hardened,
 production-ready self-host infrastructure — read this whole document before exposing any of it
 past your own loopback/LAN. See the root [`README.md`](../README.md) `Security & honesty` section
-and the spec's own status notes for the wider project context.
+for the wider project context.
 
 Every command and environment variable below was checked against the real source
-(`node/src/main.rs`, `gateway/src/main.rs`) and, where practical, against a real `docker build` +
-`docker run`/`docker compose up` in this environment — not invented. Where something doesn't
-exist yet, it's called out explicitly rather than glossed over.
+(`node/src/main.rs`) and, where practical, against a real `docker build` + `docker run`/`docker
+compose up` in this environment — not invented. Where something doesn't exist yet, it's called
+out explicitly rather than glossed over.
 
-## What's actually in this repo (the two binaries)
+## What's actually in this repo (one binary)
 
-The Cargo workspace (`../Cargo.toml`) builds two binaries relevant to self-hosting:
+The Cargo workspace (`../Cargo.toml`) builds one binary relevant to self-hosting:
 
 | Binary | Crate/path | What it is |
 |---|---|---|
-| `envoir-node` | `../node` (`node/src/main.rs`) | The reference DMTAP client: identity, MOTE store, mesh participation, and the §8 mail-client-protocol projection. **It is the whole client side** — there is no separate server binary for "your mailbox." |
-| `envoir-gateway` | `../gateway` (`gateway/src/main.rs`) | The **optional** legacy bridge between DMTAP and SMTP (spec §7) — stateless, and the only component that speaks plaintext SMTP. |
+| `envoir-node` | `../node` (`node/src/main.rs`) | The reference DMTAP client: identity, MOTE store, mesh participation, and the §8 mail-client-protocol projection. **It is the whole client side** — there is no separate server binary for "your mailbox" in this repository. |
 
-Both are plain `std`-only, synchronous Rust binaries — no async runtime, no external database.
+Plain `std`-heavy, synchronous-first Rust — no external database. The substrate
+(`kotva-core`/`kotva-mail`) is fetched as a tag-pinned git dependency, not built from a sibling
+path.
 
 ## Prerequisites
 
@@ -35,10 +46,9 @@ Both are plain `std`-only, synchronous Rust binaries — no async runtime, no ex
   but the committed workspace `Cargo.lock` (repo root — it IS tracked in git, not `.gitignore`d)
   pins a `zeroize_derive` release that requires the `edition2024` Cargo feature, which only
   stabilized in **Rust 1.85** — a plain 1.75 toolchain will fail with `feature edition2024 is
-  required`. The Dockerfiles here are pinned to `rust:1.90-slim-bookworm` and build `--locked`
-  against that committed lockfile, verified to build clean; `rust:1.82-slim-bookworm` was tried
-  first and failed with exactly that error. Use a 1.85+ toolchain (or newer) to build outside
-  Docker too.
+  required`. The Dockerfile here is pinned to `rust:1.90-slim-bookworm` and builds `--locked`
+  against that committed lockfile, verified to build clean. Use a 1.85+ toolchain (or newer) to
+  build outside Docker too.
 
 ## Quickstart (Docker)
 
@@ -47,9 +57,9 @@ Both are plain `std`-only, synchronous Rust binaries — no async runtime, no ex
 ./deploy/selfhost.sh up
 ```
 
-This copies `deploy/.env.example` to `deploy/.env` on first run (edit it — at minimum set
-`GATEWAY_DOMAIN` to your real domain if you intend to receive real legacy mail), then builds and
-starts both containers. `./deploy/selfhost.sh logs` / `ps` / `down` manage the stack afterward.
+This copies `deploy/.env.example` to `deploy/.env` on first run (edit it if you want to override
+any `ENVOIR_*` default), then builds and starts the node container. `./deploy/selfhost.sh logs` /
+`ps` / `down` manage it afterward.
 
 Equivalent, by hand:
 
@@ -59,22 +69,21 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env up --build -d
 ```
 
 The build context is the **repo root** (`context: ..` in `docker-compose.yml`), not `deploy/`
-itself — both binaries live in one Cargo workspace and their Dockerfiles need the sibling
-workspace members (`node`, `gateway`, `crates/*`, `integration`) to resolve the manifest at all.
+itself — the binary lives in the Cargo workspace and its Dockerfile needs the sibling workspace
+members (`crates/*`, `integration`) to resolve the manifest at all.
 
 ## Building without Docker
 
 ```sh
 # from the repo root
-cargo build --release -p envoir-node -p envoir-gateway
+cargo build --release -p envoir-node
 ./target/release/envoir-node version
-./target/release/envoir-gateway version
 ```
 
 (`cargo build --workspace` also works and additionally builds the test-only `integration` crate
-and the crates not on the node/gateway dependency path — see the root README's own Quickstart.)
+and every other crate under `crates/*` — see the root README's own Quickstart.)
 
-## What each binary actually does when you run it
+## What the binary actually does when you run it
 
 ### `envoir-node` (see `node/src/main.rs` for the exact source)
 
@@ -85,47 +94,43 @@ and the crates not on the node/gateway dependency path — see the root README's
 | `run` (alias `serve`) | The **real long-running daemon** (`node/src/daemon.rs::serve`): loads the keystore + the durable outbound journal (`$ENVOIR_DATA_DIR/journal.json`), binds the mesh transport on `ENVOIR_NODE_BIND` (default `0.0.0.0:4600`), and serves until SIGINT/SIGTERM. Requires an existing keystore — run `init` first. Optionally also serves JMAP, the Envoir Send HTTP API, DMTAP-PUB, and/or Sync, each gated behind its own opt-in env var (see below). |
 | `demo` | Runs an **in-process, two-node demo** over an in-memory transport (Alice seals a real encrypted MOTE, sends it, Bob validates/decrypts/acks it) to prove the delivery engine end-to-end. Prints the transcript and exits — not a server. This is the former behavior of `run` before it became the real daemon. |
 | `record` | Reloads the existing keystore and reprints just its `_dmtap` DNS TXT record — a convenience for re-publishing without regenerating identity. |
-| `gateway` | Just prints a pointer to the dedicated `envoir-gateway` binary; does nothing else. |
+| `gateway <args>` / `--gateway <args>` | Hands off to an externally-built gateway binary named by `ENVOIR_GATEWAY_BIN`, as a genuinely separate OS process (`exec` on Unix) — fails closed with a clear error if no such binary is reachable. See "The gateway (external, optional)" below. |
 
 `envoir-node` reads a real set of `ENVOIR_*` environment variables (`node/src/config.rs`, ~25 in
 total, every one with a sane default) — data dir, mesh bind, passphrase, claimed names, KT
 anchors, and the opt-in JMAP/Send-API/DMTAP-PUB/Sync surfaces. See `deploy/.env.example` for the
 full list with defaults, or `node/src/config.rs`'s own doc comment for the authoritative one.
 
-### `envoir-gateway` (see `gateway/src/main.rs`)
+## The gateway (external, optional)
 
-`run` is a genuine long-running daemon: it binds a real inbound MX (SMTP) TCP listener
-(`envoir_gateway::MxListener`, with optional STARTTLS if you supply a cert/key) and serves
-connections forever, and it configures a real outbound leg (SMTP-over-STARTTLS transport, real MX
-resolution, real MTA-STS policy discovery). **Honest limitation:** the recipient directory and the
-mesh-delivery adapter are unconfigured *operator seams* in this reference build (`EmptyDirectory`
-/ `UnreachableMesh` in `gateway/src/main.rs`) — every inbound `RCPT` is refused with SMTP `550`,
-and nothing is ever durably acknowledged (`451`), until a real directory + mesh are wired in. What
-you get out of the box is the real, working inbound-MX and outbound-MX/MTA-STS/DKIM socket
-plumbing, not an end-to-end legacy⟷DMTAP bridge.
+Legacy IMAP/POP3/SMTP-submission clients aren't served by the node, and this scaffold builds no
+gateway image. If you want to bridge to the legacy email world:
 
-`envoir-gateway` reads about 30 environment variables in total (`gateway/src/main.rs`,
-`gateway/src/personal.rs`); `deploy/.env.example` and `deploy/docker-compose.yml` wire up the 5
-this self-host stack actually uses today: `GATEWAY_DOMAIN`, `GATEWAY_LISTEN`,
-`GATEWAY_GW_SELECTOR`, `GATEWAY_TLS_CERT`, `GATEWAY_TLS_KEY`, `GATEWAY_DNS_SERVER`. The rest
-(`GATEWAY_DIRECTORY`, `GATEWAY_MESH_ENDPOINT`, `GATEWAY_AUTHZ_MODE`, the IMAP/POP3/submission
-listener flags, quota/enforcement toggles, etc.) configure gateway features this scaffold doesn't
-enable by default — see `gateway/src/main.rs`'s own `help` text for the full list.
+1. Clone and build the gateway from the separate **[Ephor repo](https://github.com/vul-os/ephor)**
+   (`cargo build -p gateway` there, binary name `ephor-gateway`) — its own README documents its
+   `GATEWAY_*` environment variables (inbound MX listener, DKIM/attestation selector, STARTTLS,
+   DNS-based MX/MTA-STS resolution), none of which live in this repository anymore.
+2. Run it as its own process — its own container, a bare-metal service, a separate VM — reachable
+   from wherever you run `envoir-node`.
+3. Set `ENVOIR_GATEWAY_BIN=/path/to/ephor-gateway` and invoke `envoir-node gateway run` (or
+   `envoir-node --gateway run`) to have the node's dispatch shim exec it.
+
+A node with no legacy correspondents never needs any of this. See the root
+[`README.md`](../README.md#node-binary-and-the-gateway-optional-external) and
+[`node/tests/gateway_dispatch.rs`](../node/tests/gateway_dispatch.rs) for exactly what the
+dispatch shim does and does not guarantee.
 
 ## Ports
 
 | Port | Service | Protocol | Notes |
 |---|---|---|---|
-| 2525 | `envoir-gateway` | SMTP (MX, inbound) | Not 25, so the container needs no root/`cap_net_bind_service`. Forward your real port 25 to this at your firewall/router if receiving real internet mail. |
 | 4600 | `envoir-node run`/`serve` | DMTAP mesh transport | `ENVOIR_NODE_BIND`, published by default (see `docker-compose.yml`). |
 
-Legacy IMAP/POP3/SMTP-submission are **not** served by the node image at all — they live only on
-the gateway (`node/Cargo.toml`'s own comment: the node intentionally does not enable
-`dmtap-mail`'s `net` feature). The node's other surfaces — JMAP (`ENVOIR_JMAP`), the Envoir Send
-HTTP API (`ENVOIR_SEND_API`), DMTAP-PUB (`ENVOIR_PUB_SERVE`), and Sync (`ENVOIR_SYNC_SERVE`) — are
-all opt-in and off by default, so none of their ports are published in `docker-compose.yml`; add a
-`ports:` entry yourself if you enable one and need it reachable from outside the container. JMAP
-and Sync default to loopback binds, so reaching them off-container also needs an explicit
+The node's other surfaces — JMAP (`ENVOIR_JMAP`), the Envoir Send HTTP API (`ENVOIR_SEND_API`),
+DMTAP-PUB (`ENVOIR_PUB_SERVE`), and Sync (`ENVOIR_SYNC_SERVE`) — are all opt-in and off by
+default, so none of their ports are published in `docker-compose.yml`; add a `ports:` entry
+yourself if you enable one and need it reachable from outside the container. JMAP and Sync
+default to loopback binds, so reaching them off-container also needs an explicit
 `ENVOIR_JMAP_BIND=0.0.0.0:...` / `ENVOIR_SYNC_BIND=0.0.0.0:...` override plus your own TLS front
 for JMAP (the daemon refuses an off-localhost JMAP bind without one, fail-closed).
 
@@ -149,21 +154,10 @@ for JMAP (the daemon refuses an off-localhost JMAP bind without one, fail-closed
 In short: `init` once, then `run`/`serve` is a real persistent daemon across restarts — both the
 identity and the outbound queue survive as long as the `node-data` volume does.
 
-## TLS for the gateway (STARTTLS)
-
-Leave `GATEWAY_TLS_CERT` / `GATEWAY_TLS_KEY` **unset** (not set-to-empty — see the note in
-`docker-compose.yml`/`.env.example`, this specific footgun is verified: a set-but-empty value
-crash-loops the container) to run a plaintext dev listener. To enable STARTTLS, put your PEM cert
-chain and private key in `deploy/certs/` (bind-mounted read-only into the container at `/certs`)
-and set both variables in `deploy/.env` to the in-container paths, e.g.
-`GATEWAY_TLS_CERT=/certs/fullchain.pem`, `GATEWAY_TLS_KEY=/certs/privkey.pem`. TLS itself is real
-(`rustls`, ring provider, embedded `webpki-roots` trust store for the outbound leg — no system CA
-bundle or OpenSSL dependency at runtime).
-
 ## DNS: publishing your `_dmtap` record (spec §3.2)
 
-The DMTAP naming spec (`../../dmtap/03-naming.md` §3.2) defines the discovery record a resolver
-looks up for `abc@def.com`:
+The DMTAP naming spec (`03-naming.md` §3.2 in the sibling [vul-os/kotva](https://github.com/vul-os/kotva)
+repo) defines the discovery record a resolver looks up for `abc@def.com`:
 
 ```
 abc._dmtap.def.com.  IN  TXT  "v=dmtap1; suite=1; ik=<base64url IK>; id=<hash of Identity §1.3>;
@@ -178,10 +172,11 @@ def.com.             IN  MX   ...             ; only if a legacy gateway serves 
 no CLI binary of its own. `envoir-node init` (and `record`) does print the record already
 formatted as the spec's TXT line (base64url `ik=`, per §3.9.1/§3.2), so you just copy it into your
 zone through your own DNS provider/registrar; there is no key-transparency (KT) log integration
-wired up either — see spec §3.5 for what a real KT log needs to provide. If you run the gateway, also
-publish a normal `MX` record for your domain pointing at wherever you forward port 25 to this
-gateway's port 2525 (see the Ports table above), plus the SPF/DKIM-selector/DMARC records
-`gateway/src/dkim.rs` and the spec's §7.3 assume (a delegated DKIM selector, not your DMTAP key).
+wired up either — see spec §3.5 for what a real KT log needs to provide. If you run a gateway
+(built from the separate Ephor repo), also publish a normal `MX` record for your domain pointing
+at wherever you forward inbound port 25 to that gateway, plus the SPF/DKIM-selector/DMARC records
+the spec's §7.3 assumes (a delegated DKIM selector, not your DMTAP key) — the gateway's own README
+documents its exact configuration.
 
 ## Known limitations / seams (summary)
 
@@ -191,19 +186,18 @@ gateway's port 2525 (see the Ports table above), plus the SPF/DKIM-selector/DMAR
 | Node outbound-queue durability | Real — `run`/`serve` loads/checkpoints a `FileJournal` at `$ENVOIR_DATA_DIR/journal.json` |
 | Node long-running daemon | Real — `run` (alias `serve`) is a service, until SIGINT/SIGTERM |
 | Node bind address | Configurable via `ENVOIR_NODE_BIND`, defaults to `0.0.0.0:4600` (Docker-reachable by default) |
-| Node client protocols | JMAP is native on the node (`ENVOIR_JMAP`, opt-in, app-password auth); legacy IMAP/POP3/SMTP-submission live only on the gateway |
-| Node mesh transport | The real libp2p mesh (`crates/dmtap-p2p`) is proven at the crate level but not yet the node daemon's default transport — see `docs/roadmap.md` |
-| Gateway recipient directory | Unconfigured seam (`EmptyDirectory`) — all inbound `RCPT` refused (`550`) |
-| Gateway mesh delivery | Unconfigured seam (`UnreachableMesh`) — no durable ack (`451`) |
-| Gateway core (inbound MX, outbound MX/MTA-STS/DKIM, STARTTLS) | Real, verified working |
+| Node client protocols | JMAP is native on the node (`ENVOIR_JMAP`, opt-in, app-password auth); legacy IMAP/POP3/SMTP-submission live only on an externally-built gateway (see above), never in this image |
+| Node mesh transport | The real libp2p mesh (`crates/dmtap-p2p`) is proven at the crate level but not yet the node daemon's default transport — see [`docs/roadmap.md`](../docs/roadmap.md) |
+| Mixnet | `node/src/onion.rs`'s Sphinx onion-wrap is a structural, keyed-BLAKE3 stand-in for the real mix cryptography — no live mix network runs; only the `fast` (direct) tier is real end-to-end today. See [`docs/roadmap.md`](../docs/roadmap.md). |
+| Gateway | Not part of this repo or this scaffold — build and run it from the separate [Ephor repo](https://github.com/vul-os/ephor) |
 | `_dmtap` DNS record | Generated correctly by `init`/`record`; publishing to your zone is still a manual/operator step, no KT log wired up |
-| Build reproducibility | Committed `Cargo.lock`, builder image pinned, both Dockerfiles build `--locked` |
+| Build reproducibility | Committed `Cargo.lock`, builder image pinned, the Dockerfile builds `--locked` |
 | Security review | None yet — pre-alpha |
 
 ## Reference
 
 - Root project README: [`../README.md`](../README.md)
 - Node crate docs: [`../node/README.md`](../node/README.md)
-- Gateway crate docs: [`../gateway/README.md`](../gateway/README.md)
-- Normative spec (sibling repo): [`../../dmtap/`](../../dmtap/) — naming/DNS is §3
-  (`03-naming.md`), the gateway is §7 (`07-gateway.md`)
+- Gateway (separate repo): [github.com/vul-os/ephor](https://github.com/vul-os/ephor)
+- Normative spec (sibling repo): [github.com/vul-os/kotva](https://github.com/vul-os/kotva) —
+  naming/DNS is §3 (`03-naming.md`), the gateway is §7 (`07-gateway.md`)

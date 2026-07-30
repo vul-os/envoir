@@ -25,32 +25,34 @@ FROM rust:1.90-slim-bookworm AS builder
 WORKDIR /src
 
 # Copy only the Cargo workspace members envoir-node's build graph needs. The root Cargo.toml
-# declares `members = ["node", "gateway", "integration", "crates/*"]`; ALL of those paths must
-# exist for Cargo to parse the workspace manifest at all (even though `-p envoir-node` only
-# *compiles* node's own dependency subset: dmtap-core, dmtap-mail, dmtap-mls, dmtap-naming,
-# dmtap-auth, dmtap-deniable). `integration` and the unused crates (dmtap-p2p, dmtap-seam,
-# conformance-runner, downgrade-tests, netsim) are copied for that manifest-resolution reason,
-# not because their code is built into this image.
+# declares `members = ["node", "integration", "crates/*"]`; ALL of those paths must exist for
+# Cargo to parse the workspace manifest at all (even though `-p envoir-node` only *compiles*
+# node's own dependency subset, including the tag-pinned `kotva-core`/`kotva-mail` git
+# dependencies, dmtap-mls, dmtap-naming, dmtap-auth, dmtap-deniable). `integration` and the unused
+# crates (dmtap-p2p, dmtap-seam, dmtap-operator, conformance-runner, downgrade-tests, netsim) are
+# copied for that manifest-resolution reason, not because their code is built into this image.
+# The legacy gateway is NOT copied here — it isn't a workspace member anymore, having moved
+# permanently to the separate Ephor repo (github.com/vul-os/ephor); see deploy/README.md.
 COPY Cargo.toml ./Cargo.toml
 COPY Cargo.lock ./Cargo.lock
 COPY node ./node
-COPY gateway ./gateway
 COPY crates ./crates
 COPY integration ./integration
 
-# --locked: the root Cargo.lock is the workspace's authoritative, tested dependency resolution
-# (deploy/Dockerfile.gateway builds with it too) — fail the build rather than silently
-# re-resolving, so the image can never drift from the dependency set the test suite ran against.
+# --locked: the root Cargo.lock is the workspace's authoritative, tested dependency resolution —
+# fail the build rather than silently re-resolving, so the image can never drift from the
+# dependency set the test suite ran against.
 RUN cargo build --release --locked -p envoir-node
 
 # ---------------------------------------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime
 
 # envoir-node's actual runtime dependencies, verified against node/Cargo.toml and the crates it
-# links: no TLS crate (dmtap-mail's `net` feature is NOT enabled for the node — legacy
-# IMAP/POP3/SMTP-submission live only on the gateway, see node/Cargo.toml's own comment), no
-# system OpenSSL/ca-certificates, no raw-socket DNS/SMTP code (that lives in the gateway too).
-# So the runtime image needs nothing beyond glibc + libgcc, both already in debian-slim.
+# links: no TLS crate (`kotva-mail`'s `net` feature is NOT enabled for the node — legacy
+# IMAP/POP3/SMTP-submission live only on an externally-built gateway from the separate Ephor
+# repo, see node/Cargo.toml's own comment), no system OpenSSL/ca-certificates, no raw-socket
+# DNS/SMTP code (that lives in the external gateway too). So the runtime image needs nothing
+# beyond glibc + libgcc, both already in debian-slim.
 RUN groupadd --system --gid 10001 envoir \
     && useradd --system --uid 10001 --gid envoir --home-dir /data --shell /usr/sbin/nologin envoir \
     && mkdir -p /data \
@@ -62,7 +64,8 @@ USER envoir
 WORKDIR /data
 
 # The node's own listeners (node/src/config.rs) — legacy IMAP/POP3/SMTP-submission live only on
-# the separate `envoir-gateway` binary (see Dockerfile.gateway), not here.
+# an externally-built gateway binary from the separate Ephor repo (github.com/vul-os/ephor), not
+# here — see deploy/README.md.
 #   4600 — the mesh transport (ENVOIR_NODE_BIND, default 0.0.0.0:4600 — Docker-reachable by
 #          default, unlike a loopback default would be).
 # The rest are opt-in and off by default, so they are not EXPOSEd: the Envoir Send HTTP API
