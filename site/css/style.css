@@ -30,6 +30,9 @@
   --accent-2: #9a4dff;
   --accent-teal: #00e0c7;
   --accent-soft: rgba(124, 77, 255, 0.14);
+  /* Lightened accent-1 used only for small text on dark backgrounds (eyebrow
+     tags etc.) — plain --accent-1 fails WCAG AA at these sizes/backgrounds. */
+  --accent-1-aa: #7374ff;
   --good: #00e0c7;
   --warn: #ffcf7d;
   --shadow-lg: 0 30px 80px -30px rgba(0, 0, 0, 0.7);
@@ -67,6 +70,8 @@
   --good: #067a68;
   --warn: #8f5200;
   --accent-soft: rgba(76, 77, 255, 0.1);
+  /* Already >=4.5:1 on this theme's light backgrounds — just alias it. */
+  --accent-1-aa: var(--accent-1);
   --shadow-lg: 0 30px 80px -30px rgba(20, 20, 30, 0.22);
   --shadow-glow: 0 0 0 1px rgba(124, 92, 255, 0.22), 0 0 40px -10px rgba(91, 157, 255, 0.3);
 }
@@ -866,3 +871,35 @@ footer { padding: 56px 0 40px; border-top: 1px solid var(--line); }
 .skip-link:focus { left: 0; }
 
 :focus-visible { outline: 2px solid var(--accent-1); outline-offset: 2px; }
+
+/* ---------- mobile/tablet legibility + AA-contrast pass ----------
+   Scoped to <1280px so the >=1280px desktop view is unchanged.
+   These labels were already >=10.5px (the tracked-micro-label floor)
+   but their color failed WCAG AA (~3.3–3.8:1) against their real
+   backgrounds; swap in the existing --ink-dim / --accent-1-aa tokens
+   (already used elsewhere on the site) for ~5–9:1. A couple of
+   under-12px "prose-ish" bits (feature badges, status line, inline
+   code) get nudged up to a legible floor. */
+@media (max-width: 1279px) {
+  .eyebrow,
+  .hero-visual .hv-caption,
+  .hero-address .label,
+  .ind-box .tt,
+  .state-table th,
+  .foot-col h4,
+  .pt-label {
+    color: var(--ink-dim);
+  }
+  .eyebrow .tag {
+    color: var(--accent-1-aa);
+  }
+  .status-pill {
+    font-size: 0.82rem;
+  }
+  .feature-tag {
+    font-size: 0.8125rem;
+  }
+  .seam-note code {
+    font-size: 0.92em;
+  }
+}

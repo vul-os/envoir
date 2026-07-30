@@ -34,6 +34,9 @@
   --ink:#eef1f7; --ink-dim:#a5adc0; --ink-faint:#656d80;
   --accent-1:#4c4dff; --accent-2:#9a4dff; --accent-teal:#00e0c7;
   --accent-soft:rgba(124,77,255,.14);
+  /* Lightened accent-1 for small text on dark backgrounds — plain
+     --accent-1 fails WCAG AA at these sizes/backgrounds. */
+  --accent-1-aa:#7374ff;
   --radius-sm:6px; --radius-md:12px; --radius-lg:16px;
   --container:1180px;
   --code-bg:#0b0d14;
@@ -45,6 +48,8 @@
   --ink:#14151a; --ink-dim:#4c5266; --ink-faint:#82889b;
   --accent-1:#3a34e0; --accent-2:#7b2fd6; --accent-teal:#008b7d;
   --accent-soft:rgba(90,60,220,.1);
+  /* Already >=4.5:1 on this theme's light backgrounds — just alias it. */
+  --accent-1-aa:var(--accent-1);
   --code-bg:#f5f3ef;
 }
 html{scroll-behavior:smooth}
@@ -164,6 +169,19 @@ img{max-width:100%;display:block}
 .footer-links{display:flex;gap:22px;flex-wrap:wrap}
 .footer-links a{font-size:13.5px;color:var(--ink-faint)}
 .footer-links a:hover{color:var(--ink-dim)}
+
+/* Mobile/tablet legibility + AA-contrast pass — scoped to <1280px so the
+   >=1280px desktop view is unchanged. These labels were already >=10.5px
+   (the tracked-micro-label floor) but their color failed WCAG AA
+   (~3.3–3.8:1) against their real backgrounds; swap in the existing
+   --ink-dim / --accent-1-aa tokens for ~5–9:1. */
+@media(max-width:1279px){
+  .vulos-back,
+  .sidebar .grp,
+  .crumb{ color:var(--ink-dim) }
+  .sidebar-head .eyebrow,
+  .crumb b{ color:var(--accent-1-aa) }
+}
 
 @media(max-width:860px){
   .nav-links{display:none}
