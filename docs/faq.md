@@ -63,8 +63,8 @@ external audit the project treats as a hard gate before any production deploymen
 [security.md](security.md).
 
 **What license is this under?**
-MIT (see [`LICENSE-MIT`](../LICENSE-MIT)). Apache-2.0 dual-licensing (for its explicit patent
-grant) is under consideration; the project ships as MIT today. See
+Dual-licensed **MIT OR Apache-2.0** (see [`LICENSE-MIT`](../LICENSE-MIT) and
+[`LICENSE-APACHE`](../LICENSE-APACHE) — Apache-2.0 adds an explicit patent grant). See
 [contributing.md](contributing.md).
 
 **How is this different from Signal / Matrix / email?**

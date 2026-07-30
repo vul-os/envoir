@@ -38,17 +38,20 @@ the spec's own roadmap markers, it doesn't belong here.
   one case stays an honest `#[ignore]`. This crate is not yet the transport `envoir-node`'s `run`/
   `serve` daemon command uses by default (it uses a real TCP transport, not this libp2p mesh) —
   see [architecture.md](architecture.md#the-mesh-and-mixnet).
-- **The client-protocol layer** (`crates/dmtap-mail`) — real IMAP (RFC 9051/3501, including
-  CONDSTORE/QRESYNC, SEARCHRES, SORT/THREAD, BINARY), POP3, SMTP-submission, and JMAP Core/Mail
-  servers, plus autodiscovery (Thunderbird, Apple, Microsoft), all runnable via the
-  `envoir-gateway` binary's `GATEWAY_IMAP_ENABLE`/`GATEWAY_POP3_ENABLE`/
-  `GATEWAY_SUBMISSION_ENABLE` toggles (`gateway/src/personal.rs`) — the node binary itself only
-  enables this crate's native, JMAP-only surface (`ENVOIR_JMAP`, no legacy protocols). See the
-  crate's own capability matrix in
-  [`crates/dmtap-mail/README.md`](../crates/dmtap-mail/README.md) for exactly what's done vs.
-  explicitly deferred (real TLS, DEFLATE compression, cross-server CATENATE URLFETCH, JMAP push
-  transport).
-- **The legacy gateway** (`gateway/`, backed by the `envoir-gateway` crate) — a real inbound MX
+- **The client-protocol layer** (`dmtap-mail`, as of this writing carved out into the sibling
+  [vul-os/kotva](https://github.com/vul-os/kotva) repo as `kotva-mail`, consumed here as a
+  tag-pinned git dependency) — real IMAP (RFC 9051/3501, including CONDSTORE/QRESYNC, SEARCHRES,
+  SORT/THREAD, BINARY), POP3, SMTP-submission, and JMAP Core/Mail servers, plus autodiscovery
+  (Thunderbird, Apple, Microsoft); the legacy-protocol front-ends (IMAP/POP3/SMTP-submission) are
+  served by the gateway binary built from the separate
+  [Ephor repo](https://github.com/vul-os/ephor) (its own `GATEWAY_IMAP_ENABLE`/
+  `GATEWAY_POP3_ENABLE`/`GATEWAY_SUBMISSION_ENABLE` toggles, not part of this workspace) — the
+  node binary itself only enables this crate's native, JMAP-only surface (`ENVOIR_JMAP`, no legacy
+  protocols). See the KOTVA repo's own capability matrix for exactly what's done vs. explicitly
+  deferred (real TLS, DEFLATE compression, cross-server CATENATE URLFETCH, JMAP push transport).
+- **The legacy gateway** — no longer part of this repository; it moved permanently to the separate
+  [Ephor broker repo](https://github.com/vul-os/ephor) as its `gateway` coordinator kind. As last
+  measured before the move: a real inbound MX
   listener with STARTTLS, a real pre-`DATA` anti-abuse gate (RBL/DNSBL, SPF, DMARC-`p=` awareness,
   greylisting, per-IP rate limits), real gateway attestation sealing, real delegated-selector DKIM
   signing (ed25519-sha256, RFC 8463/6376, with a hard refusal to sign an undelegated domain), real
@@ -58,7 +61,9 @@ the spec's own roadmap markers, it doesn't belong here.
   and the ack-before-`250`/`451`-on-no-ack rule. The recipient directory and mesh-delivery hookup
   are left as operator-supplied seams — until wired to real infrastructure, inbound refuses (`550`)
   and outbound never durably acks (`451`), which are the safe defaults for an unconfigured gateway.
-- **Cryptographic primitives** (`crates/dmtap-core`) — real Ed25519 signing, BLAKE3 content
+- **Cryptographic primitives** (`dmtap-core`, now `kotva-core` in the sibling
+  [vul-os/kotva](https://github.com/vul-os/kotva) repo, consumed here as a tag-pinned git
+  dependency) — real Ed25519 signing, BLAKE3 content
   addressing, deterministic canonical CBOR (now enforcing shortest-form integers, no
   indefinite-length items, and strictly-ascending map keys at decode time — see
   [security.md](security.md#fuzzing)), the key-name checksum, delegated/attenuable capability

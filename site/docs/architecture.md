@@ -1,8 +1,11 @@
 # Architecture
 
-Envoir has exactly two pieces of software, plus DNS (which it doesn't run): the **node** and the
-**gateway**. Everything else in this repository — the web client, the admin consoles, the status
-page — is a client of one or the other.
+Envoir ships exactly one piece of software: the **node**. Everything else in this repository —
+the web client, the admin consoles, the status page — is a client of it. A second, optional piece,
+the **gateway**, exists but no longer lives in this repository at all — it moved permanently to
+the separate **[Ephor broker repo](https://github.com/vul-os/ephor)**, and the node only keeps a
+thin dispatch shim that hands off to an externally-built gateway binary as a genuinely separate OS
+process (see [features/self-hosting.md](features/self-hosting.md)).
 
 ## The whole picture
 
@@ -29,7 +32,7 @@ flowchart LR
     end
 
     subgraph Legacy["Legacy email — optional"]
-        Gateway["envoir-gateway (gateway/)<br/>the one component that speaks SMTP"]
+        Gateway["Ephor repo (github.com/vul-os/ephor)<br/>separate repo/process, the one thing that speaks SMTP"]
         SMTP["SMTP / the existing internet"]
     end
 
@@ -70,10 +73,12 @@ A node MAY additionally run in **relay mode** (helping NAT'd peers reach each ot
 public address) or **mix mode** (be a mixnet hop). These are capabilities of the same binary, not
 separate programs — see [`node/README.md`](../node/README.md).
 
-## The gateway — envoir-gateway (optional)
+## The gateway — external, in the Ephor repo (optional)
 
-The **only** component that speaks SMTP, and the only one that is not content-blind (the legacy
-leg is unavoidably plaintext). It:
+Not part of this workspace: built from [`github.com/vul-os/ephor`](https://github.com/vul-os/ephor)
+as its `gateway` coordinator kind, with zero crate dependency on `envoir` in either direction. It's
+the **only** component that speaks SMTP, and the only one that is not content-blind (the legacy leg
+is unavoidably plaintext). It:
 
 - Receives inbound legacy mail (acts as MX for a domain), wraps it into a MOTE, attests it with a
   domain-anchored key, and delivers into the mesh — returning SMTP `451` if the recipient is
@@ -84,8 +89,9 @@ leg is unavoidably plaintext). It:
 
 The gateway is **stateless** — it holds no queue and no mailbox; durability is punted to whichever
 edge (sender or receiver) is durable. A node with no legacy correspondents never invokes a
-gateway, and at full DMTAP adoption the gateway becomes unnecessary. See
-[protocol.md](protocol.md#the-legacy-gateway) and [features/self-hosting.md](features/self-hosting.md).
+gateway (and never needs `ENVOIR_GATEWAY_BIN` set), and at full DMTAP adoption the gateway becomes
+unnecessary. See [protocol.md](protocol.md#the-legacy-gateway) and
+[features/self-hosting.md](features/self-hosting.md).
 
 ## The mesh and mixnet
 

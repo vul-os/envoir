@@ -78,7 +78,7 @@ See [`fuzz/README.md`](../fuzz/README.md) for the harness details and history.
 
 ## Conformance suite
 
-The [conformance suite](https://github.com/vul-os/dmtap/tree/main/conformance) in the spec repo
+The [conformance suite](https://github.com/vul-os/kotva/tree/main/conformance) in the spec repo
 is the **operational definition** of "DMTAP-compatible" — an implementation conforms at a level
 if and only if it passes that level's `MUST` cases, not if it merely "resembles the reference." It
 ships as three coupled artifacts: a normative case catalog (`SUITE.md`), the same cases as
@@ -144,12 +144,13 @@ directly:
   the `node/src/journal.rs` seam (a `FileJournal`, with a `NullJournal` no-op default for a node
   built without persistence) — a restarted node reloads the same anti-rollback/anti-abuse state
   rather than starting over at a weaker baseline an attacker could force by causing a crash.
-- **The gateway fails closed against SSRF.** `envoir-gateway`'s outbound MX/MTA-STS resolution
-  (`gateway/src/outbound_tcp.rs`) refuses to connect to a destination that resolves only to a
+- **The gateway fails closed against SSRF.** As last measured before the gateway moved
+  permanently out of this repository to the separate [Ephor broker repo](https://github.com/vul-os/ephor):
+  its outbound MX/MTA-STS resolution refuses to connect to a destination that resolves only to a
   loopback, private, link-local, or cloud-metadata address (including an IPv4-mapped IPv6 address
   judged by its embedded v4 form) — otherwise a legacy sender could aim the gateway at the
   operator's own internal network. An explicitly configured pinned address is the one deliberate,
-  documented exemption.
+  documented exemption. Current status lives in the Ephor repo, not here.
 
 ## The mixnet anonymity simulator
 

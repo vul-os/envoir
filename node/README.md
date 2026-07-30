@@ -3,14 +3,16 @@
 Reference implementation of the DMTAP **node** — the whole client side. One binary, installed
 on any always-on box; it *is* the mesh.
 
-See the DMTAP spec repo ([`../dmtap/`](../dmtap/)) for the normative specification. This crate
-is a **reference, not normative** (spec §10.4).
+See the sibling [vul-os/kotva](https://github.com/vul-os/kotva) repo for the normative
+specification (DMTAP is its mail profile). This crate is a **reference, not normative** (spec
+§10.4).
 
 ## Native-only (spec §8.5)
 
 The node runs the libp2p **mesh**, the **Send API** (§13.5.1), and **JMAP** (§8.1) — JMAP is the
 node's native, and only, client surface. It does **not** run any legacy protocol server: the
-IMAP/POP3/SMTP-submission surfaces live **only on the separate `envoir-gateway`** (spec §7). There
+IMAP/POP3/SMTP-submission surfaces live **only on the gateway binary built from the separate
+[Ephor repo](https://github.com/vul-os/ephor)** (spec §7), never in this crate. There
 are therefore no `ENVOIR_IMAP_PORT`/`ENVOIR_POP3_PORT`/`ENVOIR_SMTP_PORT`/`ENVOIR_MAIL_HOST` knobs
 on the node.
 

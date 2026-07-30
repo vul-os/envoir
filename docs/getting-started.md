@@ -1,9 +1,11 @@
 # Getting Started
 
 This walks through building the workspace and running the real, working pieces: the reference
-node's delivery engine and daemon, the legacy gateway (including its demo mail servers), and the
-web client. Every command below is copied from the actual CLI entry points (`node/src/main.rs`,
-`gateway/src/main.rs`) — nothing aspirational.
+node's delivery engine and daemon, and the web client. The legacy gateway is **not part of this
+workspace** — it moved to the separate, permanent **[Ephor broker repo](https://github.com/vul-os/ephor)**
+(the `gateway` coordinator kind); see the root [README's gateway section](../README.md#node-binary-and-the-gateway-optional-external)
+for how `envoir-node` hands off to a binary built from there. Every command below is copied from
+the actual CLI entry points (`node/src/main.rs`) — nothing aspirational.
 
 ## Prerequisites
 
@@ -19,8 +21,12 @@ cd envoir
 cargo build --workspace
 ```
 
-The workspace ([`Cargo.toml`](../Cargo.toml)) has four member groups: `node`, `gateway`,
-`integration` (cross-component tests), and every crate under `crates/*`.
+The workspace ([`Cargo.toml`](../Cargo.toml)) has three member groups: `node`, `integration`
+(cross-component tests), and every crate under `crates/*` (`dmtap-postage-patala` is `exclude`d —
+see the manifest's own comment for why). The substrate — what used to be the in-tree `dmtap-core`/
+`dmtap-mail` crates — is now a tag-pinned git dependency on
+[vul-os/kotva](https://github.com/vul-os/kotva); the legacy gateway isn't a member at all anymore,
+having moved to the separate [Ephor repo](https://github.com/vul-os/ephor).
 
 ## Run the node
 
@@ -37,7 +43,7 @@ cargo run -p envoir-node -- <command>
 | `run` (alias `serve`) | Run the real long-running node daemon — loads the keystore + durable outbound journal, binds the mesh transport, and serves until SIGINT/SIGTERM |
 | `demo` | Run the delivery engine as a one-shot demo: two in-process nodes exchange a real, end-to-end-encrypted MOTE over an in-memory transport (seal → validate → decrypt → ack), then exit |
 | `record` | Reload the keystore and print just its `_dmtap` DNS record |
-| `gateway` | Points you at the dedicated `envoir-gateway` binary below |
+| `gateway` | Hands off to an external gateway binary via `ENVOIR_GATEWAY_BIN` — see below |
 | `help` | Usage |
 
 Try the delivery demo first — it's the clearest illustration of what's real today:
@@ -58,36 +64,29 @@ cargo run -p envoir-node -- init   # once, to create a keystore
 cargo run -p envoir-node -- run    # the daemon; Ctrl-C to stop
 ```
 
-Legacy IMAP/POP3/SMTP-submission clients aren't served by the node — only the separate
-`envoir-gateway` binary speaks those protocols (see below). The node's own client-sync surface is
+Legacy IMAP/POP3/SMTP-submission clients aren't served by the node — only a separate gateway
+binary, built from the external [Ephor repo](https://github.com/vul-os/ephor), speaks those
+protocols (see below). The node's own client-sync surface is
 JMAP, opt-in via `ENVOIR_JMAP=1` (see [`node/src/config.rs`](../node/src/config.rs) for the full
 `ENVOIR_*` environment reference).
 
-## Run the gateway (optional)
+## Run the gateway (optional, external)
 
-`envoir-gateway` is the legacy SMTP bridge — only needed if you want to exchange mail with the
-existing email world:
+The legacy SMTP/IMAP/POP3 bridge is **not part of this workspace** — it ships from the separate
+**[Ephor broker repo](https://github.com/vul-os/ephor)** (`cargo build -p gateway` there, binary
+name `ephor-gateway`) as a genuinely separate OS process, never linked into the node's own address
+space. A node with no legacy correspondents never needs this at all:
 
 ```sh
-cargo run -p envoir-gateway -- run
+# build the gateway from the Ephor repo, then point the node's dispatch shim at it
+ENVOIR_GATEWAY_BIN=/path/to/ephor-gateway cargo run -p envoir-node -- gateway run
 ```
 
-Configure it with environment variables:
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `GATEWAY_LISTEN` | `127.0.0.1:2525` | Bind address for the inbound MX listener |
-| `GATEWAY_DOMAIN` | `localhost` | Domain this gateway is MX for |
-| `GATEWAY_GW_SELECTOR` | `gw1` | DKIM / attestation selector |
-| `GATEWAY_TLS_CERT` / `GATEWAY_TLS_KEY` | unset | PEM cert+key to enable STARTTLS; without them the listener runs in plaintext dev mode |
-| `GATEWAY_DNS_SERVER` | `1.1.1.1:53` | DNS server for outbound MX + MTA-STS lookups |
-
-The reference gateway wires up a real inbound MX listener, a real outbound SMTP-over-STARTTLS
-transport, real DNS-based MX resolution, and real MTA-STS policy fetching. The recipient directory
-and mesh-delivery hookup are left as operator-supplied seams (see
-[`gateway/README.md`](../gateway/README.md)) — until wired to a real directory/mesh, inbound mail
-is refused (`550`, the safe default) and outbound never durably acks (`451`, so the legacy
-sender's own queue retries).
+See [`node/tests/gateway_dispatch.rs`](../node/tests/gateway_dispatch.rs) for exactly what this
+handoff does and does not guarantee today (it fails closed with a clear error when no such binary
+is reachable), and the Ephor repo's own README for the gateway's own configuration — inbound MX
+listener, DKIM/attestation selector, STARTTLS, DNS-based MX/MTA-STS resolution — none of which
+lives in this repository anymore.
 
 ## Open the web client
 
@@ -118,11 +117,12 @@ cd site       && python3 -m http.server 8096   # marketing/landing page
 
 ```sh
 cargo test --workspace              # everything that builds without extra tooling
-cargo test -p dmtap-core            # canonical CBOR, conformance vectors, known-answer tests
-cargo test -p dmtap-mail            # IMAP/POP3/SMTP/JMAP protocol core
-cargo test -p dmtap-mail --features net   # + the real TCP literal-reader tests
-cargo test -p envoir-gateway        # inbound/outbound gateway flows
+cargo test -p envoir-node           # node: identity, mailbox, mesh, messaging, journal
 cargo test -p integration           # cross-component adversarial + end-to-end tests
+# dmtap-core / dmtap-mail (canonical CBOR, conformance vectors, IMAP/POP3/SMTP/JMAP protocol core)
+# are consumed as a tag-pinned git dependency now — `cargo test -p dmtap-core` no longer resolves
+# from this workspace; their own test suites live in github.com/vul-os/kotva.
+# The legacy gateway's tests moved with it to github.com/vul-os/ephor (`cargo test -p gateway` there).
 ```
 
 Formal verification and fuzzing need extra tooling and are covered in [security.md](security.md):

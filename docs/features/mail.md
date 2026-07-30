@@ -1,8 +1,9 @@
 # Mail
 
 Three-pane conversation view over the same MOTE substrate as everything else in Envoir — mail is
-simply MOTEs of `kind = mail`, defaulting to the metadata-private `private` transport tier (see
-[privacy.md](../privacy.md)).
+simply MOTEs of `kind = mail`, designed to default to the metadata-private `private` transport
+tier (see [privacy.md](../privacy.md)); today only the `fast` (direct) tier actually runs — see
+[roadmap.md](../roadmap.md).
 
 ![Mail — three-pane inbox](../img/mail-dark.png)
 
@@ -22,8 +23,10 @@ simply MOTEs of `kind = mail`, defaulting to the metadata-private `private` tran
 ## How delivery works
 
 Mail addressed to a DMTAP identity resolves `name@domain` to a key (see [identity.md](identity.md)),
-is sealed as a MOTE, and travels the mixnet by default — see
-[architecture.md](../architecture.md#message-flow) for the full sequence. Mail addressed to a
+is sealed as a MOTE, and is designed to travel the mixnet by default — see
+[architecture.md](../architecture.md#message-flow) for the full sequence and
+[roadmap.md](../roadmap.md) for why only the `fast` tier is real today (the onion-wrap's mix
+cryptography is a structural BLAKE3 stand-in, not yet the real Sphinx construction). Mail addressed to a
 legacy address (`@gmail.com` and the like) is handed to a [gateway](self-hosting.md), which is the
 only component in the whole system that speaks SMTP and the only one that isn't content-blind.
 
@@ -66,10 +69,15 @@ set of each, now at parity with Mail and Chat in the web client.
 
 ## Try it
 
+The IMAP/POP3/SMTP-submission servers are **not part of this workspace** — they're served by the
+gateway binary built from the separate [Ephor repo](https://github.com/vul-os/ephor):
+
 ```sh
+# in the Ephor repo
 GATEWAY_IMAP_ENABLE=1 GATEWAY_POP3_ENABLE=1 GATEWAY_SUBMISSION_ENABLE=1 \
-  cargo run -p envoir-gateway -- run
+  cargo run -p gateway -- run
 ```
 
-Runs real IMAP (`:1143`), POP3 (`:1110`), and SMTP-submission (`:1587`) servers (gateway defaults,
-`gateway/src/personal.rs`) — see [getting-started.md](../getting-started.md).
+Runs real IMAP (`:1143`), POP3 (`:1110`), and SMTP-submission (`:1587`) servers (gateway
+defaults) — see [getting-started.md](../getting-started.md) for how `envoir-node` points at the
+resulting binary via `ENVOIR_GATEWAY_BIN`.

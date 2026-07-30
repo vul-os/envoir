@@ -23,10 +23,12 @@ Onboarding has three tiers (spec §3.8), so you can start free and grow into ful
 
 ## Running your own gateway
 
-To exchange mail with the legacy world (`@gmail.com` and the like), you need a gateway — either
-your own, self-hosted (`cargo run -p envoir-gateway -- run`, see
-[getting-started.md](../getting-started.md#run-the-gateway-optional)), in which case you bear only
-the IP-reputation warmup cost and owe nobody a bill, or a third-party operator's.
+To exchange mail with the legacy world (`@gmail.com` and the like), you need a gateway — built
+from the separate **[Ephor broker repo](https://github.com/vul-os/ephor)**, never from this
+workspace. Run your own (see
+[getting-started.md](../getting-started.md#run-the-gateway-optional-external)), in which case you
+bear only the IP-reputation warmup cost and owe nobody a bill, or point at a third-party
+operator's.
 
 Switching gateways later costs nothing: DKIM delegation means changing a DNS record, not
 migrating data, because the box — not the gateway — is the authority over your identity. If one
@@ -45,10 +47,10 @@ directory to already know about you:
   registered anywhere.
 - **A gateway's own default local-part, once you *do* register.** In key-registered mode (the
   default; see below), a gateway operator additionally allocates each admitted key a short,
-  content-address-derived default local-part (`k` + base32, [`gateway/src/authz.rs`](../../gateway/src/authz.rs)),
-  with an optional operator-assigned **vanity** name layered on top — a vanity request that would
-  shadow another key's reserved key-derived form is refused fail-closed, so a vanity name can
-  never impersonate someone else's default address.
+  content-address-derived default local-part (`k` + base32, implemented in the Ephor repo's own
+  `gateway/src/authz.rs`, not in this workspace), with an optional operator-assigned **vanity**
+  name layered on top — a vanity request that would shadow another key's reserved key-derived form
+  is refused fail-closed, so a vanity name can never impersonate someone else's default address.
 - **Bidirectional anti-spam.** Inbound (legacy → DMTAP) and outbound (DMTAP → legacy) are gated
   independently, because they carry opposite risks. Inbound runs a pre-`DATA` gate — RBL/DNSBL,
   SPF, DMARC-`p=` awareness, greylisting, per-IP rate limits — before the message body is ever
@@ -66,10 +68,14 @@ directory to already know about you:
   money** — quota/usage-tracking is plain OSS; billing is a separate, thin operator-side layer (see
   [architecture.md](../architecture.md#where-an-operators-billing-sits)).
 
-The gateway lives in this monorepo today by design, kept loosely coupled enough that splitting it
-into its own `envoir-gateway` repository later is a clean lift rather than an untangling — see
-[`gateway/SEPARATION.md`](../../gateway/SEPARATION.md) for exactly what boundary discipline that
-requires and when the split actually happens.
+The gateway does **not** live in this monorepo — it already moved to the separate, permanent
+**[Ephor broker repo](https://github.com/vul-os/ephor)** (its `gateway` coordinator kind), with
+zero crate dependency on `envoir` in either direction, so gateway parser code cannot exist in the
+node's own address space even in principle. `envoir-node` keeps only a thin dispatch shim
+(`envoir-node gateway <args>` / `--gateway <args>`) that `exec`s an externally-built gateway binary
+named via `ENVOIR_GATEWAY_BIN` as a genuinely separate OS process — see
+[`node/tests/gateway_dispatch.rs`](../../node/tests/gateway_dispatch.rs) for exactly what that
+shim does and does not guarantee, and the Ephor repo's own README for running a gateway.
 
 ## Billing is tied to the gateway only
 

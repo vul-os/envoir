@@ -4,10 +4,13 @@
 
 Envoir is the open-source reference implementation of **DMTAP** (the Decentralized Message
 Transfer & Access Protocol): one keypair identity for mail, chat, calendar, contacts, files, and
-groups, delivered peer-to-peer over a mesh and mixnet so that not even a global observer sees who
-talks to whom. A human address like `you@envoir.org` is a *pointer* to your key, not the identity
-itself — lose the provider, keep the key. An optional gateway bridges DMTAP to legacy SMTP so it
-is useful on day one, and fades in importance as the network grows.
+groups, designed to move peer-to-peer over a mesh and mixnet so that not even a global observer
+sees who talks to whom — see [Security](security.md) and [Roadmap](roadmap.md) for exactly what's
+real today (mesh transport is proven on loopback; the mixnet's mix cryptography is a structural
+BLAKE3 stand-in, so only the `fast` tier runs end-to-end so far). A human address like
+`you@envoir.org` is a *pointer* to your key, not the identity itself — lose the provider, keep the
+key. An optional gateway bridges DMTAP to legacy SMTP so it is useful on day one, and fades in
+importance as the network grows.
 
 Envoir is to DMTAP what Element is to Matrix: the branded, MIT-licensed apps for an open protocol.
 
@@ -61,24 +64,31 @@ JMAP, with CalDAV/CardDAV compatibility) — see [protocol.md](protocol.md#messa
 
 | Path | What it is |
 |---|---|
-| `node/` | envoir-node — the whole client side: identity, mailbox, mesh, messaging, files, client protocol servers |
-| `gateway/` | envoir-gateway — the optional legacy SMTP bridge |
-| `crates/dmtap-core` | Identity, MOTE, content addressing, canonical CBOR |
+| `node/` | envoir-node — the whole client side: identity, mailbox, mesh, messaging, files, JMAP, the Send API, plus the substrate crates (`kotva-core`/`kotva-mail`) as a pinned git dependency |
 | `crates/dmtap-auth` | DMTAP-Auth — decentralized, key-based sign-in |
 | `crates/dmtap-deniable` | Deniable 1:1 messaging (X3DH + Double Ratchet) |
 | `crates/dmtap-mls` | MLS group messaging (handshake ordering, committer) |
-| `crates/dmtap-mail` | IMAP/POP3/SMTP-submission/JMAP client-protocol servers |
-| `crates/dmtap-naming` | Naming/addressing + key transparency |
+| `crates/dmtap-naming` | The pluggable naming/addressing resolver framework + key transparency |
+| `crates/dmtap-namechain-rpc` | Real, network-backed name-chain resolvers (ENS/SNS) behind `dmtap-naming` |
 | `crates/dmtap-p2p` | The real libp2p mesh transport (TCP/QUIC+Noise+Yamux, Kademlia, Circuit Relay v2 + DCUtR), proven on loopback — not yet the node binary's default transport |
-| `crates/dmtap-seam` | The operator seam — the contract a hosted operator implements |
-| `crates/conformance-runner` | Runs the implementation against the spec's conformance catalog |
-| `crates/netsim`, `crates/downgrade-tests` | Mixnet anonymity simulation + downgrade/fail-closed regression suite |
+| `crates/dmtap-clustersync` | Device-cluster sync (§5.6): an owner's own devices converge with no primary and no central server |
+| `crates/dmtap-send` | Envoir Send — the reusable library core of a capability-scoped programmatic mail API |
+| `crates/dmtap-seam` | The operator seam — the contract a hosted operator implements (no billing logic, no payment provider) |
+| `crates/dmtap-operator` | Reference operator machinery implementing `dmtap-seam`: quotas, usage queue, fail-closed gateway-authz, gateway DNS |
+| `crates/dmtap-postage-patala` | Optional, isolated reference postage payment-provider adapter — never a dependency of the default build |
+| `crates/conformance-runner` | Runs the implementation against the spec's conformance catalog and vectors, both drawn from the sibling KOTVA repo |
+| `crates/netsim`, `crates/downgrade-tests` | Mixnet mechanism-model simulation + downgrade/fail-closed regression suite |
 | `client/` | Web client — mail, chat, calendar, contacts, files, groups, identity |
 | `console/` | Open-source domain-admin console |
 | `status/` | Public + personal status page |
 | `superadmin/` | Fleet operator console — content-blind by construction |
 | `site/` | Marketing/landing page |
 | `formal/`, `fuzz/`, `integration/` | ProVerif symbolic models, wire-decoder fuzzing, adversarial cross-component tests |
+
+**Not in this repository:** the legacy-mail gateway — it moved permanently to
+[`github.com/vul-os/ephor`](https://github.com/vul-os/ephor) as its `gateway` coordinator kind —
+and `crates/dmtap-core`/`crates/dmtap-mail`, now `kotva-core`/`kotva-mail` in the sibling
+**vul-os/kotva** repo, consumed here as a tag-pinned git dependency.
 
 The normative specification lives in the sibling **vul-os/kotva** repo (22 markdown sections plus
 a compiled `dmtap.pdf`), not in this repository — see [protocol.md](protocol.md).
