@@ -1865,6 +1865,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "kotva-cbor"
+version = "0.1.0"
+
+[[package]]
 name = "kotva-core"
 version = "0.2.0"
 dependencies = [
@@ -1874,6 +1878,7 @@ dependencies = [
  "ed25519-dalek",
  "hkdf",
  "hpke",
+ "kotva-cbor",
  "ml-dsa",
  "rand_core 0.6.4",
  "serde",
