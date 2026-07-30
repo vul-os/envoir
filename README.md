@@ -408,6 +408,16 @@ Ephor-built gateway today is a manual step (build the Ephor binary, point
 `ENVOIR_GATEWAY_BIN` at it); it is not yet a zero-configuration `cargo build --workspace` experience
 the way the in-tree gateway once was, and is tracked as follow-up rather than claimed as done.
 
+## Brand
+
+The mark in [`brand/`](brand/) is the source of truth. Every icon this repo
+ships — favicon, PWA and app icons, the mark in the README and on the site — is
+rendered from `brand/logo.svg` rather than redrawn, so there is one approved
+drawing and no second copy to drift.
+
+Copy it outward, never edit a derived copy, and never edit `brand/` to match
+something downstream.
+
 ## License
 
 [MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE) — © VulOS. Dual-licensed (Apache
