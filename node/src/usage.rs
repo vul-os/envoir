@@ -1,3 +1,6 @@
+// no-broker-dep:allow-file: doc comment notes the one role that remains (Ephor) bills nothing and
+// nothing here is wired to a bridge -- states the ABSENCE of a dependency.
+
 //! Hosted-node **storage** seam — the node side of the operator seam (spec §12.2, §12.3, §12.4).
 //!
 //! A third-party operator hosting nodes for other people has a real "node usage" cost center:

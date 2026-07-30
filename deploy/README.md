@@ -1,3 +1,7 @@
+<!-- no-broker-dep:allow-file: deploy docs explain the gateway moved permanently to the separate,
+     external Ephor broker repo, with build instructions for that OTHER repo
+     -- describes an external, optional component, not a dependency of this one. -->
+
 # Self-hosting Envoir
 
 This directory is a self-contained deployment scaffold for the **node** half of the Envoir

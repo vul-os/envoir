@@ -1,4 +1,9 @@
 # syntax=docker/dockerfile:1
+
+# no-broker-dep:allow-file: comments explain IMAP/POP3/SMTP-submission live only on an
+# externally-built gateway binary from the separate Ephor repo -- this
+# Dockerfile builds only the node binary and depends on nothing named ephor.
+
 #
 # Envoir node — reference DMTAP client (identity, MOTE store, mesh, §8 mail projection).
 # See deploy/README.md for the honest status of what `envoir-node` actually does at runtime

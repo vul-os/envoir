@@ -1,3 +1,8 @@
+// no-broker-dep:allow-file: an #[ignore]'d test's doc comment explains the POP3 bridge moved out to
+// the Ephor broker repo (this crate is node-only) and needs
+// ENVOIR_GATEWAY_BIN pointed at an external Ephor checkout to exercise --
+// an optional, external, ignored-by-default test path, not a dependency.
+
 //! Proves the `envoir-node gateway` / `--gateway` privilege-separation seam actually launches the
 //! dedicated `envoir-gateway` binary in a separate process, rather than merging gateway logic
 //! into the identity-holding node process. See `node/src/main.rs`'s `run_gateway_mode` for the

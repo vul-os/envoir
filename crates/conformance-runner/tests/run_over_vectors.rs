@@ -1,3 +1,6 @@
+// no-broker-dep:allow-file: test comment notes `envoir-gateway` moved out of this repo to the Ephor
+// broker repo -- documents an exclusion, not a dependency.
+
 //! `cargo test`-visible proof that the conformance-runner engine is green over the current
 //! `dmtap-core/vectors.json` (the VERIFICATION GATE for this crate). Also locks the current,
 //! honestly-reported suite.json coverage numbers so any change (new vectors, a dmtap-core fix

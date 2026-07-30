@@ -1,3 +1,6 @@
+// no-broker-dep:allow-file: doc comment notes the legacy SMTP gateway (spec section 7) moved out of
+// this repo entirely to the Ephor broker repo -- history, not a dependency.
+
 //! Executes `suite.json` `construction-todo` cases: cases with no committed byte-exact fixture
 //! yet, where the catalog instead gives a `construction` recipe in English (e.g. "Envelope with
 //! v=1", "chunk with a flipped byte"). Per the conformance-runner charter (task item 3): for each

@@ -1,3 +1,6 @@
+<!-- no-broker-dep:allow-file: README states the legacy gateway lives permanently in the separate
+     Ephor broker repo, never in this crate -- an exclusion, not a dependency. -->
+
 # envoir-node
 
 Reference implementation of the DMTAP **node** — the whole client side. One binary, installed

@@ -1,3 +1,7 @@
+// no-broker-dep:allow-file: doc comment notes `envoir-gateway` moved out to the Ephor broker repo,
+// taking its own gateway-composing integration tests with it -- an
+// exclusion, not a dependency.
+
 //! Cross-component integration tests for the Envoir DMTAP reference stack.
 //!
 //! This crate has no library surface of its own — it exists to host end-to-end tests under

@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# no-broker-dep:allow-file: self-host script comments explain a legacy-mail gateway is NOT part of
+# this stack and must be built SEPARATELY from the external Ephor repo if
+# wanted -- an optional, explicitly-external instruction, no dependency here.
+
 # Envoir self-host — one-command bring-up wrapper around docker compose.
 #
 # What this does (nothing more): pick a docker compose invocation, make sure deploy/.env exists

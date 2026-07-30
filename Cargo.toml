@@ -1,3 +1,9 @@
+# no-broker-dep:allow-file: workspace root comments (legacy SS7 gateway) document that `envoir-gateway`
+# moved OUT of this repo permanently to the separate Ephor broker repo --
+# an architectural history note, not a dependency; this workspace's own
+# cargo tree carries no ephor crate (verified: C-DEP rust examined 1029
+# entries, zero hits).
+
 # Envoir OSS monorepo — Cargo workspace.
 # Reference implementation of the Decentralized Message Transfer & Access Protocol.
 # Fully open source, dual-licensed MIT OR Apache-2.0. Envoir is not a business and runs no
