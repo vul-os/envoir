@@ -24,9 +24,15 @@
 
 Envoir is the open-source **node reference implementation of DMTAP** (the Decentralized Message
 Transfer & Access Protocol, KOTVA's mail profile): one sovereign **keypair identity** for mail,
-chat, calendar, contacts, files, and groups, delivered over a peer-to-peer mesh and mixnet so that
-not even a global observer sees who talks to whom. A human address like `you@envoir.org` is only a
-*pointer* to your key — lose the provider, keep the identity. Naming itself is **pluggable**: a
+chat, calendar, contacts, files, and groups, designed to move over a peer-to-peer mesh and mixnet so
+that not even a global observer sees who talks to whom — the mesh transport (libp2p: Kademlia,
+Circuit Relay v2, DCUtR) is real, proven on loopback, and not yet the node's default, while the
+mixnet's onion-wrap today models the real Sphinx cell structure and freshness contract with **keyed
+BLAKE3 stand-ins for the actual mix cryptography** (no live/functioning mix network yet), so treat
+the metadata-hiding guarantee as this project's design target, not something delivered today. See
+[Security & honesty](#security--honesty) for exactly what's real. A human address like
+`you@envoir.org` is only a *pointer* to your key — lose the provider, keep the identity. Naming
+itself is **pluggable**: a
 zero-authority key-name and a local petname need no DNS at all, `name@domain` (DNS + key
 transparency) is the default, and an OPTIONAL crypto name-chain resolver (ENS `.eth` / SNS `.sol`,
 off by default, bound by four guardrails) is a third alternative — every rung still resolves to,
