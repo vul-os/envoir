@@ -306,6 +306,17 @@ img{max-width:100%;display:block}
   .md h2{font-size:1.3rem}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto}}
+
+  /* ── Vulos suite chrome — identical on every product landing ───────────────
+     Two elements, and only two: a logo-only home button in the top bar, and
+     one line in the footer. Deliberately free of repo variables so the block
+     is byte-identical across the suite and can be diffed as one thing. */
+  .vulos-home { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 9px; flex: 0 0 auto; opacity: .72; transition: opacity .15s ease, transform .15s ease; }
+  .vulos-home:hover, .vulos-home:focus-visible { opacity: 1; transform: translateY(-1px); }
+  .vulos-home img { display: block; width: 22px; height: 22px; border-radius: 6px; }
+  .vulos-foot { display: inline-flex; align-items: center; gap: 9px; font-size: 13.5px; line-height: 1.45; text-decoration: none; color: inherit; opacity: .85; transition: opacity .15s ease; }
+  .vulos-foot:hover { opacity: 1; text-decoration: none; }
+  .vulos-foot img { display: block; width: 18px; height: 18px; border-radius: 5px; flex: 0 0 auto; }
 </style>
 <script src="assets/vendor/marked.umd.js"></script>
 <script src="assets/vendor/mermaid.min.js"></script>
@@ -315,7 +326,7 @@ img{max-width:100%;display:block}
 <a class="skip-link" href="#content">Skip to content</a>
 
 <header class="site-header"><div class="wrap nav-inner">
-  <a class="vulos-back" href="https://vulos.org" target="_top">&larr; Vulos</a>
+  <a class="vulos-home" href="https://vulos.org" target="_blank" rel="noopener" title="Vulos — open, self-hostable software" aria-label="Vulos — open, self-hostable software"><img src="./assets/vulos-logo.png" alt="" width="22" height="22"></a>
   <a class="brand" href="index.html" aria-label="Envoir home">
     <img src="assets/logo-mark.svg" width="26" height="26" alt="" aria-hidden="true">Envoir
   </a>
@@ -361,12 +372,12 @@ img{max-width:100%;display:block}
 
 <footer class="site-footer">
   <div class="footer-inner">
-    <div class="footer-left"><img src="assets/logo-mark.svg" alt="" aria-hidden="true"> Envoir — MIT licensed · no token, ever · a reference implementation of DMTAP (KOTVA-Mail).</div>
+    <div class="footer-left"><img src="assets/logo-mark.svg" alt="" aria-hidden="true"> Envoir — no token, ever · a reference implementation of DMTAP (KOTVA-Mail).</div>
     <div class="footer-links">
       <a href="index.html">Home</a>
       <a href="https://github.com/vul-os/envoir" target="_blank" rel="noopener">GitHub</a>
       <a href="https://github.com/vul-os/kotva" target="_blank" rel="noopener">Spec (KOTVA)</a>
-      <a href="https://vulos.org" target="_blank" rel="noopener">vulos.org</a>
+      <a class="vulos-foot" href="https://vulos.org" target="_blank" rel="noopener"><img src="assets/vulos-logo.png" alt="" width="18" height="18"><span>Part of <strong>Vulos</strong> — open, self-hostable software</span></a>
     </div>
   </div>
 </footer>
