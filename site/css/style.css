@@ -416,11 +416,15 @@ section + section { border-top: 1px solid var(--line); }
    overflow is invisible to a geometry-only pass). */
 .illo-mote-label.top { left: 50%; top: 15%; transform: translate(-50%, calc(-50% + 42px)); }
 .illo-mote-label.right { left: 85%; top: 50%; transform: translate(-50%, calc(-50% + 42px)); }
-.illo-mote-label.bottom { left: 50%; top: 85%; transform: translate(-50%, calc(-50% - 42px)); }
+.illo-mote-label.bottom { left: 50%; top: 85%; transform: translate(-50%, calc(-50% + 42px)); }
 .illo-mote-label.left { left: 15%; top: 50%; transform: translate(-50%, calc(-50% + 42px)); }
 
 /* ---- C: legacy-gateway bridge — sovereign node, gateway, legacy inbox ---- */
-.illo-bridge { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: center; gap: 6px; padding: 10px 4px; }
+/* Uneven tracks on purpose: the outer two nodes are email addresses (the longest,
+   carol@gmail.com at 15 chars) while the middle one is the word "gateway". Equal 1fr
+   tracks starved the addresses into a mid-token break; this hands the spare width to
+   the columns that actually need it. */
+.illo-bridge { display: grid; grid-template-columns: 1.2fr auto 0.75fr auto 1.2fr; align-items: center; gap: 6px; padding: 10px 4px; }
 @media (max-width: 820px) { .illo-bridge { grid-template-columns: 1fr; gap: 18px; } .illo-bridge .illo-link { transform: rotate(90deg); width: 32px; margin: 0 auto; } }
 /* min-width:0 overrides the grid-item default of min-width:auto, which otherwise refuses to
    shrink a 1fr track below its content's intrinsic (min-content) width — with 3 text columns
@@ -435,8 +439,14 @@ section + section { border-top: 1px solid var(--line); }
    on .illo-node correctly lets the flex column shrink, but the token itself then overflows
    past the now-narrower box and is clipped invisibly at .illo-frame's edge on desktop widths
    before the 820px stacking breakpoint kicks in. Confirmed via the ancestor-walk overflow
-   check, not visible to a scrollWidth-only check. */
-.illo-node .illo-node-tt { font-size: 13px; font-weight: 650; color: var(--text); overflow-wrap: anywhere; }
+   check, not visible to a scrollWidth-only check.
+
+   It stays as the last-resort guard, but it is NOT the primary fit: at 13px an address like
+   you@envoir.org needed ~130px in a ~110px track, so `anywhere` fired on every render and
+   broke the token mid-word ("you@envoir.or / g") — no overflow, just ugly. 12px (the floor,
+   never below) fits the longest real address on one line, so the guard now only fires on a
+   genuinely narrow viewport instead of always. */
+.illo-node .illo-node-tt { font-size: 12px; font-weight: 650; color: var(--text); overflow-wrap: anywhere; }
 .illo-node .illo-node-dd { font-size: 12px; color: var(--text-faint); max-width: 15ch; overflow-wrap: anywhere; }
 .illo-link { width: 100%; height: 24px; }
 
@@ -485,24 +495,24 @@ section + section { border-top: 1px solid var(--line); }
   padding: 12px 16px; font-size: 12.5px; color: var(--text-faint); border-top: 1px solid var(--line);
   background: var(--bg-2); font-family: var(--mono); letter-spacing: 0.01em;
 }
-.illo text { font-family: var(--sans); }
-.illo .illo-mono { font-family: var(--mono); }
+.illo-frame text { font-family: var(--sans); }
+.illo-frame .illo-mono { font-family: var(--mono); }
 /* illustration colour utilities — always token-driven, so every diagram is theme-correct for free */
-.illo .c-indigo  { stroke: var(--indigo); fill: var(--indigo); }
-.illo .c-violet  { stroke: var(--violet); fill: var(--violet); }
-.illo .c-teal    { stroke: var(--teal); fill: var(--teal); }
-.illo .c-good    { stroke: var(--good); fill: var(--good); }
-.illo .c-warn    { stroke: var(--warn); fill: var(--warn); }
-.illo .c-legacy  { stroke: var(--legacy); fill: var(--legacy); }
-.illo .c-line    { stroke: var(--line-2); }
-.illo .c-text    { fill: var(--text); }
-.illo .c-dim     { fill: var(--text-dim); }
-.illo .c-faint   { fill: var(--text-faint); }
-.illo .c-bg      { fill: var(--bg-2); }
-.illo .c-bg1     { fill: var(--bg-1); }
-.illo .il-label  { font-size: 13px; font-weight: 600; }
-.illo .il-sub    { font-size: 12px; }
-.illo .il-mono   { font-family: var(--mono); font-size: 12px; }
+.illo-frame .c-indigo  { stroke: var(--indigo); fill: var(--indigo); }
+.illo-frame .c-violet  { stroke: var(--violet); fill: var(--violet); }
+.illo-frame .c-teal    { stroke: var(--teal); fill: var(--teal); }
+.illo-frame .c-good    { stroke: var(--good); fill: var(--good); }
+.illo-frame .c-warn    { stroke: var(--warn); fill: var(--warn); }
+.illo-frame .c-legacy  { stroke: var(--legacy); fill: var(--legacy); }
+.illo-frame .c-line    { stroke: var(--line-2); }
+.illo-frame .c-text    { fill: var(--text); }
+.illo-frame .c-dim     { fill: var(--text-dim); }
+.illo-frame .c-faint   { fill: var(--text-faint); }
+.illo-frame .c-bg      { fill: var(--bg-2); }
+.illo-frame .c-bg1     { fill: var(--bg-1); }
+.illo-frame .il-label  { font-size: 13px; font-weight: 600; }
+.illo-frame .il-sub    { font-size: 12px; }
+.illo-frame .il-mono   { font-family: var(--mono); font-size: 12px; }
 
 
 /* ---------- terminal trace ---------- */
