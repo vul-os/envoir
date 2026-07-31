@@ -5,7 +5,8 @@
   "description": "Envoir monorepo tooling. See docs/SCREENSHOTS.md for the screenshotter. The WASM sync binding MOVED to the KOTVA repo (crates/kotva-sync-wasm there); its npm build and `node --test` parity suite moved with it.",
   "type": "module",
   "scripts": {
-    "screenshotter": "node docs/capture-screenshots.mjs",
+    "screenshotter": "node docs/capture-screenshots.mjs && node scripts/sync-site-screens.mjs",
+    "sync-site-screens": "node scripts/sync-site-screens.mjs",
     "test:client": "node --test 'client/test/**/*.test.mjs'"
   }
 }
