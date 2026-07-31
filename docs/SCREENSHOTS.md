@@ -15,7 +15,7 @@ For each app (`client/`, `console/`, `superadmin/`, `status/`, `site/`) the scri
 1. starts a tiny built-in static file server rooted at that app's directory (plain node
    `http`, no `python3` dependency, nothing to install) on a free localhost port;
 2. drives it with real headless Chrome via `puppeteer-core`, reused from the sibling
-   `dmtap/build/node_modules` tree — nothing new is installed for this to work;
+   `kotva/build/node_modules` tree — nothing new is installed for this to work;
 3. runs the app's actual onboarding/setup flow where one exists (client identity creation,
    console "connect your domain"), then navigates by clicking real nav / theme-toggle / scenario
    controls — never by pixel coordinates or synthetic routing;
@@ -57,7 +57,8 @@ Only needed if your machine differs from the reference dev box:
 - `CHROME_PATH` — path to a Chrome/Chromium binary
   (default: `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`)
 - `PUPPETEER_CORE_PATH` — path to puppeteer-core's ESM entrypoint
-  (default: the sibling `dmtap/build/node_modules/puppeteer-core/lib/esm/puppeteer/puppeteer-core.js`)
+  (default: the sibling `kotva/build/node_modules/puppeteer-core/lib/esm/puppeteer/puppeteer-core.js`,
+  resolved relative to this repo's own location on disk — not a hardcoded absolute path)
 
 ## Code layout
 

@@ -7,7 +7,7 @@
 //
 //   1. spins up a tiny built-in static file server rooted at that app's directory (no python3,
 //      no extra installs — just node's http module) on a free localhost port,
-//   2. drives it with real headless Chrome via puppeteer-core (reused from the sibling dmtap
+//   2. drives it with real headless Chrome via puppeteer-core (reused from the sibling kotva
 //      build's node_modules — nothing new is installed; see PUPPETEER_CORE_PATH below),
 //   3. navigates by clicking the app's real nav / theme-toggle / scenario controls (never by
 //      pixel coordinates), asserting the expected screen actually rendered (a view-specific DOM
@@ -23,7 +23,8 @@
 //   CHROME_PATH           path to a Chrome/Chromium binary
 //                          (default: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome)
 //   PUPPETEER_CORE_PATH    path to puppeteer-core's ESM entrypoint
-//                          (default: sibling .../dmtap/build/node_modules/puppeteer-core/lib/esm/puppeteer/puppeteer-core.js)
+//                          (default: sibling .../kotva/build/node_modules/puppeteer-core/lib/esm/puppeteer/puppeteer-core.js,
+//                          resolved relative to this repo's location on disk)
 //
 // A per-app run is wrapped so one broken capture never aborts the others; the process exit code
 // is non-zero iff any REQUIRED shot failed (a handful of onboarding "bonus" shots are marked

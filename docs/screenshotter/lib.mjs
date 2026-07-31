@@ -4,7 +4,7 @@
 // ../SCREENSHOTS.md). Everything here is deliberately generic across apps:
 //
 //   - serveStatic()   a zero-dependency static file server (no python3, no extra installs)
-//   - launchBrowser() a puppeteer-core loader that reuses the sibling dmtap build's node_modules
+//   - launchBrowser() a puppeteer-core loader that reuses the sibling kotva build's node_modules
 //   - shooter()       a capture() helper that REQUIRES a DOM assertion to pass before it will
 //                     trust a screenshot, and never throws — failures are recorded so one broken
 //                     view can't abort the rest of the run
@@ -16,14 +16,22 @@
 import http from 'node:http';
 import { createReadStream, existsSync, statSync, mkdirSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
 
 // ---- Chrome + puppeteer-core discovery ------------------------------------------------------
 // Both are overridable via env vars for machines that don't match this dev box's layout.
 export const CHROME_PATH =
   process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
-const DEFAULT_PUPPETEER_CORE =
-  '/Users/pc/code/envoir/dmtap/build/node_modules/puppeteer-core/lib/esm/puppeteer/puppeteer-core.js';
+// Resolved relative to THIS repo (not hardcoded to any one machine's absolute /Users/pc path):
+// envoir/docs/screenshotter/lib.mjs -> ../../.. -> the parent of this repo -> sibling kotva/.
+// kotva is the renamed/relocated successor of the old "dmtap" repo this used to point at.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_PUPPETEER_CORE = resolve(
+  __dirname,
+  '../../../kotva/build/node_modules/puppeteer-core/lib/esm/puppeteer/puppeteer-core.js',
+);
 
 export async function loadPuppeteer() {
   const path = process.env.PUPPETEER_CORE_PATH || DEFAULT_PUPPETEER_CORE;
