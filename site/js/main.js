@@ -35,12 +35,21 @@
 
   /* ---------------- theme-aware screenshots ----------------
    * Every product screenshot is wrapped in <picture data-shot data-dark="..."
-   * data-light="...">, with a <source media="(prefers-color-scheme: dark)">
-   * for the pre-JS / no-JS paint (follows the OS theme) and a light-theme
-   * <img> as the safe fallback. Once this runs, it overrides that in BOTH
-   * directions to track the page's own toggle (data-theme), same as the
-   * app itself does — a visitor who flips the site to light shouldn't see
-   * dark-mode screenshots, and vice versa, regardless of their OS setting. */
+   * data-light="...">, with a plain dark-theme <img> as the pre-JS / no-JS
+   * fallback — matching the page's own hardcoded data-theme="dark" default
+   * (this page never actually followed the OS media query for its overall
+   * theme; only a returning visitor's own toggle choice, persisted below,
+   * ever moves it to light). Once this runs, it keeps the shown image in
+   * sync with the page's own toggle in both directions, same as the app
+   * itself does. Deliberately NOT a <source media="prefers-color-scheme">
+   * — a <picture> element's native source-selection algorithm re-evaluates
+   * on relevant media changes but has no idea data-theme even exists, so a
+   * matching <source> silently overrode this script's own img.src writes
+   * whenever the OS happened to report dark and a visitor toggled to
+   * light. Confirmed via currentSrc (not just the src attribute) with the
+   * OS emulated dark: toggling the page to light left the *rendered* image
+   * on the dark screenshot. One flat img target removes the competing
+   * resolution path entirely. */
   function initThemeShots() {
     var pics = document.querySelectorAll("picture[data-shot]");
     if (!pics.length) return;

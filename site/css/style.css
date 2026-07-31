@@ -343,23 +343,13 @@ section + section { border-top: 1px solid var(--line); }
 .hero-address-note a { color: var(--accent-ink); text-decoration: none; border-bottom: 1px dotted currentColor; }
 .hero-address-note a:hover { color: var(--text); }
 
-.hero-visual {
-  position: relative; border-radius: var(--r-xl); border: 1px solid var(--line);
-  background: radial-gradient(ellipse at 50% 20%, color-mix(in srgb, var(--indigo) 12%, transparent), transparent 60%), var(--bg-1);
-  box-shadow: var(--sh-3); overflow: hidden; aspect-ratio: 4 / 3.5;
-}
-.hero-visual canvas { width: 100%; height: 100%; display: block; }
-.hero-visual .hv-caption {
-  position: absolute; left: 14px; bottom: 12px; font-family: var(--mono); font-size: 12px;
-  letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint);
-  background: color-mix(in srgb, var(--bg-1) 55%, transparent); padding: 3px 8px; border-radius: 4px; border: 1px solid var(--line);
-}
-.hero-visual .hv-tag {
-  position: absolute; top: 14px; right: 14px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em;
-  color: var(--good); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px;
-  display: flex; align-items: center; gap: 6px; background: color-mix(in srgb, var(--bg-1) 55%, transparent);
-}
-.hv-tag .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
+/* Hero visual: a real screenshot in the same app-window chrome used everywhere else on the
+   page (previously a generic wireframe canvas — the single most "not the app" element on the
+   page). The mesh canvas survives as a faint animated wash behind the frame, not the whole
+   visual, so it still runs but no longer has to carry the entire first impression alone. */
+.hero-visual { position: relative; }
+.hero-visual .hv-mesh { position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: 0.4; }
+.hero-visual .hv-shot { position: relative; z-index: 1; }
 
 /* ---------- generic cards / grids ---------- */
 /* Explicit column counts everywhere below, not auto-fit — auto-fit's column count depends on

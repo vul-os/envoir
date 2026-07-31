@@ -104,10 +104,17 @@
         </div>
       </div>
 
-      <div class="hero-visual" role="img" aria-label="Illustrative animation of MOTEs (encrypted messages) hopping across a peer mesh through mixnet relays before reaching an always-on node.">
-        <span class="hv-tag"><span class="dot"></span>mesh · illustrative</span>
-        <canvas id="mesh-canvas"></canvas>
-        <span class="hv-caption">simulated routing — not live network telemetry</span>
+      <div class="hero-visual">
+        <canvas id="mesh-canvas" class="hv-mesh" aria-hidden="true"></canvas>
+        <figure class="shot-frame hv-shot">
+          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — mail</span></div>
+          <div class="shot-media-wrap">
+            <picture data-shot data-dark="assets/screens/mail-dark.png" data-light="assets/screens/mail-light.png">
+              <img class="shot-img" src="assets/screens/mail-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir's actual inbox: the left icon rail shared by every surface (mail, chat, calendar, files, contacts, identity, groups), a three-pane mail view, and a verified sender badge on the open message.">
+            </picture>
+          </div>
+          <figcaption class="shot-caption"><b>The real inbox.</b> Not a mockup — the same interface shown throughout this page, behind a faint animated mesh (illustrative — see <a href="#privacy">Honest status</a>).</figcaption>
+        </figure>
       </div>
     </div>
   </section>
@@ -277,8 +284,7 @@
             <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — mail</span></div>
             <div class="shot-media-wrap">
               <picture data-shot data-dark="assets/screens/mail-dark.png" data-light="assets/screens/mail-light.png">
-                <source srcset="assets/screens/mail-dark.png" media="(prefers-color-scheme: dark)">
-                <img class="shot-img" src="assets/screens/mail-light.png" width="1800" height="1125" loading="lazy" alt="Envoir mail: three-pane inbox. The open message shows a green &quot;verified&quot; badge next to the sender's name, and the message list shows a &quot;legacy-origin&quot; label on the one thread that crossed the SMTP gateway.">
+                <img class="shot-img" src="assets/screens/mail-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir mail: three-pane inbox. The open message shows a green &quot;verified&quot; badge next to the sender's name, and the message list shows a &quot;legacy-origin&quot; label on the one thread that crossed the SMTP gateway.">
               </picture>
             </div>
             <figcaption class="shot-caption"><b>Mail.</b> Three-pane inbox, threading, folders, star/archive/snooze. The <span class="pill good" style="display:inline-flex;">verified</span> badge means you've checked that sender's safety number; <span class="pill legacy" style="display:inline-flex;">legacy-origin</span> means the message crossed the SMTP gateway to reach you.</figcaption>
@@ -302,8 +308,7 @@
             <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — chat</span></div>
             <div class="shot-media-wrap">
               <picture data-shot data-dark="assets/screens/chat-dark.png" data-light="assets/screens/chat-light.png">
-                <source srcset="assets/screens/chat-dark.png" media="(prefers-color-scheme: dark)">
-                <img class="shot-img" src="assets/screens/chat-light.png" width="1800" height="1125" loading="lazy" alt="Envoir chat: a direct-message thread with Ada Okonkwo, a green verified badge, an online-presence dot, and a Deniable 1:1 protocol indicator in the header. The thread discusses chat and mail being the same MOTE object.">
+                <img class="shot-img" src="assets/screens/chat-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir chat: a direct-message thread with Ada Okonkwo, a green verified badge, an online-presence dot, and a Deniable 1:1 protocol indicator in the header. The thread discusses chat and mail being the same MOTE object.">
               </picture>
             </div>
             <figcaption class="shot-caption"><b>Chat.</b> DMs and channels riding the fast tier by default — the header states plainly which cryptographic mode a conversation uses.</figcaption>
@@ -327,8 +332,7 @@
             <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — files</span></div>
             <div class="shot-media-wrap">
               <picture data-shot data-dark="assets/screens/files-dark.png" data-light="assets/screens/files-light.png">
-                <source srcset="assets/screens/files-dark.png" media="(prefers-color-scheme: dark)">
-                <img class="shot-img" src="assets/screens/files-light.png" width="1800" height="1125" loading="lazy" alt="Envoir files: a grid of files each showing a content hash prefixed b3:, an E2E badge, and two shared folders rendered as groups (DMTAP Core, Design Crit).">
+                <img class="shot-img" src="assets/screens/files-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir files: a grid of files each showing a content hash prefixed b3:, an E2E badge, and two shared folders rendered as groups (DMTAP Core, Design Crit).">
               </picture>
             </div>
             <figcaption class="shot-caption"><b>Files.</b> Content-addressed by BLAKE3 hash (the <span class="mono">b3:</span> prefix), end-to-end encrypted, no protocol size cap. A shared folder <em>is</em> a group.</figcaption>
@@ -352,8 +356,7 @@
             <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — identity</span></div>
             <div class="shot-media-wrap">
               <picture data-shot data-dark="assets/screens/identity-dark.png" data-light="assets/screens/identity-light.png">
-                <source srcset="assets/screens/identity-dark.png" media="(prefers-color-scheme: dark)">
-                <img class="shot-img" src="assets/screens/identity-light.png" width="1800" height="1125" loading="lazy" alt="Envoir identity page: sovereign identity card for Ada Okonkwo with key age, device count, and verified-contact count; a key-name naming ladder card; and a DNS-discovered ada@envoir.org address marked primary.">
+                <img class="shot-img" src="assets/screens/identity-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir identity page: sovereign identity card for Ada Okonkwo with key age, device count, and verified-contact count; a key-name naming ladder card; and a DNS-discovered ada@envoir.org address marked primary.">
               </picture>
             </div>
             <figcaption class="shot-caption"><b>Identity.</b> The naming ladder made concrete: a zero-authority key-name at the floor, DNS discovery layered on top, all pointing at one root key.</figcaption>
@@ -429,8 +432,7 @@
           <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — compose</span></div>
           <div class="shot-media-wrap">
             <picture data-shot data-dark="assets/screens/compose-dark.png" data-light="assets/screens/compose-light.png">
-              <source srcset="assets/screens/compose-dark.png" media="(prefers-color-scheme: dark)">
-              <img class="shot-img" src="assets/screens/compose-light.png" width="1800" height="1125" loading="lazy" alt="Envoir compose window: To field accepting a name@domain, a key-name, an ENS/SNS name, an @handle, or a group address, with a Private/Fast tier switch set to Private.">
+              <img class="shot-img" src="assets/screens/compose-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir compose window: To field accepting a name@domain, a key-name, an ENS/SNS name, an @handle, or a group address, with a Private/Fast tier switch set to Private.">
             </picture>
           </div>
           <figcaption class="shot-caption"><b>Compose.</b> The <span class="pill priv" style="display:inline-flex;">Private</span> / <span class="pill fast" style="display:inline-flex;">Fast</span> switch is the same tier choice shown throughout the app — private is the intended default.</figcaption>
@@ -439,8 +441,7 @@
           <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — inspector</span></div>
           <div class="shot-media-wrap">
             <picture data-shot data-dark="assets/screens/inspector-dark.png" data-light="assets/screens/inspector-light.png">
-              <source srcset="assets/screens/inspector-dark.png" media="(prefers-color-scheme: dark)">
-              <img class="shot-img" src="assets/screens/inspector-light.png" width="1800" height="1125" loading="lazy" alt="MOTE inspector panel showing the three sealed layers of a message: outer mixnet/sealed-sender layer, signed content-addressed envelope, and end-to-end encrypted payload, plus the simulated mixnet delivery path.">
+              <img class="shot-img" src="assets/screens/inspector-dark.png" width="1800" height="1125" loading="lazy" alt="MOTE inspector panel showing the three sealed layers of a message: outer mixnet/sealed-sender layer, signed content-addressed envelope, and end-to-end encrypted payload, plus the simulated mixnet delivery path.">
             </picture>
           </div>
           <figcaption class="shot-caption"><b>MOTE inspector.</b> Opens on any message — the three sealed layers, in order: what the network sees, what's signed, and what only the recipient can decrypt.</figcaption>
@@ -449,8 +450,7 @@
           <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — contacts</span></div>
           <div class="shot-media-wrap">
             <picture data-shot data-dark="assets/screens/contacts-dark.png" data-light="assets/screens/contacts-light.png">
-              <source srcset="assets/screens/contacts-dark.png" media="(prefers-color-scheme: dark)">
-              <img class="shot-img" src="assets/screens/contacts-light.png" width="1800" height="1125" loading="lazy" alt="Envoir contacts: a contact card for Ada Okonkwo with a green Key verified panel, a scannable safety-number grid, and eight word-coded verification codes.">
+              <img class="shot-img" src="assets/screens/contacts-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir contacts: a contact card for Ada Okonkwo with a green Key verified panel, a scannable safety-number grid, and eight word-coded verification codes.">
             </picture>
           </div>
           <figcaption class="shot-caption"><b>Contacts.</b> Every contact is a key, not just a display name — verification lives on the card, not bolted on afterward.</figcaption>
@@ -459,8 +459,7 @@
           <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — calendar</span></div>
           <div class="shot-media-wrap">
             <picture data-shot data-dark="assets/screens/calendar-dark.png" data-light="assets/screens/calendar-light.png">
-              <source srcset="assets/screens/calendar-dark.png" media="(prefers-color-scheme: dark)">
-              <img class="shot-img" src="assets/screens/calendar-light.png" width="1800" height="1125" loading="lazy" alt="Envoir calendar month view for July 2026 with color-coded events and an agenda sidebar showing invitations and today's schedule.">
+              <img class="shot-img" src="assets/screens/calendar-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir calendar month view for July 2026 with color-coded events and an agenda sidebar showing invitations and today's schedule.">
             </picture>
           </div>
           <figcaption class="shot-caption"><b>Calendar.</b> JSCalendar MOTEs under the hood, CalDAV-compatible on the outside.</figcaption>
@@ -469,8 +468,7 @@
           <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — agenda</span></div>
           <div class="shot-media-wrap">
             <picture data-shot data-dark="assets/screens/calendar-agenda-dark.png" data-light="assets/screens/calendar-agenda-light.png">
-              <source srcset="assets/screens/calendar-agenda-dark.png" media="(prefers-color-scheme: dark)">
-              <img class="shot-img" src="assets/screens/calendar-agenda-light.png" width="1800" height="1125" loading="lazy" alt="Envoir calendar agenda panel listing pending invitations and this week's events grouped by day.">
+              <img class="shot-img" src="assets/screens/calendar-agenda-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir calendar agenda panel listing pending invitations and this week's events grouped by day.">
             </picture>
           </div>
           <figcaption class="shot-caption"><b>Agenda.</b> Invitations arrive as sealed MOTEs too — accept or decline signs a reply back to the organizer's node.</figcaption>
@@ -479,8 +477,7 @@
           <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — groups</span></div>
           <div class="shot-media-wrap">
             <picture data-shot data-dark="assets/screens/groups-dark.png" data-light="assets/screens/groups-light.png">
-              <source srcset="assets/screens/groups-dark.png" media="(prefers-color-scheme: dark)">
-              <img class="shot-img" src="assets/screens/groups-light.png" width="1800" height="1125" loading="lazy" alt="Envoir groups: the DMTAP Core channel with four members, each add or remove member-signed and appended to a hash-chained log, plus posting-model and membership-visibility settings.">
+              <img class="shot-img" src="assets/screens/groups-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir groups: the DMTAP Core channel with four members, each add or remove member-signed and appended to a hash-chained log, plus posting-model and membership-visibility settings.">
             </picture>
           </div>
           <figcaption class="shot-caption"><b>Groups.</b> An address that represents a group — every add, remove, or role change is member-signed and hash-chained, never a silent server edit.</figcaption>
@@ -489,8 +486,7 @@
           <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — settings</span></div>
           <div class="shot-media-wrap">
             <picture data-shot data-dark="assets/screens/settings-dark.png" data-light="assets/screens/settings-light.png">
-              <source srcset="assets/screens/settings-dark.png" media="(prefers-color-scheme: dark)">
-              <img class="shot-img" src="assets/screens/settings-light.png" width="1800" height="1125" loading="lazy" alt="Envoir settings: identity summary card, addresses and aliases list with a primary address, and a default full-signature block.">
+              <img class="shot-img" src="assets/screens/settings-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir settings: identity summary card, addresses and aliases list with a primary address, and a default full-signature block.">
             </picture>
           </div>
           <figcaption class="shot-caption"><b>Settings.</b> Addresses, aliases, and signatures — the page states its own rule up top: privacy is never a paid feature.</figcaption>
@@ -562,8 +558,7 @@
                 <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — contacts</span></div>
                 <div class="shot-media-wrap">
                   <picture data-shot data-dark="assets/screens/contacts-dark.png" data-light="assets/screens/contacts-light.png">
-                    <source srcset="assets/screens/contacts-dark.png" media="(prefers-color-scheme: dark)">
-                    <img class="shot-img" src="assets/screens/contacts-light.png" width="1800" height="1125" loading="lazy" alt="Envoir contact card showing a green Key verified confirmation after comparing a safety number out of band.">
+                    <img class="shot-img" src="assets/screens/contacts-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir contact card showing a green Key verified confirmation after comparing a safety number out of band.">
                   </picture>
                 </div>
                 <figcaption class="shot-caption">"You compared this safety number out-of-band, so a look-alike key would be detected." That line is the whole anti-phishing story.</figcaption>
@@ -585,8 +580,7 @@
                 <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — new message</span></div>
                 <div class="shot-media-wrap">
                   <picture data-shot data-dark="assets/screens/compose-dark.png" data-light="assets/screens/compose-light.png">
-                    <source srcset="assets/screens/compose-dark.png" media="(prefers-color-scheme: dark)">
-                    <img class="shot-img" src="assets/screens/compose-light.png" width="1800" height="1125" loading="lazy" alt="Envoir compose window addressed from ada@envoir.org with a Private/Fast send-tier switch and a sealed/signed disclaimer.">
+                    <img class="shot-img" src="assets/screens/compose-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir compose window addressed from ada@envoir.org with a Private/Fast send-tier switch and a sealed/signed disclaimer.">
                   </picture>
                 </div>
                 <figcaption class="shot-caption"><b>Today:</b> the client itself is honest about its own build — "sealed · signed with your real key · simulated delivery, connect your node to send for real."</figcaption>
@@ -608,8 +602,7 @@
                 <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — mail</span></div>
                 <div class="shot-media-wrap">
                   <picture data-shot data-dark="assets/screens/mail-dark.png" data-light="assets/screens/mail-light.png">
-                    <source srcset="assets/screens/mail-dark.png" media="(prefers-color-scheme: dark)">
-                    <img class="shot-img" src="assets/screens/mail-light.png" width="1800" height="1125" loading="lazy" alt="Envoir inbox showing a received welcome message with a verified sender badge and a transport-path panel confirming pure-mesh delivery with no gateway attestation.">
+                    <img class="shot-img" src="assets/screens/mail-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir inbox showing a received welcome message with a verified sender badge and a transport-path panel confirming pure-mesh delivery with no gateway attestation.">
                   </picture>
                 </div>
                 <figcaption class="shot-caption">"Pure-mesh — never plaintext at a gateway": the absence of a gateway attestation is itself the proof.</figcaption>
@@ -631,8 +624,7 @@
                 <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — inspector</span></div>
                 <div class="shot-media-wrap">
                   <picture data-shot data-dark="assets/screens/inspector-dark.png" data-light="assets/screens/inspector-light.png">
-                    <source srcset="assets/screens/inspector-dark.png" media="(prefers-color-scheme: dark)">
-                    <img class="shot-img" src="assets/screens/inspector-light.png" width="1800" height="1125" loading="lazy" alt="MOTE inspector showing outer mixnet/sealed-sender layer, signed envelope layer, and end-to-end encrypted payload layer for a received message, with a simulated-network delivery path.">
+                    <img class="shot-img" src="assets/screens/inspector-dark.png" width="1800" height="1125" loading="lazy" alt="MOTE inspector showing outer mixnet/sealed-sender layer, signed envelope layer, and end-to-end encrypted payload layer for a received message, with a simulated-network delivery path.">
                   </picture>
                 </div>
                 <figcaption class="shot-caption">The delivery path shown here is explicitly labelled "simulated network" — see <a href="#privacy">Honest status</a> for exactly what that means today.</figcaption>
@@ -659,8 +651,7 @@
             <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — transport path</span></div>
             <div class="shot-media-wrap">
               <picture data-shot data-dark="assets/screens/path-graph.png" data-light="assets/screens/path-graph-light.png">
-                <source srcset="assets/screens/path-graph.png" media="(prefers-color-scheme: dark)">
-                <img class="shot-img" src="assets/screens/path-graph-light.png" width="1800" height="1125" loading="lazy" alt="Envoir's transport-path provenance panel: sender name, private-tier mixnet hop with a floor of at least 3 hops, an arrow to you on this device, and a green pure-mesh — never plaintext at a gateway attestation.">
+                <img class="shot-img" src="assets/screens/path-graph.png" width="1800" height="1125" loading="lazy" alt="Envoir's transport-path provenance panel: sender name, private-tier mixnet hop with a floor of at least 3 hops, an arrow to you on this device, and a green pure-mesh — never plaintext at a gateway attestation.">
               </picture>
             </div>
             <figcaption class="shot-caption">Sender → private-tier mixnet (≥3-hop floor) → you, this device. Green means no gateway ever touched it.</figcaption>
@@ -833,8 +824,7 @@
           <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">console — overview</span></div>
           <div class="shot-media-wrap">
             <picture data-shot data-dark="assets/screens/console-overview-dark.png" data-light="assets/screens/console-overview-light.png">
-              <source srcset="assets/screens/console-overview-dark.png" media="(prefers-color-scheme: dark)">
-              <img class="shot-img" src="assets/screens/console-overview-light.png" width="1800" height="1125" loading="lazy" alt="Org console overview for @abc.com showing a 2-of-3 threshold domain authority, member and group counts, and a statement that the console administers names and operations, never a sovereign member's key.">
+              <img class="shot-img" src="assets/screens/console-overview-dark.png" width="1800" height="1125" loading="lazy" alt="Org console overview for @abc.com showing a 2-of-3 threshold domain authority, member and group counts, and a statement that the console administers names and operations, never a sovereign member's key.">
             </picture>
           </div>
           <figcaption class="shot-caption"><b>Console — overview.</b> "Everything the console administers under @abc.com — names and operations, never a sovereign member's key."</figcaption>
@@ -843,8 +833,7 @@
           <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">console — members</span></div>
           <div class="shot-media-wrap">
             <picture data-shot data-dark="assets/screens/console-members-dark.png" data-light="assets/screens/console-members-light.png">
-              <source srcset="assets/screens/console-members-dark.png" media="(prefers-color-scheme: dark)">
-              <img class="shot-img" src="assets/screens/console-members-light.png" width="1800" height="1125" loading="lazy" alt="Org console members list distinguishing sovereign members from org-managed accounts.">
+              <img class="shot-img" src="assets/screens/console-members-dark.png" width="1800" height="1125" loading="lazy" alt="Org console members list distinguishing sovereign members from org-managed accounts.">
             </picture>
           </div>
           <figcaption class="shot-caption"><b>Console — members.</b> Sovereign vs. org-managed accounts, tracked separately by design.</figcaption>
@@ -853,8 +842,7 @@
           <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">console — directory</span></div>
           <div class="shot-media-wrap">
             <picture data-shot data-dark="assets/screens/console-directory-dark.png" data-light="assets/screens/console-directory-light.png">
-              <source srcset="assets/screens/console-directory-dark.png" media="(prefers-color-scheme: dark)">
-              <img class="shot-img" src="assets/screens/console-directory-light.png" width="1800" height="1125" loading="lazy" alt="Org console directory settings for a members-only DMTAP domain directory.">
+              <img class="shot-img" src="assets/screens/console-directory-dark.png" width="1800" height="1125" loading="lazy" alt="Org console directory settings for a members-only DMTAP domain directory.">
             </picture>
           </div>
           <figcaption class="shot-caption"><b>Console — directory.</b> The org-wide member directory, scoped and versioned.</figcaption>
@@ -863,8 +851,7 @@
           <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">console — billing</span></div>
           <div class="shot-media-wrap">
             <picture data-shot data-dark="assets/screens/console-billing-dark.png" data-light="assets/screens/console-billing-light.png">
-              <source srcset="assets/screens/console-billing-dark.png" media="(prefers-color-scheme: dark)">
-              <img class="shot-img" src="assets/screens/console-billing-light.png" width="1800" height="1125" loading="lazy" alt="Org console billing view for the domain's org-managed seats.">
+              <img class="shot-img" src="assets/screens/console-billing-dark.png" width="1800" height="1125" loading="lazy" alt="Org console billing view for the domain's org-managed seats.">
             </picture>
           </div>
           <figcaption class="shot-caption"><b>Console — billing.</b> Scoped to the org's own managed seats — never to what self-hosted members do.</figcaption>
@@ -873,8 +860,7 @@
           <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">superadmin — overview</span></div>
           <div class="shot-media-wrap">
             <picture data-shot data-dark="assets/screens/superadmin-overview-dark.png" data-light="assets/screens/superadmin-overview-light.png">
-              <source srcset="assets/screens/superadmin-overview-dark.png" media="(prefers-color-scheme: dark)">
-              <img class="shot-img" src="assets/screens/superadmin-overview-light.png" width="1800" height="1125" loading="lazy" alt="Fleet superadmin overview for operator.example showing node, gateway, mix-node, and relay health across four regions, marked content-blind, and metered operations such as hosted storage and relayed bytes — deliberately not content.">
+              <img class="shot-img" src="assets/screens/superadmin-overview-dark.png" width="1800" height="1125" loading="lazy" alt="Fleet superadmin overview for operator.example showing node, gateway, mix-node, and relay health across four regions, marked content-blind, and metered operations such as hosted storage and relayed bytes — deliberately not content.">
             </picture>
           </div>
           <figcaption class="shot-caption"><b>Superadmin — overview.</b> "Operations only; never content" — the badge in the corner says it outright.</figcaption>
@@ -883,8 +869,7 @@
           <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">superadmin — fleet</span></div>
           <div class="shot-media-wrap">
             <picture data-shot data-dark="assets/screens/superadmin-fleet-dark.png" data-light="assets/screens/superadmin-fleet-light.png">
-              <source srcset="assets/screens/superadmin-fleet-dark.png" media="(prefers-color-scheme: dark)">
-              <img class="shot-img" src="assets/screens/superadmin-fleet-light.png" width="1800" height="1125" loading="lazy" alt="Fleet superadmin view listing nodes, gateways, mix nodes, and relays across regions.">
+              <img class="shot-img" src="assets/screens/superadmin-fleet-dark.png" width="1800" height="1125" loading="lazy" alt="Fleet superadmin view listing nodes, gateways, mix nodes, and relays across regions.">
             </picture>
           </div>
           <figcaption class="shot-caption"><b>Superadmin — fleet.</b> Every node, gateway, mix node, and relay an operator runs — infrastructure health, not mailboxes.</figcaption>
@@ -893,8 +878,7 @@
           <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">superadmin — abuse ops</span></div>
           <div class="shot-media-wrap">
             <picture data-shot data-dark="assets/screens/superadmin-abuse-dark.png" data-light="assets/screens/superadmin-abuse-light.png">
-              <source srcset="assets/screens/superadmin-abuse-dark.png" media="(prefers-color-scheme: dark)">
-              <img class="shot-img" src="assets/screens/superadmin-abuse-light.png" width="1800" height="1125" loading="lazy" alt="Fleet superadmin abuse operations queue for handling reports without exposing message content.">
+              <img class="shot-img" src="assets/screens/superadmin-abuse-dark.png" width="1800" height="1125" loading="lazy" alt="Fleet superadmin abuse operations queue for handling reports without exposing message content.">
             </picture>
           </div>
           <figcaption class="shot-caption"><b>Superadmin — abuse ops.</b> Reports and incident handling, structured to stay content-blind.</figcaption>
@@ -903,8 +887,7 @@
           <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">superadmin — billing</span></div>
           <div class="shot-media-wrap">
             <picture data-shot data-dark="assets/screens/superadmin-billing-dark.png" data-light="assets/screens/superadmin-billing-light.png">
-              <source srcset="assets/screens/superadmin-billing-dark.png" media="(prefers-color-scheme: dark)">
-              <img class="shot-img" src="assets/screens/superadmin-billing-light.png" width="1800" height="1125" loading="lazy" alt="Fleet superadmin billing view aggregating metered operations across the whole fleet.">
+              <img class="shot-img" src="assets/screens/superadmin-billing-dark.png" width="1800" height="1125" loading="lazy" alt="Fleet superadmin billing view aggregating metered operations across the whole fleet.">
             </picture>
           </div>
           <figcaption class="shot-caption"><b>Superadmin — billing.</b> Fleet-wide metering: storage, gateway sends, relayed bytes — the genuine cost centers, deliberately small.</figcaption>
