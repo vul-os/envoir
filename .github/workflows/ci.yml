@@ -342,3 +342,43 @@ jobs:
           echo "KOTVA main @ $(git -C "$KOTVA_DIR" rev-parse HEAD) (pinned: $KOTVA_REF)"
           cargo test --locked -p conformance-runner
           cargo run --locked -p conformance-runner | tail -40
+
+  # The JS surfaces — the published docs and the client's own unit tests.
+  #
+  # This job exists because both guards below already existed and ran NOWHERE.
+  # A gate that is never invoked by CI is indistinguishable from a gate that
+  # cannot fail, and this suite has shipped that shape before: `docs:sync:check`
+  # was written with a real dry-run path and a coverage-count assertion, and
+  # then sat unreferenced by any workflow. Writing the guard is half the work;
+  # wiring it into the run is the half that makes it a gate.
+  #
+  # No Rust, no KOTVA checkout: nothing here reads the spec repo, and adding a
+  # dependency this job does not need is how a fast check becomes a slow one
+  # nobody keeps green.
+  docs:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: envoir
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: envoir
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # `docs/` is the single source of truth; `site/docs/*.md` is GENERATED
+      # from it by scripts/sync-site-docs.mjs. Before that script existed, nine
+      # files were byte-identical copies maintained by hand, so editing the
+      # wrong one silently did nothing at all.
+      #
+      # --check is a true dry run (it never writes) and asserts a coverage
+      # COUNT: it fails if it examined fewer pages than the published set, and
+      # fails if it examined zero. Both matter — an exit code alone cannot tell
+      # "everything is in sync" apart from "the glob matched nothing".
+      - name: Published docs match their source (drift check)
+        run: npm run docs:sync:check
+
+      - name: Client unit tests
+        run: npm run test:client
