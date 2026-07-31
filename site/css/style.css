@@ -403,10 +403,18 @@ section + section { border-top: 1px solid var(--line); }
 .illo-mote-label span { display: block; font-size: 13px; font-weight: 650; color: var(--text-dim); }
 .illo-mote-label.center { left: 50%; top: 50%; }
 .illo-mote-label.center span { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.06em; color: var(--text); background: var(--bg-1); padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line-2); }
-.illo-mote-label.top { left: 50%; top: 15%; }
-.illo-mote-label.right { left: 85%; top: 50%; }
-.illo-mote-label.bottom { left: 50%; top: 85%; }
-.illo-mote-label.left { left: 15%; top: 50%; }
+/* Each label sits at the SAME left/top as its icon (so it stays correctly anchored at any
+   container size) but is pushed off that point by a fixed pixel offset via transform, clear
+   of the icon's ~27px drawn radius — top/left/right labels push toward center (there's more
+   room that direction before hitting the MOTE badge); the bottom label pushes up instead,
+   since pushing it down would run off the container's own edge. Previously all four labels
+   used the bare icon position with no offset at all, rendering the label text directly on
+   top of its own icon — caught visually, not by any automated check (overlap without
+   overflow is invisible to a geometry-only pass). */
+.illo-mote-label.top { left: 50%; top: 15%; transform: translate(-50%, calc(-50% + 42px)); }
+.illo-mote-label.right { left: 85%; top: 50%; transform: translate(-50%, calc(-50% + 42px)); }
+.illo-mote-label.bottom { left: 50%; top: 85%; transform: translate(-50%, calc(-50% - 42px)); }
+.illo-mote-label.left { left: 15%; top: 50%; transform: translate(-50%, calc(-50% + 42px)); }
 
 /* ---- C: legacy-gateway bridge — sovereign node, gateway, legacy inbox ---- */
 .illo-bridge { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: center; gap: 6px; padding: 10px 4px; }
