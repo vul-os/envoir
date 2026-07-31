@@ -1,11 +1,25 @@
-# Files
+# Files & sharing
 
 Content-addressed, end-to-end encrypted, any size — no protocol cap, bounded only by your own
 storage. A shared folder **is** a group: drop a file, and everyone with membership can read it.
 
 ![Files — content-addressed, shared folders as groups](../img/files-dark.png)
 
-## How it works
+## Adding and browsing files
+
+Open **Files** from the left rail. Click **Add file** to upload, or drag one in. Switch between
+**grid** and **list** view from the header, and use the filter chips (All, Starred, Shared, …) to
+narrow the view. Selecting a file opens its **details** panel — download, share, star, or remove,
+plus its content ID (the file's own hash-derived identifier) with a one-click copy.
+
+## Sharing a file
+
+Click **Share** on a file's details panel (or select several files and use the bulk **Share**
+action) and pick a [group](groups.md) to share into — the file lands in that group's shared
+folder, and every current member can read it immediately. There's no separate "sharing" system to
+learn: a shared folder *is* a group, using the exact same membership and roles as a chat channel.
+
+## How it works under the hood
 
 A file is a **BLAKE3 Merkle-DAG manifest** over fixed-size encrypted chunks:
 
@@ -40,8 +54,8 @@ read the file.
 This tiering is deliberate, not an oversight: routing every large file through the same slow,
 low-bandwidth mixnet as messages would be impractical, so bulk chunk transfer trades some
 metadata protection for the bandwidth a large file actually needs. Small and normal-sized
-attachments keep the full guarantee. See [privacy.md](../privacy.md) for the underlying tier
-model.
+attachments keep the full guarantee. See [Privacy & threat model](../privacy.md) for the
+underlying tier model.
 
 ## Availability
 
@@ -54,13 +68,18 @@ model.
 An always-on node gives you best-effort and durable availability for free; "Dropbox-like, always
 reachable" for a large file is exactly where a paid replica becomes worth it — and exactly the
 kind of thing an optional hosted operator (never a required one) can sell without touching the
-protocol's privacy guarantees. See [self-hosting.md](self-hosting.md).
+protocol's privacy guarantees. See [Self-hosting a node](self-hosting.md).
 
-## Shared folders are groups
+## Removing someone's access
 
-There's no separate "sharing" primitive: a shared folder is a group over a set of manifests,
-using the exact same MLS machinery, roles, and membership model as a chat channel — see
-[chat.md](chat.md#groups-roles-and-posting-models). Removing someone from the folder's group
-triggers a re-key of every file they had access to, by default, so a removed member doesn't
-retain silent access to future changes (though anything they already downloaded, they already
-have — no deletion protocol can retroactively un-share bits a device already copied).
+Removing someone from a shared folder's group triggers a re-key of every file they had access to,
+by default, so a removed member doesn't retain silent access to future changes — though anything
+they already downloaded, they already have; no deletion protocol can retroactively un-share bits a
+device already copied. See [Groups](groups.md) for managing membership.
+
+## What's real vs. simulated today
+
+File listing, sharing UI, the details panel, and the manifest/chunking model described above are
+real client concepts. As with every other module, actual chunk transfer across the mesh/swarm is a
+clearly-labeled in-browser simulation in this reference client — see [Roadmap](../roadmap.md) for
+the project-wide real-vs-simulated line.

@@ -1,13 +1,34 @@
-# Identity
+# Your identity & safety numbers
 
 Your key is the security boundary. Everything else — your address, your provider, your IP — is a
-replaceable pointer to it.
+replaceable pointer to it. This page walks through creating that identity, what the client shows
+you along the way, and how to verify a contact's key with a safety number once you're in.
 
 ![Identity — safety number, devices, signed-in apps](../img/identity-dark.png)
 
-<p align="center">
-  <img src="../img/identity-mobile.png" width="300" alt="Identity — mobile, single-pane view">
-</p>
+## Creating your identity (first run)
+
+The first time you open the client with no identity yet, you land on a three-step onboarding flow
+— nothing here talks to a server; the whole thing runs in your browser.
+
+1. **Pick your address.** Type your name, then choose either a ready-made `you@envoir.org`
+   address (the easy default, works with the old email world today) or your own domain
+   (`you@yourbrand.com`, DNS/DKIM/DMARC auto-configured, one approval). You can optionally keep an
+   existing legacy address as an alias so switching doesn't mean abandoning an old inbox. Click
+   **Create my identity** and the client generates a real Ed25519 keypair in your browser — the
+   private key never leaves the device.
+2. **Save your recovery phrase.** A 12-word phrase appears once. Write it down offline — anyone
+   who has it can recover your identity, so treat it like a spare key to your front door, not a
+   password to paste into a note app. (The demo client shows a 12-word phrase; a production
+   client uses the full SLIP-0039 word list — see [Recovery](#recovery) below.) Click **I've saved
+   it** once you have.
+3. **You're sovereign.** The final screen shows your address, your key fingerprint, and — front
+   and center — your **safety number**, rendered as a word list and a scannable grid. This is what
+   you'd read aloud or show a contact to prove you are who you say you are. Click **Open Envoir**
+   to land in the app.
+
+No account was created anywhere. If you closed the tab right now, the only place that identity
+exists is the keypair sitting in this browser's storage.
 
 ## The key hierarchy
 
@@ -21,30 +42,36 @@ a software compromise of the device can only *use* the key while it's unlocked, 
 ## Addresses are pointers, not the identity
 
 What you give out is a **primary address** — `name@domain`, e.g. `you@envoir.org` or your own
-domain. One identity may hold several addresses at once: aliases, a kept legacy address (so
-switching to Envoir doesn't mean abandoning an old inbox), an optional `@handle`, and
-plus-addressing (`you+tag@domain`) — all resolving to the same key. If you lose the domain, you
-lose the *name*, not the identity: a signed move record rebinds the same key to a new name, and
-existing contacts (who route by key, not by name, once you've made first contact) follow you
-automatically. `name@domain` is only the headline form — a zero-authority key-name and a local
-petname need no domain or DNS at all, and an optional crypto name-chain (`.eth`/`.sol`) is a
-third, guarded alternative. See [../naming.md](../naming.md) for the full ladder and
-[protocol.md](../protocol.md#naming--key-transparency) for naming in the context of the whole
+domain. One identity may hold several addresses at once: aliases, a kept legacy address, an
+optional `@handle`, and plus-addressing (`you+tag@domain`) — all resolving to the same key. If you
+lose the domain, you lose the *name*, not the identity: a signed move record rebinds the same key
+to a new name, and existing contacts (who route by key, not by name, once you've made first
+contact) follow you automatically. `name@domain` is only the headline form — a zero-authority
+key-name and a local petname need no domain or DNS at all, and an optional crypto name-chain
+(`.eth`/`.sol`) is a third, guarded alternative. See [Naming](../naming.md) for the full ladder and
+[Protocol](../protocol.md#naming--key-transparency) for naming in the context of the whole
 protocol.
 
-## Safety numbers
+## Safety numbers — verifying a contact's key
 
 A safety number is a deterministic fingerprint of an identity's full keyset — rendered as words,
-digits, or a scannable QR-style grid, exactly like Signal's. Two contacts compare it out-of-band
-(in person, over a trusted channel, or by scanning) to upgrade a trust-on-first-use pin to a
-verified one. This is the one thing that closes the gap TOFU leaves open: a look-alike key
-substituted at the very first contact, before either side has verified anything.
+digits, or a scannable QR-style grid, exactly like Signal's. This is the one thing that closes the
+gap trust-on-first-use (TOFU) leaves open: a look-alike key substituted at the very first contact,
+before either side has verified anything.
 
-A **verified ✓** badge in the client means you did this comparison. It is computed over the entire
-identity object (every algorithm suite the identity holds), not a single key, specifically so a
-rogue additional key injected later can't hide behind a pin you only checked against the original
-one — adding a key changes the safety number and downgrades a verified pin back to unverified
-until you re-check.
+**How to verify someone, in the client:**
+
+1. Open their card in [Contacts](contacts.md) or the reading pane in [Mail](mail.md), and find
+   their safety-number affordance (words, numeric blocks, or the grid).
+2. Compare it against theirs **out-of-band** — in person, over a call you trust, or by scanning
+   each other's grid. Don't compare it over the same channel you're trying to verify.
+3. If it matches, mark them verified. A **verified ✓** badge now shows next to their name
+   everywhere in the client.
+
+The safety number is computed over the *entire* identity object (every algorithm suite the
+identity holds), not a single key, specifically so a rogue additional key injected later can't
+hide behind a pin you only checked against the original one — adding a key changes the safety
+number and downgrades a verified pin back to unverified until you re-check.
 
 The 8-word encoding is **a verification affordance, not an address** — it is never something you'd
 give someone to reach you, only something you'd read aloud to confirm a key.
@@ -73,14 +100,15 @@ Recovery is a first-class, versioned, signed policy you compose from phrase, add
 and social-guardian factors, with two deliberately different thresholds — a lower bar for
 recovering access, a higher bar for changing the recovery policy itself, so a single recovered or
 compromised factor can never rewrite the rules and lock you out. See
-[privacy.md](../privacy.md#recovery-phrase-device-and-social-guardians) for the full model,
-including its one honest, unavoidable limit.
+[Privacy & threat model](../privacy.md#recovery-phrase-device-and-social-guardians) for the full
+model, including its one honest, unavoidable limit: losing the root key *and* enough recovery
+factors simultaneously is unrecoverable, by design — there is no central authority who can bail
+you out, because DMTAP deliberately doesn't have one.
 
 ## Groups as identities
 
 A group is simply an identity that has members — its own keypair, its own address on the same
-naming ladder as a person. See [chat.md](chat.md#groups-roles-and-posting-models) and
-[files.md](files.md#shared-folders-are-groups).
+naming ladder as a person. See [Groups](groups.md) and [Files & sharing](files.md#shared-folders-are-groups).
 
 ## Signing in with your key — DMTAP-Auth
 
@@ -100,10 +128,23 @@ that only speak OIDC/OAuth, a bridge translates DMTAP-Auth into a standard ID to
 a convenience operator you can swap or self-host, not a requirement, and its importance fades as
 native support spreads. See spec §13 for the full ceremony and its stated honest limits (a
 compromised bridge is a trusted third party exactly like any classical identity provider — only
-the native path removes that trust entirely).
+the native path removes that trust entirely). Try the demo in
+[Settings & devices](settings.md#sign-in-with-envoir).
 
 ## Multi-device
 
 Your devices form your own personal MLS group, syncing the mailbox, flags, labels, and file index
 as an encrypted CRDT over the mesh. Any device can send or receive; your always-on box is the
-anchor that guarantees receipt while your other devices sleep.
+anchor that guarantees receipt while your other devices sleep. Manage linked devices from
+[Settings & devices](settings.md#devices).
+
+## What's real vs. simulated today
+
+Identity keygen, signing, and the safety-number derivation shown above are **real browser
+cryptography** — a genuine Ed25519 keypair and a genuine deterministic digest, not a mock. What's
+a labeled stand-in: the browser demo uses SHA-256 over a 256-word list instead of the spec's
+BLAKE3-over-a-1024-word list (browsers have no native BLAKE3), and the demo derives the number over
+only your own key rather than both parties' — see the header comment in
+[`client/js/safety.js`](../../client/js/safety.js) for the exact difference. Network delivery
+(mesh/mixnet) is a clearly-labeled in-browser simulation everywhere else in the client — see
+[Roadmap](../roadmap.md) for the project-wide real-vs-simulated line.
