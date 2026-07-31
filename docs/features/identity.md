@@ -49,7 +49,7 @@ to a new name, and existing contacts (who route by key, not by name, once you've
 contact) follow you automatically. `name@domain` is only the headline form — a zero-authority
 key-name and a local petname need no domain or DNS at all, and an optional crypto name-chain
 (`.eth`/`.sol`) is a third, guarded alternative. See [Naming](../naming.md) for the full ladder and
-[Protocol](../protocol.md#naming--key-transparency) for naming in the context of the whole
+[Protocol](../protocol.md#naming-key-transparency) for naming in the context of the whole
 protocol.
 
 ## Safety numbers — verifying a contact's key
@@ -129,7 +129,7 @@ a convenience operator you can swap or self-host, not a requirement, and its imp
 native support spreads. See spec §13 for the full ceremony and its stated honest limits (a
 compromised bridge is a trusted third party exactly like any classical identity provider — only
 the native path removes that trust entirely). Try the demo in
-[Settings & devices](settings.md#sign-in-with-envoir).
+[Settings & devices](settings.md#sign-in-with-envoir-demo).
 
 ## Devices
 

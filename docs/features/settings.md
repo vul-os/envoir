@@ -20,7 +20,7 @@ safety number (see [Identity](identity.md#avatars-and-profile)).
 One identity, many addresses, all resolving to the same key. From here you can keep a legacy
 address as an alias, add a work alias, claim an `@handle`, or link an on-chain `.eth`/`.sol`
 name-chain address — linking one requires the **bidirectional binding** described in
-[Naming](../naming.md#name-chain-eth--sol--optional-crypto-name-chains-four-guardrails): your key
+[Naming](../naming.md#name-chain-eth-sol-optional-crypto-name-chains-four-guardrails): your key
 must claim the name, *and* the chain record must point back to your key, or the client refuses the
 link. Plus-addressing (`you+tag@domain`) works automatically with no setup.
 
@@ -87,7 +87,7 @@ A push only ever means "your node has something new — open to sync" — the pa
 reading your mail to decide when to notify you. **Send test wake-ping** runs the exact
 push → notification → wake-sync code path a real push event would, with no backend involved, so
 you can see the mechanism work rather than a simulation of a different mechanism. See
-[PWA & push](../pwa-and-push.md#web-push--a-content-free-wake-ping-by-design) for the full
+[PWA & push](../pwa-and-push.md#web-push-a-content-free-wake-ping-by-design) for the full
 model and its one disclosed residual on iOS.
 
 ## Keyboard shortcuts
@@ -96,7 +96,7 @@ Opens the same shortcuts overlay as pressing `?` anywhere in the app.
 
 ## Sign in with Envoir — demo
 
-A working demonstration of [DMTAP-Auth](identity.md#signing-in-with-your-key--dmtap-auth): sign in
+A working demonstration of [DMTAP-Auth](identity.md#signing-in-with-your-key-dmtap-auth): sign in
 to a mock relying party using your key instead of a password, and see the origin-binding step play
 out.
 

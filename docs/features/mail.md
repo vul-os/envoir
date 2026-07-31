@@ -35,7 +35,7 @@ Every keyboard shortcut is listed in-app via `?` (or Settings → Keyboard short
 ## What the badges on a conversation mean
 
 - A **verified ✓** badge next to a sender's name means you've checked their
-  [safety number](identity.md#safety-numbers) — see [Identity](identity.md).
+  [safety number](identity.md#safety-numbers-verifying-a-contacts-key) — see [Identity](identity.md).
 - A small **path badge** (shield, bolt, or bridge icon) on the row shows how that message arrived
   — pure-mesh private tier, pure-mesh fast tier, or gateway-touched. Click it to expand the full
   transport-path graph in the reading pane. See

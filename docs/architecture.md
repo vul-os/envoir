@@ -121,7 +121,7 @@ at all, and an OPTIONAL `name-chain` resolver (ENS `.eth` / SNS `.sol`, off by d
 third, guarded alternative below the same fixed point — every rung still resolves to, and is
 pinned as, a key. See [naming.md](naming.md) for the full ladder,
 [features/identity.md](features/identity.md), and
-[protocol.md](protocol.md#naming--key-transparency).
+[protocol.md](protocol.md#naming-key-transparency).
 
 ## Message flow
 

@@ -49,7 +49,7 @@ never a coin. See [FAQ](faq.md).
 | Self-hosting | Run your own domain, node, and optionally your own gateway — for $0 | [features/self-hosting.md](features/self-hosting.md) |
 
 Calendar and contacts ride the same substrate as additional MOTE kinds (JSCalendar/JSContact over
-JMAP, with CalDAV/CardDAV compatibility) — see [protocol.md](protocol.md#messaging--files),
+JMAP, with CalDAV/CardDAV compatibility) — see [protocol.md](protocol.md#messaging-files),
 [features/calendar.md](features/calendar.md), and [features/contacts.md](features/contacts.md).
 
 ## Map of the docs

@@ -53,7 +53,7 @@ contribution from the other party's ratchet step.
 
 Opt-in and off by default, because they're metadata-sensitive — Envoir doesn't turn on a signal
 that reveals when you're active unless you've asked for it (Settings →
-[Privacy & network](settings.md#privacy--network)).
+[Privacy & network](settings.md#privacy-network)).
 
 ## Channels and roles
 

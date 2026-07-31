@@ -79,7 +79,7 @@ a global identifier.
 which is checked against a **key-transparency log** for tamper-evidence, and the result is
 **pinned on first use (TOFU)**. After that, correspondents route by key over the mesh and never
 re-consult DNS for that relationship unless a signed rotation record says to. See
-[protocol.md](protocol.md#naming--key-transparency) for the full flow and
+[protocol.md](protocol.md#naming-key-transparency) for the full flow and
 [`crates/dmtap-naming`](../crates/dmtap-naming)'s `dns`/`kt`/`resolver` modules for the
 fail-closed verification core (an unreachable or sub-quorum KT log **never** falls back to a
 TOFU pin — see spec §3.3).
@@ -220,7 +220,7 @@ covered in the conformance suite.
 
 ## See also
 
-- [protocol.md](protocol.md#naming--key-transparency) — naming in the context of the whole
+- [protocol.md](protocol.md#naming-key-transparency) — naming in the context of the whole
   protocol.
 - [features/identity.md](features/identity.md) — safety numbers, the key hierarchy, and why an
   address is only ever a pointer.

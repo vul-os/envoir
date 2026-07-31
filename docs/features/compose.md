@@ -46,7 +46,7 @@ still edit or cancel it before it goes.
 ## Sending, and undo send
 
 Click **Send**. In this reference client (with no real node connected — see
-[Settings & devices](settings.md#node-connection) for connecting one), the message moves into Sent
+[Settings & devices](settings.md#node-connection-leaving-the-demo-behind) for connecting one), the message moves into Sent
 immediately, with a brief **undo** window in the toast that appears — click it in time and the
 send is reverted, the draft restored. Once a real node is connected with a send capability
 provisioned, "send" instead calls the node's real Send API and the composed message travels for
@@ -66,7 +66,7 @@ with your setup:
   actual `POST /v1/send` and a real, end-to-end-encrypted MOTE is sealed and dispatched.
 
 This note exists specifically so the client never claims a message was sent when it wasn't — see
-[Settings & devices](settings.md#node-connection) for wiring up a real node.
+[Settings & devices](settings.md#node-connection-leaving-the-demo-behind) for wiring up a real node.
 
 ## Programmatic sending — Envoir Send
 
