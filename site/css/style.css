@@ -240,6 +240,11 @@ section + section { border-top: 1px solid var(--line); }
   transition: transform 0.18s var(--ease-out), box-shadow 0.18s var(--ease-out), border-color 0.18s ease, background 0.18s ease;
   white-space: nowrap;
 }
+/* An inline <svg> with a viewBox but no width/height fills its container. Inside a
+   flex button that resolves to the button's full width — the Compose CTA's pencil
+   rendered at ~100px. Every other icon holder here sizes its svg explicitly; the
+   button did not. Matches the app's icon scale. */
+.btn svg { width: 15px; height: 15px; flex: none; }
 .btn:active { transform: translateY(1px); }
 .btn-primary { background: var(--grad); color: #fff; box-shadow: 0 6px 20px -8px color-mix(in srgb, var(--violet) 65%, transparent); }
 .btn-primary:hover { box-shadow: 0 10px 26px -6px color-mix(in srgb, var(--violet) 75%, transparent); transform: translateY(-1px); }
