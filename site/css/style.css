@@ -314,6 +314,9 @@ section + section { border-top: 1px solid var(--line); }
 .pill.good   { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
 .pill.warn   { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
 .pill.legacy { background: color-mix(in srgb, var(--legacy) 18%, transparent); color: var(--legacy); }
+
+/* ---------- key chip — identical rule to app.css's .key (line 161) ---------- */
+.key { font-family: var(--mono); font-size: 12px; color: var(--text-dim); background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; display: inline-block; }
 .pill.dim    { background: var(--bg-3); color: var(--text-dim); }
 
 /* ---------- hero ---------- */
