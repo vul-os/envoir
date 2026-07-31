@@ -36,166 +36,267 @@
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
-<div class="scroll-progress" aria-hidden="true"><span id="scroll-progress-bar"></span></div>
 
-<header class="site-nav">
-  <div class="wrap nav-inner">
-    <a class="brand" href="#top" aria-label="Envoir home">
-      <img src="assets/logo-mark.svg" width="30" height="30" alt="" aria-hidden="true">
+<div class="app-shell">
+
+  <!-- ══════════ Top bar — mirrors client/js/shell.js's <header class="topbar"> ══════════ -->
+  <header class="topbar">
+    <a class="topbar-brand" href="#top" aria-label="Envoir home">
+      <img src="assets/logo-mark.svg" alt="">
       <span class="word">Envoir</span>
     </a>
-
-    <nav class="nav-links" id="primary-nav" aria-label="Primary">
-      <a href="#why">Why different</a>
-      <a href="#product">Product</a>
-      <a href="#how-to">How to use it</a>
-      <a href="#privacy">Honest status</a>
-      <a href="#open-source">Self-hosting</a>
-      <a href="docs.html">Docs</a>
-    </nav>
-
-    <div class="nav-right">
-      <button class="switch" id="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Toggle light/dark theme"></button>
-      <a class="btn btn-ghost btn-mono nav-cta" href="https://github.com/vul-os/envoir" target="_blank" rel="noopener">Get the code</a>
-      <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Open menu">
-        <span class="nav-toggle-bars" aria-hidden="true"><span></span><span></span><span></span></span>
+    <div class="topbar-search" role="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="site-search" placeholder="Search mail…" aria-label="Search this page" autocomplete="off" spellcheck="false">
+    </div>
+    <button class="cmd-open" id="cmd-open" type="button" aria-label="Open command palette">
+      <kbd>⌘K</kbd><span class="full">commands</span>
+    </button>
+    <span class="net-pill" title="This page is a static simulation of the client — nothing here talks to a real node.">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="6" cy="6" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M7.9 6.9L16 16M16.1 6.9L8 16M8.2 6h7.6"/></svg>
+      <span class="full">simulated network</span>
+    </span>
+    <div class="topbar-right">
+      <button class="icon-btn theme-toggle" id="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Toggle light and dark theme">
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg>
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
       </button>
+      <a class="icon-btn" href="https://github.com/vul-os/envoir" target="_blank" rel="noopener" aria-label="Envoir on GitHub" title="GitHub">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49l-.01-1.7c-2.78.62-3.37-1.37-3.37-1.37-.45-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.86.09-.66.35-1.12.63-1.38-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.28 9.28 0 0 1 5 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9l-.01 2.82c0 .27.18.6.69.49A10.03 10.03 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/></svg>
+      </a>
+      <a class="btn btn-primary sm" href="https://github.com/vul-os/envoir" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+        <span class="full">Get the code</span>
+      </a>
     </div>
-  </div>
+  </header>
 
-  <div class="mobile-menu" id="mobile-menu" hidden>
-    <nav aria-label="Mobile">
-      <a href="#why">Why different</a>
-      <a href="#naming">Your address</a>
-      <a href="#product">Product</a>
-      <a href="#how-to">How to use it</a>
-      <a href="#traceability">Traceability</a>
-      <a href="#privacy">Honest status</a>
-      <a href="#open-source">Self-hosting</a>
-      <a href="docs.html">Docs</a>
+  <div class="shell">
+
+    <!-- ══════════ Rail — primary nav, 1:1 widget with the app's left icon rail ══════════ -->
+    <nav class="rail" aria-label="Primary">
+      <a class="rail-brand" href="#top" aria-hidden="true"><img src="assets/logo-mark.svg" alt=""></a>
+      <div class="rail-nav" id="rail-nav">
+        <a class="rail-btn" data-rail="top" href="#top" title="Mail" aria-label="Mail">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+          <span>Mail</span><i class="rail-badge">3</i>
+        </a>
+        <a class="rail-btn" data-rail="chat" href="#chat" title="Chat" aria-label="Chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.2A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z"/></svg>
+          <span>Chat</span><i class="rail-badge">4</i>
+        </a>
+        <a class="rail-btn" data-rail="calendar" href="#calendar" title="Calendar" aria-label="Calendar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+          <span>Calendar</span><i class="rail-badge">2</i>
+        </a>
+        <a class="rail-btn" data-rail="contacts" href="#contacts" title="Contacts" aria-label="Contacts">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>
+          <span>Contacts</span>
+        </a>
+        <a class="rail-btn" data-rail="files" href="#files" title="Files" aria-label="Files">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          <span>Files</span>
+        </a>
+        <a class="rail-btn" data-rail="identity" href="#identity" title="Identity" aria-label="Identity">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="5"/><path d="M12.6 12.6L20 20M16 16l3-3M18.5 18.5l2-2"/></svg>
+          <span>Identity</span>
+        </a>
+        <a class="rail-btn" data-rail="groups" href="#groups" title="Groups" aria-label="Groups">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><circle cx="16.5" cy="9.5" r="2.4"/><path d="M2.5 20.5c0-3.6 2.9-6.4 6.5-6.4s6.5 2.8 6.5 6.4"/><path d="M15 14.4c2.7.5 4.6 2.8 4.6 5.7"/></svg>
+          <span>Groups</span>
+        </a>
+      </div>
+      <div class="rail-spacer"></div>
+      <a class="rail-btn" href="docs.html" title="Settings — read the docs" aria-label="Settings — read the docs">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.6V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.6 1H21a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.6 1z"/></svg>
+        <span>Settings</span>
+      </a>
+      <a class="rail-id" href="https://github.com/vul-os/envoir" target="_blank" rel="noopener" title="View source on GitHub" aria-label="View source on GitHub">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49l-.01-1.7c-2.78.62-3.37-1.37-3.37-1.37-.45-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.86.09-.66.35-1.12.63-1.38-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.28 9.28 0 0 1 5 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9l-.01 2.82c0 .27.18.6.69.49A10.03 10.03 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/></svg>
+      </a>
     </nav>
-    <a class="btn btn-primary btn-mono" href="https://github.com/vul-os/envoir" target="_blank" rel="noopener">Get the code →</a>
-  </div>
-</header>
 
-<main id="main">
+    <!-- ══════════ List column — the folder list, repurposed as this page's own contents ══════════ -->
+    <aside class="list-col" aria-label="Page contents">
+      <a class="btn btn-primary block" href="https://github.com/vul-os/envoir" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+        Get the code
+      </a>
+      <nav class="folders" id="folders" aria-label="Sections">
+        <a class="folder" data-folder="top" href="#top">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+          <span>Welcome</span>
+        </a>
+        <a class="folder" data-folder="why" href="#why">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4" stroke-linecap="round"/><circle cx="12" cy="12" r="5"/></svg>
+          <span>Why different</span><i class="count">4</i>
+        </a>
+        <a class="folder" data-folder="naming" href="#naming">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="9" cy="9" r="5"/><path d="M12.6 12.6L20 20M16 16l3-3"/></svg>
+          <span>Your address</span><i class="count">3</i>
+        </a>
+        <a class="folder" data-folder="product" href="#product">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.4"/><rect x="14" y="3" width="7" height="7" rx="1.4"/><rect x="3" y="14" width="7" height="7" rx="1.4"/><rect x="14" y="14" width="7" height="7" rx="1.4"/></svg>
+          <span>Product tour</span><i class="count">11</i>
+        </a>
+        <a class="folder" data-folder="how-to" href="#how-to">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M9 5h12M9 12h12M9 19h12"/><circle cx="4" cy="5" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="4" cy="19" r="1.6"/></svg>
+          <span>How to use it</span><i class="count">6</i>
+        </a>
+        <a class="folder" data-folder="traceability" href="#traceability">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h4l2-6 4 12 2-6h4"/></svg>
+          <span>Traceability</span>
+        </a>
+        <a class="folder" data-folder="parity" href="#parity">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>
+          <span>Feature parity</span><i class="count">52</i>
+        </a>
+        <a class="folder" data-folder="privacy" href="#privacy">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+          <span>Honest status</span><i class="count">5</i>
+        </a>
+        <a class="folder" data-folder="open-source" href="#open-source">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="4" width="18" height="7" rx="1.6"/><rect x="3" y="13" width="18" height="7" rx="1.6"/><circle cx="7" cy="7.5" r=".9" fill="currentColor" stroke="none"/><circle cx="7" cy="16.5" r=".9" fill="currentColor" stroke="none"/></svg>
+          <span>Self-hosting</span><i class="count">2</i>
+        </a>
+        <a class="folder" data-folder="trust" href="#trust">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4v5c0 5-3.4 8-8 9-4.6-1-8-4-8-9V7z"/></svg>
+          <span>Trust</span>
+        </a>
+        <a class="folder" data-folder="get-started" href="#get-started">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          <span>Get started</span>
+        </a>
+      </nav>
+      <div class="rail-label-h">Labels</div>
+      <nav class="labels" aria-label="Jump to a topic">
+        <a class="label-item" href="#why"><i class="dot" style="--h:265"></i>Sovereign</a>
+        <a class="label-item" href="#privacy"><i class="dot" style="--h:38"></i>Privacy</a>
+        <a class="label-item" href="#traceability"><i class="dot" style="--h:172"></i>Protocol</a>
+        <a class="label-item" href="#open-source"><i class="dot" style="--h:243"></i>Operators</a>
+      </nav>
+    </aside>
 
-  <!-- ============ HERO ============ -->
-  <section class="hero" id="top">
-    <div class="wrap hero-grid">
-      <div class="hero-copy">
-        <p class="eyebrow"><span class="tag">DMTAP</span> reference client · MIT · pre-alpha</p>
-        <h1>Your key is your identity. <em>Your node is your provider.</em></h1>
-        <p class="lede">
-          Envoir is mail, chat, files, and calendar reachable at one <span class="mono">name@domain</span> —
-          all bound to a single keypair identity, held on a node you run instead of a company. It's the
-          open-source reference client for <strong>DMTAP</strong>, designed to move through a
-          peer mesh and mixnet so watching the wires never reveals who's talking to whom.
-          <a href="#privacy">What's real today, honestly, below ↓</a>
-        </p>
-        <div class="hero-ctas">
-          <a class="btn btn-primary" href="https://github.com/vul-os/envoir" target="_blank" rel="noopener">Get the code</a>
-          <a class="btn btn-ghost" href="#how-to">See how it works ↓</a>
-        </div>
-        <div class="hero-address">
-          <span class="label">Your address, the moment you generate a key — provider-issued or your own domain</span>
-          <span class="readout mono" id="address-readout" aria-live="off">you@envoir.org<span class="cursor">&nbsp;</span></span>
-          <span class="hero-address-note">Same key underneath if it ever rotates — the address doesn't move. <a href="#naming">Why a name, not a key string →</a></span>
-        </div>
-      </div>
+    <!-- ══════════ Reading pane — the ONE scrolling surface; content lives here ══════════ -->
+    <main class="reading-pane" id="main">
+      <div class="scroll-progress" aria-hidden="true"><span id="scroll-progress-bar"></span></div>
 
-      <div class="hero-visual">
-        <canvas id="mesh-canvas" class="hv-mesh" aria-hidden="true"></canvas>
-        <figure class="shot-frame hv-shot">
-          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — mail</span></div>
-          <div class="shot-media-wrap">
-            <picture data-shot data-dark="assets/screens/mail-dark.png" data-light="assets/screens/mail-light.png">
-              <img class="shot-img" src="assets/screens/mail-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir's actual inbox: the left icon rail shared by every surface (mail, chat, calendar, files, contacts, identity, groups), a three-pane mail view, and a verified sender badge on the open message.">
-            </picture>
+      <!-- ============ HERO, rendered as an opened message ============ -->
+      <section id="top">
+        <canvas id="mesh-canvas" class="hero-mesh" aria-hidden="true"></canvas>
+        <div class="msg-card">
+          <div class="msg-tags">
+            <span class="pill priv">Sovereign</span>
+            <span class="pill dim"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.4 8-8 9-4.6-1-8-4-8-9V7z"/></svg>metadata-private</span>
           </div>
-          <figcaption class="shot-caption"><b>The real inbox.</b> Not a mockup — the same interface shown throughout this page, behind a faint animated mesh (illustrative — see <a href="#privacy">Honest status</a>).</figcaption>
-        </figure>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ WHY DIFFERENT ============ -->
-  <section id="why">
-    <div class="wrap">
-      <div class="section-head reveal">
-        <p class="eyebrow"><span class="tag">the crux</span> why this isn't just another inbox</p>
-        <h2>Every other inbox is a courtesy. This one starts from your key.</h2>
-        <p class="lede">Four ideas do all the work. None of them are exotic on their own — the difference is that Envoir actually builds on them, instead of adding privacy as a layer on top of a rented mailbox.</p>
-      </div>
-
-      <div class="why-grid">
-        <div class="why-card reveal" data-d="1">
-          <div class="why-ic" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="4"/><path d="M12 12v6M9 15.5l6 3M15 15.5l-6 3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <h1 class="msg-title">Welcome to Envoir — you are sovereign now.</h1>
+          <div class="msg-head">
+            <div class="msg-avatar" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+            </div>
+            <div class="msg-who">
+              <div class="msg-name">Envoir <span class="pill good"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M4 12l5 5L20 6"/></svg>verified</span></div>
+              <div class="msg-addr mono">envoir@envoir.org · to you, wherever you run it</div>
+            </div>
+            <div class="msg-when mono">pre-alpha · reference client</div>
           </div>
-          <h3>Your key is your identity</h3>
-          <p>Everywhere else, an account is something a company issues you and can revoke. Here the <strong>keypair comes first</strong> — you generate it before any provider is involved, and it's what every other name resolves to, not the other way round.</p>
-        </div>
-        <div class="why-card reveal" data-d="2">
-          <div class="why-ic" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="6" rx="1.5"/><rect x="4" y="14" width="16" height="6" rx="1.5"/><circle cx="8" cy="7" r="0.8" fill="currentColor" stroke="none"/><circle cx="8" cy="17" r="0.8" fill="currentColor" stroke="none"/></svg>
+          <div class="msg-body">
+            <p>Here's the one idea that changes everything: your <strong>key</strong> is your identity. Every other inbox is an account a company issues you and can revoke — this one starts from a keypair you generate yourself, before any provider is involved. <code class="mono">name@domain</code> is just a memorable pointer to it, like a phone number pointing at a person. No provider holds the key, so no provider can read your mail, and you can move your whole life to another provider — or your own domain — without losing a single message or contact.</p>
+            <p>Mail, chat, files, and calendar all resolve to that one identity, held on a node you run instead of a company. It's the open-source reference client for <strong>DMTAP</strong>, designed to move through a peer mesh and mixnet so watching the wires never reveals who's talking to whom. <a href="#privacy">What's real today, honestly, below ↓</a></p>
+            <p>Try scrolling — every folder in the list to the left opens the section it names, exactly the way a real folder would.</p>
+            <p class="msg-sign">— Envoir</p>
           </div>
-          <h3>Your node is your provider</h3>
-          <p>The address is a <strong>pointer</strong> to your key, not the key itself. Move to a different node, a different domain, even self-host tomorrow — the pointer gets republished and everyone still reaches the same you. Losing a provider was never supposed to mean losing an identity.</p>
-        </div>
-        <div class="why-card reveal" data-d="3">
-          <div class="why-ic" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 4-8 4-8-4 8-4Z" stroke-linejoin="round"/><path d="M4 11l8 4 8-4M4 15l8 4 8-4" stroke-linejoin="round"/></svg>
+          <div class="hero-ctas">
+            <a class="btn btn-primary" href="https://github.com/vul-os/envoir" target="_blank" rel="noopener">Get the code</a>
+            <a class="btn btn-ghost" href="#how-to">See how it works ↓</a>
           </div>
-          <h3>One object, every feature</h3>
-          <p>Mail, chat, a shared file, a calendar invite — under the hood they're all the <strong>same sealed object</strong> (a MOTE), just rendered differently by the client. One identity, one mailbox, one set of devices, not a separate account and threat model per feature.</p>
-        </div>
-        <div class="why-card reveal" data-d="4">
-          <div class="why-ic" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="6" width="8" height="12" rx="1.5"/><rect x="13" y="6" width="8" height="12" rx="1.5"/><path d="M11 12h2" stroke-linecap="round" stroke-dasharray="1.5 2"/></svg>
-          </div>
-          <h3>Useful with the mail you already have</h3>
-          <p>Every DMTAP identity can also send and receive with ordinary SMTP inboxes through a gateway. You're not asking your contacts to migrate before you can use it — day one, it's already useful.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ NAMING / INDIRECTION ============ -->
-  <section id="naming">
-    <div class="wrap">
-      <div class="section-head reveal">
-        <p class="eyebrow"><span class="tag">spec §3.9 · §0.4</span> your address</p>
-        <h2>One key. One recommended address. Three layers of indirection between them.</h2>
-        <p class="lede">The identity is always the key — that never casually changes. <span class="mono">name@domain</span> is the address you actually give people: human, and federated, so there's no single namespace to squat or fight over.</p>
-      </div>
-
-      <figure class="illo-frame reveal" style="margin-bottom:40px;">
-        <div class="illo-bridge" role="img" aria-label="Diagram: a human name resolves once to a durable key, which is the real identity, which in turn resolves to an ephemeral mesh location that can change at any time without changing the name or the key.">
-          <div class="illo-node">
-            <div class="illo-node-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" class="c-dim"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 8h18M7 12h4" stroke-linecap="round"/></svg></div>
-            <span class="illo-node-tt mono">abc@def.com</span>
-            <span class="illo-node-dd">Name — human, stable. Looked up once via DNS + key transparency.</span>
-          </div>
-          <svg class="illo-link" viewBox="0 0 60 24" aria-hidden="true"><path d="M2 12H52M52 12L42 4M52 12L42 20" fill="none" class="c-line" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <div class="illo-node">
-            <div class="illo-node-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" class="c-indigo"><circle cx="9" cy="9" r="5"/><path d="M12.5 12.5L20 20M16 16l3-3M18.5 18.5l2-2"/></svg></div>
-            <span class="illo-node-tt mono">IK 7f2a…9c1b</span>
-            <span class="illo-node-dd">Key — durable, portable. The identity itself; never changes on a whim.</span>
-          </div>
-          <svg class="illo-link" viewBox="0 0 60 24" aria-hidden="true"><path d="M2 12H52M52 12L42 4M52 12L42 20" fill="none" class="c-line" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <div class="illo-node">
-            <div class="illo-node-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" class="c-violet"><path d="M12 3v5M12 16v5M3 12h5M16 12h5" stroke-linecap="round" stroke-dasharray="1 3"/><circle cx="12" cy="12" r="3.4"/></svg></div>
-            <span class="illo-node-tt mono">mesh DHT</span>
-            <span class="illo-node-dd">Location — ephemeral. Self-republished as your node's address changes.</span>
+          <div class="hero-address">
+            <span class="label">Your address, the moment you generate a key — provider-issued or your own domain</span>
+            <span class="readout mono" id="address-readout" aria-live="off">you@envoir.org<span class="cursor">&nbsp;</span></span>
+            <span class="hero-address-note">Same key underneath if it ever rotates — the address doesn't move. <a href="#naming">Why a name, not a key string →</a></span>
           </div>
         </div>
-        <figcaption class="illo-caption">Only the middle layer — the key — is the thing that can't be taken from you. The name is convenience; the location is just where you happen to be right now.</figcaption>
-      </figure>
+      </section>
 
-      <p class="lede reveal" style="margin: 28px 0 22px;">A message between two DMTAP identities never touches a mail server. It's built, sealed, and routed hop-by-hop by the sender's own node:</p>
+      <!-- ============ WHY DIFFERENT ============ -->
+      <section id="why">
+        <div class="pane-crumb"><span>Envoir</span><span class="sep">›</span><span class="cur">Why different</span><span class="meta"><span>4 ideas</span></span></div>
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow"><span class="tag">the crux</span> why this isn't just another inbox</p>
+            <h2>Every other inbox is a courtesy. This one starts from your key.</h2>
+            <p class="lede">Four ideas do all the work. None of them are exotic on their own — the difference is that Envoir actually builds on them, instead of adding privacy as a layer on top of a rented mailbox.</p>
+          </div>
 
-      <div class="trace reveal" role="img" aria-label="Message flow trace: resolve name to key, fetch key packages and location, build a sealed and encrypted MOTE, send through the mixnet, and receive an acknowledgement.">
+          <div class="why-grid">
+            <div class="why-card reveal" data-d="1">
+              <div class="why-ic" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="4"/><path d="M12 12v6M9 15.5l6 3M15 15.5l-6 3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <h3>Your key is your identity</h3>
+              <p>Everywhere else, an account is something a company issues you and can revoke. Here the <strong>keypair comes first</strong> — you generate it before any provider is involved, and it's what every other name resolves to, not the other way round.</p>
+            </div>
+            <div class="why-card reveal" data-d="2">
+              <div class="why-ic" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="6" rx="1.5"/><rect x="4" y="14" width="16" height="6" rx="1.5"/><circle cx="8" cy="7" r="0.8" fill="currentColor" stroke="none"/><circle cx="8" cy="17" r="0.8" fill="currentColor" stroke="none"/></svg>
+              </div>
+              <h3>Your node is your provider</h3>
+              <p>The address is a <strong>pointer</strong> to your key, not the key itself. Move to a different node, a different domain, even self-host tomorrow — the pointer gets republished and everyone still reaches the same you. Losing a provider was never supposed to mean losing an identity.</p>
+            </div>
+            <div class="why-card reveal" data-d="3">
+              <div class="why-ic" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 4-8 4-8-4 8-4Z" stroke-linejoin="round"/><path d="M4 11l8 4 8-4M4 15l8 4 8-4" stroke-linejoin="round"/></svg>
+              </div>
+              <h3>One object, every feature</h3>
+              <p>Mail, chat, a shared file, a calendar invite — under the hood they're all the <strong>same sealed object</strong> (a MOTE), just rendered differently by the client. One identity, one mailbox, one set of devices, not a separate account and threat model per feature.</p>
+            </div>
+            <div class="why-card reveal" data-d="4">
+              <div class="why-ic" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="6" width="8" height="12" rx="1.5"/><rect x="13" y="6" width="8" height="12" rx="1.5"/><path d="M11 12h2" stroke-linecap="round" stroke-dasharray="1.5 2"/></svg>
+              </div>
+              <h3>Useful with the mail you already have</h3>
+              <p>Every DMTAP identity can also send and receive with ordinary SMTP inboxes through a gateway. You're not asking your contacts to migrate before you can use it — day one, it's already useful.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ NAMING / INDIRECTION ============ -->
+      <section id="naming">
+        <div class="pane-crumb"><span>Envoir</span><span class="sep">›</span><span class="cur">Your address</span><span class="meta"><span>spec §3.9 · §0.4</span></span></div>
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow"><span class="tag">spec §3.9 · §0.4</span> your address</p>
+            <h2>One key. One recommended address. Three layers of indirection between them.</h2>
+            <p class="lede">The identity is always the key — that never casually changes. <span class="mono">name@domain</span> is the address you actually give people: human, and federated, so there's no single namespace to squat or fight over.</p>
+          </div>
+
+          <figure class="illo-frame reveal" style="margin-bottom:40px;">
+            <div class="illo-bridge" role="img" aria-label="Diagram: a human name resolves once to a durable key, which is the real identity, which in turn resolves to an ephemeral mesh location that can change at any time without changing the name or the key.">
+              <div class="illo-node">
+                <div class="illo-node-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" class="c-dim"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 8h18M7 12h4" stroke-linecap="round"/></svg></div>
+                <span class="illo-node-tt mono">abc@def.com</span>
+                <span class="illo-node-dd">Name — human, stable. Looked up once via DNS + key transparency.</span>
+              </div>
+              <svg class="illo-link" viewBox="0 0 60 24" aria-hidden="true"><path d="M2 12H52M52 12L42 4M52 12L42 20" fill="none" class="c-line" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <div class="illo-node">
+                <div class="illo-node-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" class="c-indigo"><circle cx="9" cy="9" r="5"/><path d="M12.5 12.5L20 20M16 16l3-3M18.5 18.5l2-2"/></svg></div>
+                <span class="illo-node-tt mono">IK 7f2a…9c1b</span>
+                <span class="illo-node-dd">Key — durable, portable. The identity itself; never changes on a whim.</span>
+              </div>
+              <svg class="illo-link" viewBox="0 0 60 24" aria-hidden="true"><path d="M2 12H52M52 12L42 4M52 12L42 20" fill="none" class="c-line" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <div class="illo-node">
+                <div class="illo-node-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" class="c-violet"><path d="M12 3v5M12 16v5M3 12h5M16 12h5" stroke-linecap="round" stroke-dasharray="1 3"/><circle cx="12" cy="12" r="3.4"/></svg></div>
+                <span class="illo-node-tt mono">mesh DHT</span>
+                <span class="illo-node-dd">Location — ephemeral. Self-republished as your node's address changes.</span>
+              </div>
+            </div>
+            <figcaption class="illo-caption">Only the middle layer — the key — is the thing that can't be taken from you. The name is convenience; the location is just where you happen to be right now.</figcaption>
+          </figure>
+
+          <p class="lede reveal" style="margin: 28px 0 22px;">A message between two DMTAP identities never touches a mail server. It's built, sealed, and routed hop-by-hop by the sender's own node:</p>
+
+          <div class="trace reveal" role="img" aria-label="Message flow trace: resolve name to key, fetch key packages and location, build a sealed and encrypted MOTE, send through the mixnet, and receive an acknowledgement.">
 <span class="prompt">$</span> envoir send alice@yourdomain
 <span class="step">[1]</span> resolve   alice@yourdomain → key <span class="tag">K</span>            <span class="tag">dns + key-transparency, §3</span>
 <span class="step">[2]</span> fetch     K's KeyPackages + current location  <span class="tag">mesh DHT, §4 / §5.3</span>
@@ -205,803 +306,835 @@
 
 <span class="tag">no gateway · no SMTP · no plaintext outside the two endpoints</span></div>
 
-      <div class="naming-primary reveal bracketed" style="margin-top:40px;">
-        <span class="np-badge">the headline address · §3.9.1</span>
-        <div class="np-grid">
-          <div class="np-flavor">
-            <span class="np-tt">Provider-issued</span>
-            <span class="np-example mono">you@envoir.org</span>
-            <span class="np-dd">Free, handle-shaped, zero DNS work — yours the moment you claim it (Tier B, §3.8)</span>
-          </div>
-          <div class="np-flavor">
-            <span class="np-tt">Your own domain</span>
-            <span class="np-example mono">you@yourbrand.com</span>
-            <span class="np-dd">Full sovereignty; records auto-published, never hand-edited (Tier C, §3.8)</span>
-          </div>
-        </div>
-        <p class="np-note">Both flavours are one format, reachable from Gmail and Outlook on day one, and survive key rotation and even a future post-quantum migration — the name binds to your identity's stable anchor, not to whichever key happens to be signing today (§1.5–§1.6, §3.9.1).</p>
-      </div>
-
-      <div class="naming-secondary reveal">
-        <div class="ns-row">
-          <span class="ns-form">@handle</span>
-          <span class="ns-example mono">@thisismyname</span>
-          <span class="ns-note">Optional, opt-in global registry — first-come, small anti-squat cost, audited so it can't be silently repointed (§3.9.2)</span>
-        </div>
-        <div class="ns-row">
-          <span class="ns-form">Petname</span>
-          <span class="ns-example mono">“Mom” → a key</span>
-          <span class="ns-note">Local only — a name you give a contact; never leaves your devices (§3.9.3)</span>
-        </div>
-        <div class="ns-row">
-          <span class="ns-form">Alias / plus-address</span>
-          <span class="ns-example mono">you+news@domain</span>
-          <span class="ns-note">One identity, several names — even an old address you already own can be folded in once it's verified to point back at your key (§3.9.4)</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ PRODUCT: ONE OBJECT, RENDERED FOUR WAYS ============ -->
-  <section id="product">
-    <div class="wrap">
-      <div class="section-head reveal">
-        <p class="eyebrow"><span class="tag">spec §2 · §5 · §8 · §13</span> the product</p>
-        <h2>Mail, chat, files, and login — one key, no central provider</h2>
-        <p class="lede">Everything below really is <em>kind</em> of the same object — a MOTE — rendered differently by the client. One identity, one mailbox, one set of devices, no separate service to trust per feature.</p>
-      </div>
-
-      <figure class="illo-frame reveal" style="max-width:460px;margin:0 auto 48px;">
-        <div class="illo-mote" role="img" aria-label="Diagram: a single sealed MOTE object at the centre, with four spokes labelled mail, chat, files, and calendar — the same encrypted object, just rendered differently by the client.">
-          <svg viewBox="0 0 400 400" aria-hidden="true">
-            <line x1="200" y1="200" x2="200" y2="88"  class="c-line" stroke-width="2"/>
-            <line x1="200" y1="200" x2="312" y2="200" class="c-line" stroke-width="2"/>
-            <line x1="200" y1="200" x2="200" y2="312" class="c-line" stroke-width="2"/>
-            <line x1="200" y1="200" x2="88"  y2="200" class="c-line" stroke-width="2"/>
-            <polygon points="200,142 251,171 251,229 200,258 149,229 149,171" class="c-indigo" opacity="0.14"/>
-            <polygon points="200,142 251,171 251,229 200,258 149,229 149,171" fill="none" class="c-indigo" stroke-width="2"/>
-            <circle cx="200" cy="60"  r="32" class="c-bg1" stroke="var(--line-2)" stroke-width="1.5"/>
-            <circle cx="340" cy="200" r="32" class="c-bg1" stroke="var(--line-2)" stroke-width="1.5"/>
-            <circle cx="200" cy="340" r="32" class="c-bg1" stroke="var(--line-2)" stroke-width="1.5"/>
-            <circle cx="60"  cy="200" r="32" class="c-bg1" stroke="var(--line-2)" stroke-width="1.5"/>
-            <g transform="translate(200 60)"  class="c-dim" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="-13" y="-9" width="26" height="18" rx="3"/><path d="M-13 -7l13 9 13-9"/></g>
-            <g transform="translate(340 200)" class="c-dim" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M-13-9h26a4 4 0 0 1 4 4v9a4 4 0 0 1-4 4h-15l-7 6v-6h-4a4 4 0 0 1-4-4v-9a4 4 0 0 1 4-4z"/></g>
-            <g transform="translate(200 340)" class="c-dim" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="-13" y="-10" width="26" height="22" rx="3"/><path d="M-13-3h26M-6-10v6M6-10v6"/></g>
-            <g transform="translate(60 200)"  class="c-dim" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M-13-7h8l3 4h11a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-22a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2z"/></g>
-          </svg>
-          <div class="illo-mote-label center"><span class="mono">MOTE</span></div>
-          <div class="illo-mote-label top"><span>Mail</span></div>
-          <div class="illo-mote-label right"><span>Chat</span></div>
-          <div class="illo-mote-label bottom"><span>Calendar</span></div>
-          <div class="illo-mote-label left"><span>Files</span></div>
-        </div>
-        <figcaption class="illo-caption">Same envelope, same seal, same keys — the client just decides how to draw it depending on <span class="mono">kind</span>.</figcaption>
-      </figure>
-
-      <div class="feature-row reveal" id="mail">
-        <div class="feature-media">
-          <figure class="shot-frame">
-            <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — mail</span></div>
-            <div class="shot-media-wrap">
-              <picture data-shot data-dark="assets/screens/mail-dark.png" data-light="assets/screens/mail-light.png">
-                <img class="shot-img" src="assets/screens/mail-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir mail: three-pane inbox. The open message shows a green &quot;verified&quot; badge next to the sender's name, and the message list shows a &quot;legacy-origin&quot; label on the one thread that crossed the SMTP gateway.">
-              </picture>
+          <div class="naming-primary reveal bracketed" style="margin-top:40px;">
+            <span class="np-badge">the headline address · §3.9.1</span>
+            <div class="np-grid">
+              <div class="np-flavor">
+                <span class="np-tt">Provider-issued</span>
+                <span class="np-example mono">you@envoir.org</span>
+                <span class="np-dd">Free, handle-shaped, zero DNS work — yours the moment you claim it (Tier B, §3.8)</span>
+              </div>
+              <div class="np-flavor">
+                <span class="np-tt">Your own domain</span>
+                <span class="np-example mono">you@yourbrand.com</span>
+                <span class="np-dd">Full sovereignty; records auto-published, never hand-edited (Tier C, §3.8)</span>
+              </div>
             </div>
-            <figcaption class="shot-caption"><b>Mail.</b> Three-pane inbox, threading, folders, star/archive/snooze. The <span class="pill good" style="display:inline-flex;">verified</span> badge means you've checked that sender's safety number; <span class="pill legacy" style="display:inline-flex;">legacy-origin</span> means the message crossed the SMTP gateway to reach you.</figcaption>
+            <p class="np-note">Both flavours are one format, reachable from Gmail and Outlook on day one, and survive key rotation and even a future post-quantum migration — the name binds to your identity's stable anchor, not to whichever key happens to be signing today (§1.5–§1.6, §3.9.1).</p>
+          </div>
+
+          <div class="naming-secondary reveal">
+            <div class="ns-row">
+              <span class="ns-form">@handle</span>
+              <span class="ns-example mono">@thisismyname</span>
+              <span class="ns-note">Optional, opt-in global registry — first-come, small anti-squat cost, audited so it can't be silently repointed (§3.9.2)</span>
+            </div>
+            <div class="ns-row">
+              <span class="ns-form">Petname</span>
+              <span class="ns-example mono">"Mom" → a key</span>
+              <span class="ns-note">Local only — a name you give a contact; never leaves your devices (§3.9.3)</span>
+            </div>
+            <div class="ns-row">
+              <span class="ns-form">Alias / plus-address</span>
+              <span class="ns-example mono">you+news@domain</span>
+              <span class="ns-note">One identity, several names — even an old address you already own can be folded in once it's verified to point back at your key (§3.9.4)</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ PRODUCT: ONE OBJECT, RENDERED FOUR WAYS ============ -->
+      <section id="product">
+        <div class="pane-crumb"><span>Envoir</span><span class="sep">›</span><span class="cur">Product tour</span><span class="meta"><span>11 screens</span></span></div>
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow"><span class="tag">spec §2 · §5 · §8 · §13</span> the product</p>
+            <h2>Mail, chat, files, and login — one key, no central provider</h2>
+            <p class="lede">Everything below really is <em>kind</em> of the same object — a MOTE — rendered differently by the client. One identity, one mailbox, one set of devices, no separate service to trust per feature.</p>
+          </div>
+
+          <figure class="illo-frame reveal" style="max-width:460px;margin:0 auto 48px;">
+            <div class="illo-mote" role="img" aria-label="Diagram: a single sealed MOTE object at the centre, with four spokes labelled mail, chat, files, and calendar — the same encrypted object, just rendered differently by the client.">
+              <svg viewBox="0 0 400 400" aria-hidden="true">
+                <line x1="200" y1="200" x2="200" y2="88"  class="c-line" stroke-width="2"/>
+                <line x1="200" y1="200" x2="312" y2="200" class="c-line" stroke-width="2"/>
+                <line x1="200" y1="200" x2="200" y2="312" class="c-line" stroke-width="2"/>
+                <line x1="200" y1="200" x2="88"  y2="200" class="c-line" stroke-width="2"/>
+                <polygon points="200,142 251,171 251,229 200,258 149,229 149,171" class="c-indigo" opacity="0.14"/>
+                <polygon points="200,142 251,171 251,229 200,258 149,229 149,171" fill="none" class="c-indigo" stroke-width="2"/>
+                <circle cx="200" cy="60"  r="32" class="c-bg1" stroke="var(--line-2)" stroke-width="1.5"/>
+                <circle cx="340" cy="200" r="32" class="c-bg1" stroke="var(--line-2)" stroke-width="1.5"/>
+                <circle cx="200" cy="340" r="32" class="c-bg1" stroke="var(--line-2)" stroke-width="1.5"/>
+                <circle cx="60"  cy="200" r="32" class="c-bg1" stroke="var(--line-2)" stroke-width="1.5"/>
+                <g transform="translate(200 60)"  class="c-dim" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="-13" y="-9" width="26" height="18" rx="3"/><path d="M-13 -7l13 9 13-9"/></g>
+                <g transform="translate(340 200)" class="c-dim" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M-13-9h26a4 4 0 0 1 4 4v9a4 4 0 0 1-4 4h-15l-7 6v-6h-4a4 4 0 0 1-4-4v-9a4 4 0 0 1 4-4z"/></g>
+                <g transform="translate(200 340)" class="c-dim" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="-13" y="-10" width="26" height="22" rx="3"/><path d="M-13-3h26M-6-10v6M6-10v6"/></g>
+                <g transform="translate(60 200)"  class="c-dim" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M-13-7h8l3 4h11a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-22a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2z"/></g>
+              </svg>
+              <div class="illo-mote-label center"><span class="mono">MOTE</span></div>
+              <div class="illo-mote-label top"><span>Mail</span></div>
+              <div class="illo-mote-label right"><span>Chat</span></div>
+              <div class="illo-mote-label bottom"><span>Calendar</span></div>
+              <div class="illo-mote-label left"><span>Files</span></div>
+            </div>
+            <figcaption class="illo-caption">Same envelope, same seal, same keys — the client just decides how to draw it depending on <span class="mono">kind</span>.</figcaption>
           </figure>
-        </div>
-        <div class="feature-copy">
-          <span class="feature-tag mono">kind = mail · private tier is the design default</span>
-          <h3>Mail</h3>
-          <p>Rich compose, scheduled and undo send, color labels — over the same MOTE substrate as everything else, sealed end-to-end always; mixnet-routed once the mix workstream lands (today, delivery runs on the direct <span class="mono">fast</span> tier — see <a href="#privacy">Honest status</a>).</p>
-          <ul class="feature-points">
-            <li>Real client protocols: JMAP natively, plus a genuinely complete IMAP/POP3/SMTP-submission surface (CONDSTORE, SEARCHRES, SORT/THREAD…) so existing mail apps just work.</li>
-            <li>A <b>verified ✓</b> badge once you've checked a sender's safety number, and a plain <b>legacy-origin</b> marker on anything that crossed the gateway.</li>
-            <li>Calendar and contacts ride the same node as JSCalendar/JSContact MOTEs, with CalDAV/CardDAV compatibility.</li>
-          </ul>
-        </div>
-      </div>
 
-      <div class="feature-row reverse reveal" id="chat">
-        <div class="feature-media">
-          <figure class="shot-frame">
-            <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — chat</span></div>
-            <div class="shot-media-wrap">
-              <picture data-shot data-dark="assets/screens/chat-dark.png" data-light="assets/screens/chat-light.png">
-                <img class="shot-img" src="assets/screens/chat-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir chat: a direct-message thread with Ada Okonkwo, a green verified badge, an online-presence dot, and a Deniable 1:1 protocol indicator in the header. The thread discusses chat and mail being the same MOTE object.">
-              </picture>
-            </div>
-            <figcaption class="shot-caption"><b>Chat.</b> DMs and channels riding the fast tier by default — the header states plainly which cryptographic mode a conversation uses.</figcaption>
-          </figure>
-        </div>
-        <div class="feature-copy">
-          <span class="feature-tag mono">kind = chat · fast tier · MLS or deniable 1:1</span>
-          <h3>Chat</h3>
-          <p>DMs and channels on the same substrate as mail — just a faster default tier. The two available cryptographic modes make genuinely different tradeoffs, so the client is explicit about which one's in use.</p>
-          <ul class="feature-points">
-            <li><b>MLS group · signed</b> — the default for channels and any group of three or more; strong forward secrecy and post-compromise security, but non-repudiable by design (RFC 9420).</li>
-            <li><b>Deniable 1:1</b> — an explicit, opt-in X3DH/PQXDH + Double Ratchet mode for conversations that need cryptographic repudiation; never a silent default.</li>
-            <li>Presence and typing indicators are opt-in and off by default — metadata Envoir doesn't turn on unless you ask.</li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="feature-row reveal" id="files">
-        <div class="feature-media">
-          <figure class="shot-frame">
-            <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — files</span></div>
-            <div class="shot-media-wrap">
-              <picture data-shot data-dark="assets/screens/files-dark.png" data-light="assets/screens/files-light.png">
-                <img class="shot-img" src="assets/screens/files-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir files: a grid of files each showing a content hash prefixed b3:, an E2E badge, and two shared folders rendered as groups (DMTAP Core, Design Crit).">
-              </picture>
-            </div>
-            <figcaption class="shot-caption"><b>Files.</b> Content-addressed by BLAKE3 hash (the <span class="key">b3:</span> prefix), end-to-end encrypted, no protocol size cap. A shared folder <em>is</em> a group.</figcaption>
-          </figure>
-        </div>
-        <div class="feature-copy">
-          <span class="feature-tag mono">content-addressed · any size</span>
-          <h3>Files</h3>
-          <p>A BLAKE3 Merkle-DAG manifest over encrypted chunks — resumable, deduplicated, swarmed BitTorrent-style, and self-verifying. Drop a file into a shared folder, and everyone with membership can read it.</p>
-          <ul class="feature-points">
-            <li>The file's key travels only inside the sealed MOTE that announces it — holders relay encrypted chunks blind, never able to read what they're serving.</li>
-            <li>Small and normal attachments keep the full mixnet privacy guarantee; only very large bulk transfers trade some of that for bandwidth — disclosed, not hidden.</li>
-            <li>Removing someone from a shared folder re-keys everything they had access to, by default.</li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="feature-row reverse reveal" id="identity">
-        <div class="feature-media">
-          <figure class="shot-frame">
-            <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — identity</span></div>
-            <div class="shot-media-wrap">
-              <picture data-shot data-dark="assets/screens/identity-dark.png" data-light="assets/screens/identity-light.png">
-                <img class="shot-img" src="assets/screens/identity-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir identity page: sovereign identity card for Ada Okonkwo with key age, device count, and verified-contact count; a key-name naming ladder card; and a DNS-discovered ada@envoir.org address marked primary.">
-              </picture>
-            </div>
-            <figcaption class="shot-caption"><b>Identity.</b> The naming ladder made concrete: a zero-authority key-name at the floor, DNS discovery layered on top, all pointing at one root key.</figcaption>
-          </figure>
-        </div>
-        <div class="feature-copy">
-          <span class="feature-tag mono">root key + device subkeys · §1 / §13</span>
-          <h3>Identity</h3>
-          <p>A safety number is a deterministic fingerprint of your whole keyset, rendered as words or a scannable grid so two people can verify each other's key out-of-band. The same keypair signs you into the web — no password, no central identity provider.</p>
-          <ul class="feature-points">
-            <li>Root key held cold; each device carries its own signed subkey, so compromising one device never hands over the root, and revoking it is cheap and targeted.</li>
-            <li>Recovery is a first-class, versioned policy (phrase / devices / social guardians) with two deliberately asymmetric thresholds.</li>
-            <li><b>DMTAP-Auth</b>: an origin-bound challenge signed by your key — phishing-resistant like a passkey, because a passkey is what gates it.</li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="two-col-illos reveal">
-        <figure class="illo-frame">
-          <div class="illo-node" style="padding:20px 20px 4px;">
-            <span class="illo-node-tt" style="font-size:13px;">Key rotation, same address</span>
-          </div>
-          <div class="illo-rotation" role="img" aria-label="Diagram: the address alice at yourdomain stays fixed at the top while three keys are shown underneath in sequence, key A and key B faded as retired, key C highlighted as current — the address never moves even though the signing key has rotated twice.">
-            <span class="ir-addr"><span class="dot" aria-hidden="true"></span>alice@yourdomain</span>
-            <svg viewBox="0 0 400 60" aria-hidden="true"><path d="M70 4v20M200 4v20M330 4v20M70 24Q200 50 200 24M200 24Q200 50 330 24" fill="none" class="c-line" stroke-width="1.6"/></svg>
-            <div class="ir-keys">
-              <div class="ir-key"><div class="ir-key-tt mono">key A</div><div class="ir-key-vv">retired</div></div>
-              <div class="ir-key"><div class="ir-key-tt mono">key B</div><div class="ir-key-vv">retired</div></div>
-              <div class="ir-key current"><div class="ir-key-tt mono">key C</div><div class="ir-key-vv">current</div></div>
-            </div>
-          </div>
-          <figcaption class="illo-caption">Three different signing keys, one address the whole time — contacts who pinned the address never had to re-add you.</figcaption>
-        </figure>
-
-        <figure class="illo-frame">
-          <div class="illo-node" style="padding:20px 20px 4px;">
-            <span class="illo-node-tt" style="font-size:13px;">Bridging to legacy mail</span>
-          </div>
-          <div class="illo-bridge" role="img" aria-label="Diagram: a sovereign Envoir node connects through a gateway to an ordinary legacy SMTP inbox such as Gmail, with the gateway cryptographically attesting anything it bridges.">
-            <div class="illo-node">
-              <div class="illo-node-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" class="c-indigo"><circle cx="9" cy="9" r="5"/><path d="M12.5 12.5L20 20"/></svg></div>
-              <span class="illo-node-tt">you@envoir.org</span>
-              <span class="illo-node-dd">DMTAP-native, sealed</span>
-            </div>
-            <svg class="illo-link" viewBox="0 0 60 24" aria-hidden="true"><path d="M2 12H52" fill="none" class="c-line" stroke-width="2" stroke-dasharray="4 3"/><path d="M52 12L42 4M52 12L42 20" fill="none" class="c-line" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <div class="illo-node">
-              <div class="illo-node-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" class="c-legacy"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 8l9 5 9-5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-              <span class="illo-node-tt">gateway</span>
-              <span class="illo-node-dd">attests the crossing</span>
-            </div>
-            <svg class="illo-link" viewBox="0 0 60 24" aria-hidden="true"><path d="M2 12H52" fill="none" class="c-line" stroke-width="2" stroke-dasharray="4 3"/><path d="M52 12L42 4M52 12L42 20" fill="none" class="c-line" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <div class="illo-node">
-              <div class="illo-node-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" class="c-dim"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 8l9 5 9-5"/></svg></div>
-              <span class="illo-node-tt">carol@gmail.com</span>
-              <span class="illo-node-dd">ordinary SMTP inbox</span>
-            </div>
-          </div>
-          <figcaption class="illo-caption">The gateway's attestation is sealed inside the payload — so mail your node receives can prove whether it ever touched a gateway at all (see <a href="#traceability">Traceability</a>).</figcaption>
-        </figure>
-      </div>
-
-      <div class="signin-strip reveal">
-        <span class="lbl">On any site: <b>“Sign in with Envoir”</b> → enter <span class="mono">alice@yourdomain</span> → approve on your device. No password created, no bearer token to steal.</span>
-        <a class="btn btn-ghost btn-mono" href="https://github.com/vul-os/kotva" target="_blank" rel="noopener">DMTAP-Auth, §13 →</a>
-      </div>
-
-      <div class="section-head reveal" style="margin-top:64px;">
-        <p class="eyebrow"><span class="tag">more of the app</span> the rest of the surface</p>
-        <h2 style="font-size:clamp(1.5rem,1rem+1.8vw,2.1rem);">Compose, calendar, contacts, groups, and settings</h2>
-      </div>
-      <div class="shot-gallery reveal">
-        <figure class="shot-frame">
-          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — compose</span></div>
-          <div class="shot-media-wrap">
-            <picture data-shot data-dark="assets/screens/compose-dark.png" data-light="assets/screens/compose-light.png">
-              <img class="shot-img" src="assets/screens/compose-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir compose window: To field accepting a name@domain, a key-name, an ENS/SNS name, an @handle, or a group address, with a Private/Fast tier switch set to Private.">
-            </picture>
-          </div>
-          <figcaption class="shot-caption"><b>Compose.</b> The <span class="pill priv" style="display:inline-flex;">Private</span> / <span class="pill fast" style="display:inline-flex;">Fast</span> switch is the same tier choice shown throughout the app — private is the intended default.</figcaption>
-        </figure>
-        <figure class="shot-frame">
-          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — inspector</span></div>
-          <div class="shot-media-wrap">
-            <picture data-shot data-dark="assets/screens/inspector-dark.png" data-light="assets/screens/inspector-light.png">
-              <img class="shot-img" src="assets/screens/inspector-dark.png" width="1800" height="1125" loading="lazy" alt="MOTE inspector panel showing the three sealed layers of a message: outer mixnet/sealed-sender layer, signed content-addressed envelope, and end-to-end encrypted payload, plus the simulated mixnet delivery path.">
-            </picture>
-          </div>
-          <figcaption class="shot-caption"><b>MOTE inspector.</b> Opens on any message — the three sealed layers, in order: what the network sees, what's signed, and what only the recipient can decrypt.</figcaption>
-        </figure>
-        <figure class="shot-frame">
-          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — contacts</span></div>
-          <div class="shot-media-wrap">
-            <picture data-shot data-dark="assets/screens/contacts-dark.png" data-light="assets/screens/contacts-light.png">
-              <img class="shot-img" src="assets/screens/contacts-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir contacts: a contact card for Ada Okonkwo with a green Key verified panel, a scannable safety-number grid, and eight word-coded verification codes.">
-            </picture>
-          </div>
-          <figcaption class="shot-caption"><b>Contacts.</b> Every contact is a key, not just a display name — verification lives on the card, not bolted on afterward.</figcaption>
-        </figure>
-        <figure class="shot-frame">
-          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — calendar</span></div>
-          <div class="shot-media-wrap">
-            <picture data-shot data-dark="assets/screens/calendar-dark.png" data-light="assets/screens/calendar-light.png">
-              <img class="shot-img" src="assets/screens/calendar-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir calendar month view for July 2026 with color-coded events and an agenda sidebar showing invitations and today's schedule.">
-            </picture>
-          </div>
-          <figcaption class="shot-caption"><b>Calendar.</b> JSCalendar MOTEs under the hood, CalDAV-compatible on the outside.</figcaption>
-        </figure>
-        <figure class="shot-frame">
-          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — agenda</span></div>
-          <div class="shot-media-wrap">
-            <picture data-shot data-dark="assets/screens/calendar-agenda-dark.png" data-light="assets/screens/calendar-agenda-light.png">
-              <img class="shot-img" src="assets/screens/calendar-agenda-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir calendar agenda panel listing pending invitations and this week's events grouped by day.">
-            </picture>
-          </div>
-          <figcaption class="shot-caption"><b>Agenda.</b> Invitations arrive as sealed MOTEs too — accept or decline signs a reply back to the organizer's node.</figcaption>
-        </figure>
-        <figure class="shot-frame">
-          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — groups</span></div>
-          <div class="shot-media-wrap">
-            <picture data-shot data-dark="assets/screens/groups-dark.png" data-light="assets/screens/groups-light.png">
-              <img class="shot-img" src="assets/screens/groups-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir groups: the DMTAP Core channel with four members, each add or remove member-signed and appended to a hash-chained log, plus posting-model and membership-visibility settings.">
-            </picture>
-          </div>
-          <figcaption class="shot-caption"><b>Groups.</b> An address that represents a group — every add, remove, or role change is member-signed and hash-chained, never a silent server edit.</figcaption>
-        </figure>
-        <figure class="shot-frame wide">
-          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — settings</span></div>
-          <div class="shot-media-wrap">
-            <picture data-shot data-dark="assets/screens/settings-dark.png" data-light="assets/screens/settings-light.png">
-              <img class="shot-img" src="assets/screens/settings-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir settings: identity summary card, addresses and aliases list with a primary address, and a default full-signature block.">
-            </picture>
-          </div>
-          <figcaption class="shot-caption"><b>Settings.</b> Addresses, aliases, and signatures — the page states its own rule up top: privacy is never a paid feature.</figcaption>
-        </figure>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ HOW YOU'D USE IT ============ -->
-  <section id="how-to">
-    <div class="wrap">
-      <div class="section-head reveal">
-        <p class="eyebrow"><span class="tag">walkthrough</span> how you'd actually use it</p>
-        <h2>From nothing to a verified, sent message</h2>
-        <p class="lede">Six real screens from the onboarding flow and the app itself — not a mockup of what it might look like eventually.</p>
-      </div>
-
-      <div class="walk">
-        <div class="walk-step reveal">
-          <div class="walk-num">1</div>
-          <div class="walk-body">
-            <div class="walk-copy">
-              <h3>Generate a key</h3>
-              <p>The client generates an Ed25519 keypair on your device and shows a recovery phrase once. Nothing is sent anywhere yet — there's no account to create, because the key <em>is</em> the account.</p>
-              <span class="pill dim mono">no server round-trip</span>
-            </div>
-            <div class="walk-media">
-              <figure class="shot-frame">
-                <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">onboarding — step 2 of 3</span></div>
-                <div class="shot-media-wrap">
-                  <img class="shot-img" src="assets/screens/onboarding-safety.png" width="1800" height="1125" loading="lazy" alt="Onboarding: Save your recovery phrase screen showing a 12-word demo phrase and a warning that anyone with the phrase can recover the identity.">
-                </div>
-                <figcaption class="shot-caption">Onboarding always renders dark, before the shell's own theme toggle exists — shown here as it actually appears, not faked light.</figcaption>
-              </figure>
-            </div>
-          </div>
-        </div>
-
-        <div class="walk-step reveal">
-          <div class="walk-num">2</div>
-          <div class="walk-body">
-            <div class="walk-copy">
-              <h3>Claim your address</h3>
-              <p>Pick a provider-issued handle or point your own domain at your key. The moment it's live, that's your safety number too — the same fingerprint two people compare to confirm they both pinned the real key.</p>
-              <span class="pill good mono">key-name floor · zero authority</span>
-            </div>
-            <div class="walk-media">
-              <figure class="shot-frame">
-                <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">onboarding — step 3 of 3</span></div>
-                <div class="shot-media-wrap">
-                  <img class="shot-img" src="assets/screens/onboarding-identity.png" width="1800" height="1125" loading="lazy" alt="Onboarding: You're sovereign screen showing the new address ada@envoir.org, its fingerprint, algorithm Ed25519, and a scannable safety-number grid with word-coded verification.">
-                </div>
-                <figcaption class="shot-caption">The safety number is derived from the key alone — deterministic, unforgeable, and never used to route mail.</figcaption>
-              </figure>
-            </div>
-          </div>
-        </div>
-
-        <div class="walk-step reveal">
-          <div class="walk-num">3</div>
-          <div class="walk-body">
-            <div class="walk-copy">
-              <h3>Add a contact, verify their safety number</h3>
-              <p>Compare the word list or scan the grid with your contact, out-of-band — in person, on a call, wherever you already trust each other. That's the one gap first-contact pinning leaves open, and it's what closes it.</p>
-              <span class="pill good mono">key verified</span>
-            </div>
-            <div class="walk-media compact">
-              <figure class="shot-frame">
-                <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — contacts</span></div>
-                <div class="shot-media-wrap">
-                  <picture data-shot data-dark="assets/screens/contacts-dark.png" data-light="assets/screens/contacts-light.png">
-                    <img class="shot-img" src="assets/screens/contacts-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir contact card showing a green Key verified confirmation after comparing a safety number out of band.">
-                  </picture>
-                </div>
-                <figcaption class="shot-caption">"You compared this safety number out-of-band, so a look-alike key would be detected." That line is the whole anti-phishing story.</figcaption>
-              </figure>
-            </div>
-          </div>
-        </div>
-
-        <div class="walk-step reveal">
-          <div class="walk-num">4</div>
-          <div class="walk-body">
-            <div class="walk-copy">
-              <h3>Compose and send</h3>
-              <p>Address it by name, key-name, ENS/SNS name, @handle, or a group address. Pick <span class="pill priv" style="display:inline-flex;">Private</span> or <span class="pill fast" style="display:inline-flex;">Fast</span> — the same tier choice you'll see again on every message you receive.</p>
-              <span class="pill dim mono">signed with your real key</span>
-            </div>
-            <div class="walk-media compact">
-              <figure class="shot-frame">
-                <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — new message</span></div>
-                <div class="shot-media-wrap">
-                  <picture data-shot data-dark="assets/screens/compose-dark.png" data-light="assets/screens/compose-light.png">
-                    <img class="shot-img" src="assets/screens/compose-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir compose window addressed from ada@envoir.org with a Private/Fast send-tier switch and a sealed/signed disclaimer.">
-                  </picture>
-                </div>
-                <figcaption class="shot-caption"><b>Today:</b> the client itself is honest about its own build — "sealed · signed with your real key · simulated delivery, connect your node to send for real."</figcaption>
-              </figure>
-            </div>
-          </div>
-        </div>
-
-        <div class="walk-step reveal">
-          <div class="walk-num">5</div>
-          <div class="walk-body">
-            <div class="walk-copy">
-              <h3>What the recipient sees</h3>
-              <p>A verified badge if they've already pinned your key, a legacy-origin label if it crossed a gateway, and — on any message — a transport-path panel showing exactly which trust boundaries it crossed.</p>
-              <span class="pill legacy mono">legacy-origin, when it applies</span>
-            </div>
-            <div class="walk-media compact">
+          <div class="feature-row reveal" id="mail">
+            <div class="feature-media">
               <figure class="shot-frame">
                 <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — mail</span></div>
                 <div class="shot-media-wrap">
                   <picture data-shot data-dark="assets/screens/mail-dark.png" data-light="assets/screens/mail-light.png">
-                    <img class="shot-img" src="assets/screens/mail-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir inbox showing a received welcome message with a verified sender badge and a transport-path panel confirming pure-mesh delivery with no gateway attestation.">
+                    <img class="shot-img" src="assets/screens/mail-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir mail: three-pane inbox. The open message shows a green &quot;verified&quot; badge next to the sender's name, and the message list shows a &quot;legacy-origin&quot; label on the one thread that crossed the SMTP gateway.">
                   </picture>
                 </div>
-                <figcaption class="shot-caption">"Pure-mesh — never plaintext at a gateway": the absence of a gateway attestation is itself the proof.</figcaption>
+                <figcaption class="shot-caption"><b>Mail.</b> Three-pane inbox, threading, folders, star/archive/snooze. The <span class="pill good" style="display:inline-flex;">verified</span> badge means you've checked that sender's safety number; <span class="pill legacy" style="display:inline-flex;">legacy-origin</span> means the message crossed the SMTP gateway to reach you.</figcaption>
               </figure>
             </div>
-          </div>
-        </div>
-
-        <div class="walk-step reveal">
-          <div class="walk-num">6</div>
-          <div class="walk-body">
-            <div class="walk-copy">
-              <h3>See exactly what happened</h3>
-              <p>Open the inspector on any message for the full picture: what the network could see, what's signed, and what's sealed for your eyes only — the three layers, laid out instead of asserted.</p>
-              <span class="pill priv mono">private · mixnet</span>
+            <div class="feature-copy">
+              <span class="feature-tag mono">kind = mail · private tier is the design default</span>
+              <h3>Mail</h3>
+              <p>Rich compose, scheduled and undo send, color labels — over the same MOTE substrate as everything else, sealed end-to-end always; mixnet-routed once the mix workstream lands (today, delivery runs on the direct <span class="mono">fast</span> tier — see <a href="#privacy">Honest status</a>).</p>
+              <ul class="feature-points">
+                <li>Real client protocols: JMAP natively, plus a genuinely complete IMAP/POP3/SMTP-submission surface (CONDSTORE, SEARCHRES, SORT/THREAD…) so existing mail apps just work.</li>
+                <li>A <b>verified ✓</b> badge once you've checked a sender's safety number, and a plain <b>legacy-origin</b> marker on anything that crossed the gateway.</li>
+                <li>Calendar and contacts ride the same node as JSCalendar/JSContact MOTEs, with CalDAV/CardDAV compatibility.</li>
+              </ul>
             </div>
-            <div class="walk-media compact">
+          </div>
+
+          <div class="feature-row reverse reveal" id="chat">
+            <div class="feature-media">
               <figure class="shot-frame">
-                <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — inspector</span></div>
+                <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — chat</span></div>
                 <div class="shot-media-wrap">
-                  <picture data-shot data-dark="assets/screens/inspector-dark.png" data-light="assets/screens/inspector-light.png">
-                    <img class="shot-img" src="assets/screens/inspector-dark.png" width="1800" height="1125" loading="lazy" alt="MOTE inspector showing outer mixnet/sealed-sender layer, signed envelope layer, and end-to-end encrypted payload layer for a received message, with a simulated-network delivery path.">
+                  <picture data-shot data-dark="assets/screens/chat-dark.png" data-light="assets/screens/chat-light.png">
+                    <img class="shot-img" src="assets/screens/chat-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir chat: a direct-message thread with Ada Okonkwo, a green verified badge, an online-presence dot, and a Deniable 1:1 protocol indicator in the header. The thread discusses chat and mail being the same MOTE object.">
                   </picture>
                 </div>
-                <figcaption class="shot-caption">The delivery path shown here is explicitly labelled "simulated network" — see <a href="#privacy">Honest status</a> for exactly what that means today.</figcaption>
+                <figcaption class="shot-caption"><b>Chat.</b> DMs and channels riding the fast tier by default — the header states plainly which cryptographic mode a conversation uses.</figcaption>
               </figure>
             </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ TRANSPORT TRACEABILITY ============ -->
-  <section id="traceability">
-    <div class="wrap">
-      <div class="section-head reveal">
-        <p class="eyebrow"><span class="tag">spec §7</span> transport-path provenance</p>
-        <h2>Know which trust boundaries a message crossed — without weakening the mixnet</h2>
-        <p class="lede">Every message you receive carries a recipient-only, verifiable record of what it crossed on the way to you: which privacy tier, and whether it ever touched a legacy gateway. That record never leaves your own devices.</p>
-      </div>
-
-      <div class="trace-showcase reveal">
-        <div class="trace-media">
-          <figure class="shot-frame">
-            <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — transport path</span></div>
-            <div class="shot-media-wrap">
-              <picture data-shot data-dark="assets/screens/path-graph.png" data-light="assets/screens/path-graph-light.png">
-                <img class="shot-img" src="assets/screens/path-graph.png" width="1800" height="1125" loading="lazy" alt="Envoir's transport-path provenance panel: sender name, private-tier mixnet hop with a floor of at least 3 hops, an arrow to you on this device, and a green pure-mesh — never plaintext at a gateway attestation.">
-              </picture>
+            <div class="feature-copy">
+              <span class="feature-tag mono">kind = chat · fast tier · MLS or deniable 1:1</span>
+              <h3>Chat</h3>
+              <p>DMs and channels on the same substrate as mail — just a faster default tier. The two available cryptographic modes make genuinely different tradeoffs, so the client is explicit about which one's in use.</p>
+              <ul class="feature-points">
+                <li><b>MLS group · signed</b> — the default for channels and any group of three or more; strong forward secrecy and post-compromise security, but non-repudiable by design (RFC 9420).</li>
+                <li><b>Deniable 1:1</b> — an explicit, opt-in X3DH/PQXDH + Double Ratchet mode for conversations that need cryptographic repudiation; never a silent default.</li>
+                <li>Presence and typing indicators are opt-in and off by default — metadata Envoir doesn't turn on unless you ask.</li>
+              </ul>
             </div>
-            <figcaption class="shot-caption">Sender → private-tier mixnet (≥3-hop floor) → you, this device. Green means no gateway ever touched it.</figcaption>
+          </div>
+
+          <div class="feature-row reveal" id="files">
+            <div class="feature-media">
+              <figure class="shot-frame">
+                <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — files</span></div>
+                <div class="shot-media-wrap">
+                  <picture data-shot data-dark="assets/screens/files-dark.png" data-light="assets/screens/files-light.png">
+                    <img class="shot-img" src="assets/screens/files-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir files: a grid of files each showing a content hash prefixed b3:, an E2E badge, and two shared folders rendered as groups (DMTAP Core, Design Crit).">
+                  </picture>
+                </div>
+                <figcaption class="shot-caption"><b>Files.</b> Content-addressed by BLAKE3 hash (the <span class="key">b3:</span> prefix), end-to-end encrypted, no protocol size cap. A shared folder <em>is</em> a group.</figcaption>
+              </figure>
+            </div>
+            <div class="feature-copy">
+              <span class="feature-tag mono">content-addressed · any size</span>
+              <h3>Files</h3>
+              <p>A BLAKE3 Merkle-DAG manifest over encrypted chunks — resumable, deduplicated, swarmed BitTorrent-style, and self-verifying. Drop a file into a shared folder, and everyone with membership can read it.</p>
+              <ul class="feature-points">
+                <li>The file's key travels only inside the sealed MOTE that announces it — holders relay encrypted chunks blind, never able to read what they're serving.</li>
+                <li>Small and normal attachments keep the full mixnet privacy guarantee; only very large bulk transfers trade some of that for bandwidth — disclosed, not hidden.</li>
+                <li>Removing someone from a shared folder re-keys everything they had access to, by default.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="feature-row reverse reveal" id="identity">
+            <div class="feature-media">
+              <figure class="shot-frame">
+                <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — identity</span></div>
+                <div class="shot-media-wrap">
+                  <picture data-shot data-dark="assets/screens/identity-dark.png" data-light="assets/screens/identity-light.png">
+                    <img class="shot-img" src="assets/screens/identity-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir identity page: sovereign identity card for Ada Okonkwo with key age, device count, and verified-contact count; a key-name naming ladder card; and a DNS-discovered ada@envoir.org address marked primary.">
+                  </picture>
+                </div>
+                <figcaption class="shot-caption"><b>Identity.</b> The naming ladder made concrete: a zero-authority key-name at the floor, DNS discovery layered on top, all pointing at one root key.</figcaption>
+              </figure>
+            </div>
+            <div class="feature-copy">
+              <span class="feature-tag mono">root key + device subkeys · §1 / §13</span>
+              <h3>Identity</h3>
+              <p>A safety number is a deterministic fingerprint of your whole keyset, rendered as words or a scannable grid so two people can verify each other's key out-of-band. The same keypair signs you into the web — no password, no central identity provider.</p>
+              <ul class="feature-points">
+                <li>Root key held cold; each device carries its own signed subkey, so compromising one device never hands over the root, and revoking it is cheap and targeted.</li>
+                <li>Recovery is a first-class, versioned policy (phrase / devices / social guardians) with two deliberately asymmetric thresholds.</li>
+                <li><b>DMTAP-Auth</b>: an origin-bound challenge signed by your key — phishing-resistant like a passkey, because a passkey is what gates it.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="two-col-illos reveal">
+            <figure class="illo-frame">
+              <div class="illo-node" style="padding:20px 20px 4px;">
+                <span class="illo-node-tt" style="font-size:13px;">Key rotation, same address</span>
+              </div>
+              <div class="illo-rotation" role="img" aria-label="Diagram: the address alice at yourdomain stays fixed at the top while three keys are shown underneath in sequence, key A and key B faded as retired, key C highlighted as current — the address never moves even though the signing key has rotated twice.">
+                <span class="ir-addr"><span class="dot" aria-hidden="true"></span>alice@yourdomain</span>
+                <svg viewBox="0 0 400 60" aria-hidden="true"><path d="M70 4v20M200 4v20M330 4v20M70 24Q200 50 200 24M200 24Q200 50 330 24" fill="none" class="c-line" stroke-width="1.6"/></svg>
+                <div class="ir-keys">
+                  <div class="ir-key"><div class="ir-key-tt mono">key A</div><div class="ir-key-vv">retired</div></div>
+                  <div class="ir-key"><div class="ir-key-tt mono">key B</div><div class="ir-key-vv">retired</div></div>
+                  <div class="ir-key current"><div class="ir-key-tt mono">key C</div><div class="ir-key-vv">current</div></div>
+                </div>
+              </div>
+              <figcaption class="illo-caption">Three different signing keys, one address the whole time — contacts who pinned the address never had to re-add you.</figcaption>
+            </figure>
+
+            <figure class="illo-frame">
+              <div class="illo-node" style="padding:20px 20px 4px;">
+                <span class="illo-node-tt" style="font-size:13px;">Bridging to legacy mail</span>
+              </div>
+              <div class="illo-bridge" role="img" aria-label="Diagram: a sovereign Envoir node connects through a gateway to an ordinary legacy SMTP inbox such as Gmail, with the gateway cryptographically attesting anything it bridges.">
+                <div class="illo-node">
+                  <div class="illo-node-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" class="c-indigo"><circle cx="9" cy="9" r="5"/><path d="M12.5 12.5L20 20"/></svg></div>
+                  <span class="illo-node-tt">you@envoir.org</span>
+                  <span class="illo-node-dd">DMTAP-native, sealed</span>
+                </div>
+                <svg class="illo-link" viewBox="0 0 60 24" aria-hidden="true"><path d="M2 12H52" fill="none" class="c-line" stroke-width="2" stroke-dasharray="4 3"/><path d="M52 12L42 4M52 12L42 20" fill="none" class="c-line" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <div class="illo-node">
+                  <div class="illo-node-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" class="c-legacy"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 8l9 5 9-5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                  <span class="illo-node-tt">gateway</span>
+                  <span class="illo-node-dd">attests the crossing</span>
+                </div>
+                <svg class="illo-link" viewBox="0 0 60 24" aria-hidden="true"><path d="M2 12H52" fill="none" class="c-line" stroke-width="2" stroke-dasharray="4 3"/><path d="M52 12L42 4M52 12L42 20" fill="none" class="c-line" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <div class="illo-node">
+                  <div class="illo-node-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" class="c-dim"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 8l9 5 9-5"/></svg></div>
+                  <span class="illo-node-tt">carol@gmail.com</span>
+                  <span class="illo-node-dd">ordinary SMTP inbox</span>
+                </div>
+              </div>
+              <figcaption class="illo-caption">The gateway's attestation is sealed inside the payload — so mail your node receives can prove whether it ever touched a gateway at all (see <a href="#traceability">Traceability</a>).</figcaption>
+            </figure>
+          </div>
+
+          <div class="signin-strip reveal">
+            <span class="lbl">On any site: <b>"Sign in with Envoir"</b> → enter <span class="mono">alice@yourdomain</span> → approve on your device. No password created, no bearer token to steal.</span>
+            <a class="btn btn-ghost btn-mono" href="https://github.com/vul-os/kotva" target="_blank" rel="noopener">DMTAP-Auth, §13 →</a>
+          </div>
+
+          <div class="section-head reveal" style="margin-top:64px;">
+            <p class="eyebrow"><span class="tag">more of the app</span> the rest of the surface</p>
+            <h2 style="font-size:clamp(1.5rem,1rem+1.8vw,2.1rem);">Compose, calendar, contacts, groups, and settings</h2>
+          </div>
+          <div class="shot-gallery reveal">
+            <figure class="shot-frame">
+              <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — compose</span></div>
+              <div class="shot-media-wrap">
+                <picture data-shot data-dark="assets/screens/compose-dark.png" data-light="assets/screens/compose-light.png">
+                  <img class="shot-img" src="assets/screens/compose-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir compose window: To field accepting a name@domain, a key-name, an ENS/SNS name, an @handle, or a group address, with a Private/Fast tier switch set to Private.">
+                </picture>
+              </div>
+              <figcaption class="shot-caption"><b>Compose.</b> The <span class="pill priv" style="display:inline-flex;">Private</span> / <span class="pill fast" style="display:inline-flex;">Fast</span> switch is the same tier choice shown throughout the app — private is the intended default.</figcaption>
+            </figure>
+            <figure class="shot-frame">
+              <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — inspector</span></div>
+              <div class="shot-media-wrap">
+                <picture data-shot data-dark="assets/screens/inspector-dark.png" data-light="assets/screens/inspector-light.png">
+                  <img class="shot-img" src="assets/screens/inspector-dark.png" width="1800" height="1125" loading="lazy" alt="MOTE inspector panel showing the three sealed layers of a message: outer mixnet/sealed-sender layer, signed content-addressed envelope, and end-to-end encrypted payload, plus the simulated mixnet delivery path.">
+                </picture>
+              </div>
+              <figcaption class="shot-caption"><b>MOTE inspector.</b> Opens on any message — the three sealed layers, in order: what the network sees, what's signed, and what only the recipient can decrypt.</figcaption>
+            </figure>
+            <figure class="shot-frame" id="contacts">
+              <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — contacts</span></div>
+              <div class="shot-media-wrap">
+                <picture data-shot data-dark="assets/screens/contacts-dark.png" data-light="assets/screens/contacts-light.png">
+                  <img class="shot-img" src="assets/screens/contacts-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir contacts: a contact card for Ada Okonkwo with a green Key verified panel, a scannable safety-number grid, and eight word-coded verification codes.">
+                </picture>
+              </div>
+              <figcaption class="shot-caption"><b>Contacts.</b> Every contact is a key, not just a display name — verification lives on the card, not bolted on afterward.</figcaption>
+            </figure>
+            <figure class="shot-frame" id="calendar">
+              <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — calendar</span></div>
+              <div class="shot-media-wrap">
+                <picture data-shot data-dark="assets/screens/calendar-dark.png" data-light="assets/screens/calendar-light.png">
+                  <img class="shot-img" src="assets/screens/calendar-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir calendar month view for July 2026 with color-coded events and an agenda sidebar showing invitations and today's schedule.">
+                </picture>
+              </div>
+              <figcaption class="shot-caption"><b>Calendar.</b> JSCalendar MOTEs under the hood, CalDAV-compatible on the outside.</figcaption>
+            </figure>
+            <figure class="shot-frame">
+              <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — agenda</span></div>
+              <div class="shot-media-wrap">
+                <picture data-shot data-dark="assets/screens/calendar-agenda-dark.png" data-light="assets/screens/calendar-agenda-light.png">
+                  <img class="shot-img" src="assets/screens/calendar-agenda-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir calendar agenda panel listing pending invitations and this week's events grouped by day.">
+                </picture>
+              </div>
+              <figcaption class="shot-caption"><b>Agenda.</b> Invitations arrive as sealed MOTEs too — accept or decline signs a reply back to the organizer's node.</figcaption>
+            </figure>
+            <figure class="shot-frame" id="groups">
+              <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — groups</span></div>
+              <div class="shot-media-wrap">
+                <picture data-shot data-dark="assets/screens/groups-dark.png" data-light="assets/screens/groups-light.png">
+                  <img class="shot-img" src="assets/screens/groups-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir groups: the DMTAP Core channel with four members, each add or remove member-signed and appended to a hash-chained log, plus posting-model and membership-visibility settings.">
+                </picture>
+              </div>
+              <figcaption class="shot-caption"><b>Groups.</b> An address that represents a group — every add, remove, or role change is member-signed and hash-chained, never a silent server edit.</figcaption>
+            </figure>
+            <figure class="shot-frame wide">
+              <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — settings</span></div>
+              <div class="shot-media-wrap">
+                <picture data-shot data-dark="assets/screens/settings-dark.png" data-light="assets/screens/settings-light.png">
+                  <img class="shot-img" src="assets/screens/settings-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir settings: identity summary card, addresses and aliases list with a primary address, and a default full-signature block.">
+                </picture>
+              </div>
+              <figcaption class="shot-caption"><b>Settings.</b> Addresses, aliases, and signatures — the page states its own rule up top: privacy is never a paid feature.</figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ HOW YOU'D USE IT ============ -->
+      <section id="how-to">
+        <div class="pane-crumb"><span>Envoir</span><span class="sep">›</span><span class="cur">How to use it</span><span class="meta"><span>6 steps</span></span></div>
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow"><span class="tag">walkthrough</span> how you'd actually use it</p>
+            <h2>From nothing to a verified, sent message</h2>
+            <p class="lede">Six real screens from the onboarding flow and the app itself — not a mockup of what it might look like eventually.</p>
+          </div>
+
+          <div class="walk">
+            <div class="walk-step reveal">
+              <div class="walk-num">1</div>
+              <div class="walk-body">
+                <div class="walk-copy">
+                  <h3>Generate a key</h3>
+                  <p>The client generates an Ed25519 keypair on your device and shows a recovery phrase once. Nothing is sent anywhere yet — there's no account to create, because the key <em>is</em> the account.</p>
+                  <span class="pill dim mono">no server round-trip</span>
+                </div>
+                <div class="walk-media">
+                  <figure class="shot-frame">
+                    <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">onboarding — step 2 of 3</span></div>
+                    <div class="shot-media-wrap">
+                      <img class="shot-img" src="assets/screens/onboarding-safety.png" width="1800" height="1125" loading="lazy" alt="Onboarding: Save your recovery phrase screen showing a 12-word demo phrase and a warning that anyone with the phrase can recover the identity.">
+                    </div>
+                    <figcaption class="shot-caption">Onboarding always renders dark, before the shell's own theme toggle exists — shown here as it actually appears, not faked light.</figcaption>
+                  </figure>
+                </div>
+              </div>
+            </div>
+
+            <div class="walk-step reveal">
+              <div class="walk-num">2</div>
+              <div class="walk-body">
+                <div class="walk-copy">
+                  <h3>Claim your address</h3>
+                  <p>Pick a provider-issued handle or point your own domain at your key. The moment it's live, that's your safety number too — the same fingerprint two people compare to confirm they both pinned the real key.</p>
+                  <span class="pill good mono">key-name floor · zero authority</span>
+                </div>
+                <div class="walk-media">
+                  <figure class="shot-frame">
+                    <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">onboarding — step 3 of 3</span></div>
+                    <div class="shot-media-wrap">
+                      <img class="shot-img" src="assets/screens/onboarding-identity.png" width="1800" height="1125" loading="lazy" alt="Onboarding: You're sovereign screen showing the new address ada@envoir.org, its fingerprint, algorithm Ed25519, and a scannable safety-number grid with word-coded verification.">
+                    </div>
+                    <figcaption class="shot-caption">The safety number is derived from the key alone — deterministic, unforgeable, and never used to route mail.</figcaption>
+                  </figure>
+                </div>
+              </div>
+            </div>
+
+            <div class="walk-step reveal">
+              <div class="walk-num">3</div>
+              <div class="walk-body">
+                <div class="walk-copy">
+                  <h3>Add a contact, verify their safety number</h3>
+                  <p>Compare the word list or scan the grid with your contact, out-of-band — in person, on a call, wherever you already trust each other. That's the one gap first-contact pinning leaves open, and it's what closes it.</p>
+                  <span class="pill good mono">key verified</span>
+                </div>
+                <div class="walk-media compact">
+                  <figure class="shot-frame">
+                    <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — contacts</span></div>
+                    <div class="shot-media-wrap">
+                      <picture data-shot data-dark="assets/screens/contacts-dark.png" data-light="assets/screens/contacts-light.png">
+                        <img class="shot-img" src="assets/screens/contacts-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir contact card showing a green Key verified confirmation after comparing a safety number out of band.">
+                      </picture>
+                    </div>
+                    <figcaption class="shot-caption">"You compared this safety number out-of-band, so a look-alike key would be detected." That line is the whole anti-phishing story.</figcaption>
+                  </figure>
+                </div>
+              </div>
+            </div>
+
+            <div class="walk-step reveal">
+              <div class="walk-num">4</div>
+              <div class="walk-body">
+                <div class="walk-copy">
+                  <h3>Compose and send</h3>
+                  <p>Address it by name, key-name, ENS/SNS name, @handle, or a group address. Pick <span class="pill priv" style="display:inline-flex;">Private</span> or <span class="pill fast" style="display:inline-flex;">Fast</span> — the same tier choice you'll see again on every message you receive.</p>
+                  <span class="pill dim mono">signed with your real key</span>
+                </div>
+                <div class="walk-media compact">
+                  <figure class="shot-frame">
+                    <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — new message</span></div>
+                    <div class="shot-media-wrap">
+                      <picture data-shot data-dark="assets/screens/compose-dark.png" data-light="assets/screens/compose-light.png">
+                        <img class="shot-img" src="assets/screens/compose-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir compose window addressed from ada@envoir.org with a Private/Fast send-tier switch and a sealed/signed disclaimer.">
+                      </picture>
+                    </div>
+                    <figcaption class="shot-caption"><b>Today:</b> the client itself is honest about its own build — "sealed · signed with your real key · simulated delivery, connect your node to send for real."</figcaption>
+                  </figure>
+                </div>
+              </div>
+            </div>
+
+            <div class="walk-step reveal">
+              <div class="walk-num">5</div>
+              <div class="walk-body">
+                <div class="walk-copy">
+                  <h3>What the recipient sees</h3>
+                  <p>A verified badge if they've already pinned your key, a legacy-origin label if it crossed a gateway, and — on any message — a transport-path panel showing exactly which trust boundaries it crossed.</p>
+                  <span class="pill legacy mono">legacy-origin, when it applies</span>
+                </div>
+                <div class="walk-media compact">
+                  <figure class="shot-frame">
+                    <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — mail</span></div>
+                    <div class="shot-media-wrap">
+                      <picture data-shot data-dark="assets/screens/mail-dark.png" data-light="assets/screens/mail-light.png">
+                        <img class="shot-img" src="assets/screens/mail-dark.png" width="1800" height="1125" loading="lazy" alt="Envoir inbox showing a received welcome message with a verified sender badge and a transport-path panel confirming pure-mesh delivery with no gateway attestation.">
+                      </picture>
+                    </div>
+                    <figcaption class="shot-caption">"Pure-mesh — never plaintext at a gateway": the absence of a gateway attestation is itself the proof.</figcaption>
+                  </figure>
+                </div>
+              </div>
+            </div>
+
+            <div class="walk-step reveal">
+              <div class="walk-num">6</div>
+              <div class="walk-body">
+                <div class="walk-copy">
+                  <h3>See exactly what happened</h3>
+                  <p>Open the inspector on any message for the full picture: what the network could see, what's signed, and what's sealed for your eyes only — the three layers, laid out instead of asserted.</p>
+                  <span class="pill priv mono">private · mixnet</span>
+                </div>
+                <div class="walk-media compact">
+                  <figure class="shot-frame">
+                    <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — inspector</span></div>
+                    <div class="shot-media-wrap">
+                      <picture data-shot data-dark="assets/screens/inspector-dark.png" data-light="assets/screens/inspector-light.png">
+                        <img class="shot-img" src="assets/screens/inspector-dark.png" width="1800" height="1125" loading="lazy" alt="MOTE inspector showing outer mixnet/sealed-sender layer, signed envelope layer, and end-to-end encrypted payload layer for a received message, with a simulated-network delivery path.">
+                      </picture>
+                    </div>
+                    <figcaption class="shot-caption">The delivery path shown here is explicitly labelled "simulated network" — see <a href="#privacy">Honest status</a> for exactly what that means today.</figcaption>
+                  </figure>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ TRANSPORT TRACEABILITY ============ -->
+      <section id="traceability">
+        <div class="pane-crumb"><span>Envoir</span><span class="sep">›</span><span class="cur">Traceability</span><span class="meta"><span>spec §7</span></span></div>
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow"><span class="tag">spec §7</span> transport-path provenance</p>
+            <h2>Know which trust boundaries a message crossed — without weakening the mixnet</h2>
+            <p class="lede">Every message you receive carries a recipient-only, verifiable record of what it crossed on the way to you: which privacy tier, and whether it ever touched a legacy gateway. That record never leaves your own devices.</p>
+          </div>
+
+          <div class="trace-showcase reveal">
+            <div class="trace-media">
+              <figure class="shot-frame">
+                <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">envoir — transport path</span></div>
+                <div class="shot-media-wrap">
+                  <picture data-shot data-dark="assets/screens/path-graph.png" data-light="assets/screens/path-graph-light.png">
+                    <img class="shot-img" src="assets/screens/path-graph.png" width="1800" height="1125" loading="lazy" alt="Envoir's transport-path provenance panel: sender name, private-tier mixnet hop with a floor of at least 3 hops, an arrow to you on this device, and a green pure-mesh — never plaintext at a gateway attestation.">
+                  </picture>
+                </div>
+                <figcaption class="shot-caption">Sender → private-tier mixnet (≥3-hop floor) → you, this device. Green means no gateway ever touched it.</figcaption>
+              </figure>
+            </div>
+            <div class="trace-copy">
+              <h3>What you can learn about a message</h3>
+              <ul class="feature-points">
+                <li>Which tier it arrived on — the metadata-private <span class="mono">private</span> tier (mixnet + cover traffic) or the faster, direct <span class="mono">fast</span> tier — something your own node observed at receipt, not a claim the sender made.</li>
+                <li>Whether it's <b>pure-mesh</b> or <b>gateway-touched</b>. A gateway-touched message carries that gateway's cryptographic attestation, sealed inside the encrypted payload. A native message carries no such attestation — proof it was never plaintext at any gateway.</li>
+                <li>A coarse hop-count <em>floor</em> for the private tier (≥3 hops standard, ≥5 high-security) — never an exact path.</li>
+              </ul>
+              <p class="trace-boundary"><strong>What it deliberately withholds:</strong> no individual mix node, no exact hop count beyond the profile floor, no per-hop timing — a record that could reveal more would be leaking the exact thing the mixnet exists to hide. This is also the same attestation an operator would bill against, so a gateway charge is independently checkable, never taken on faith.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ FEATURE PARITY (demoted — supporting evidence, not the lead) ============ -->
+      <section id="parity">
+        <div class="pane-crumb"><span>Envoir</span><span class="sep">›</span><span class="cur">Feature parity</span><span class="meta"><span>52 features audited</span></span></div>
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow"><span class="tag">spec §17 · sense-check</span> feature parity</p>
+            <h2>Checked feature by feature against the email you use today</h2>
+            <p class="lede">52 mail, contacts, and calendar features, audited one at a time against the legacy inbox. Where DMTAP genuinely loses a capability, this says so.</p>
+          </div>
+
+          <div class="parity-tally reveal">
+            <div class="pt-stat"><span class="pt-num">34</span><span class="pt-label">clean<br>same or better</span></div>
+            <div class="pt-stat"><span class="pt-num">16</span><span class="pt-label">different<br>works, changed shape</span></div>
+            <div class="pt-stat"><span class="pt-num">2</span><span class="pt-label">n/a<br>legacy premise doesn't survive — correctly</span></div>
+            <div class="pt-stat"><span class="pt-num">1</span><span class="pt-label">harder<br>disclosed, not hidden</span></div>
+          </div>
+
+          <div class="grid-3">
+            <div class="card reveal" data-d="1">
+              <span class="num">§17.1 · #36</span>
+              <h3>Contact verification is the real upgrade</h3>
+              <p>Legacy contacts are unauthenticated names. Here every contact is a key, audited by transparency logs and verifiable out-of-band — the one place parity wasn't the goal, improvement was.</p>
+            </div>
+            <div class="card reveal" data-d="2">
+              <span class="num">§17.1 · #4</span>
+              <h3>Search stays on your device</h3>
+              <p>No provider ever builds a searchable index of your mail. Your always-on node indexes everything locally — the same capability as a server, just held by you instead of them.</p>
+            </div>
+            <div class="card reveal" data-d="3">
+              <span class="num">§17.6</span>
+              <h3>What's still open</h3>
+              <p>Full-fidelity encrypted export/backup and a zero-setup org directory aren't fully specified yet — real gaps, tracked in the open spec rather than glossed over.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ PRIVACY / HONEST STATUS ============ -->
+      <section id="privacy">
+        <div class="pane-crumb"><span>Envoir</span><span class="sep">›</span><span class="cur">Honest status</span><span class="meta"><span>spec §6</span></span></div>
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow"><span class="tag">spec §6</span> privacy, honestly</p>
+            <h2>Metadata-private by architecture, not by promise</h2>
+            <p class="lede">Content privacy is table stakes. DMTAP also treats the social graph itself — who talks to whom, when, how much — as something to protect.</p>
+          </div>
+
+          <figure class="illo-frame reveal" style="margin-bottom:36px;max-width:620px;">
+            <div class="illo-tiers" role="img" aria-label="Diagram comparing the two transport tiers: fast, a solid direct line from sender to recipient marked live today, versus private, a dashed line through several mixnet relay hops marked design target, not yet deployed.">
+              <div class="illo-tier-row">
+                <div class="illo-tier-tt"><span class="name fast mono">fast</span><span class="status">direct · seconds</span></div>
+                <svg viewBox="0 0 400 44" aria-hidden="true">
+                  <circle cx="16" cy="22" r="8" class="c-indigo"/>
+                  <path d="M28 22H372" class="c-indigo" stroke-width="2.5" fill="none"/>
+                  <circle cx="384" cy="22" r="8" class="c-indigo"/>
+                </svg>
+                <span class="pill good mono" style="justify-self:start;">live today</span>
+              </div>
+              <div class="illo-tier-row">
+                <div class="illo-tier-tt"><span class="name priv mono">private</span><span class="status">mixnet · minutes</span></div>
+                <svg viewBox="0 0 400 44" aria-hidden="true">
+                  <circle cx="16" cy="22" r="8" class="c-violet"/>
+                  <path d="M28 22 L94 10 L160 32 L226 10 L292 32 L358 14 L372 22" class="c-violet" stroke-width="2" fill="none" stroke-dasharray="5 5"/>
+                  <circle cx="94" cy="10" r="4.5" class="c-violet" opacity="0.7"/>
+                  <circle cx="160" cy="32" r="4.5" class="c-violet" opacity="0.7"/>
+                  <circle cx="226" cy="10" r="4.5" class="c-violet" opacity="0.7"/>
+                  <circle cx="292" cy="32" r="4.5" class="c-violet" opacity="0.7"/>
+                  <circle cx="358" cy="14" r="4.5" class="c-violet" opacity="0.7"/>
+                  <circle cx="384" cy="22" r="8" fill="none" class="c-violet" stroke-width="2"/>
+                </svg>
+                <span class="pill warn mono" style="justify-self:start;">design target — not yet deployed</span>
+              </div>
+            </div>
+            <figcaption class="illo-caption">Every message today ships on the solid line. The dashed line is the specified, roadmapped default — not something currently running.</figcaption>
           </figure>
-        </div>
-        <div class="trace-copy">
-          <h3>What you can learn about a message</h3>
-          <ul class="feature-points">
-            <li>Which tier it arrived on — the metadata-private <span class="mono">private</span> tier (mixnet + cover traffic) or the faster, direct <span class="mono">fast</span> tier — something your own node observed at receipt, not a claim the sender made.</li>
-            <li>Whether it's <b>pure-mesh</b> or <b>gateway-touched</b>. A gateway-touched message carries that gateway's cryptographic attestation, sealed inside the encrypted payload. A native message carries no such attestation — proof it was never plaintext at any gateway.</li>
-            <li>A coarse hop-count <em>floor</em> for the private tier (≥3 hops standard, ≥5 high-security) — never an exact path.</li>
-          </ul>
-          <p class="trace-boundary"><strong>What it deliberately withholds:</strong> no individual mix node, no exact hop count beyond the profile floor, no per-hop timing — a record that could reveal more would be leaking the exact thing the mixnet exists to hide. This is also the same attestation an operator would bill against, so a gateway charge is independently checkable, never taken on faith.</p>
-        </div>
-      </div>
-    </div>
-  </section>
 
-  <!-- ============ FEATURE PARITY (demoted — supporting evidence, not the lead) ============ -->
-  <section id="parity">
-    <div class="wrap">
-      <div class="section-head reveal">
-        <p class="eyebrow"><span class="tag">spec §17 · sense-check</span> feature parity</p>
-        <h2>Checked feature by feature against the email you use today</h2>
-        <p class="lede">52 mail, contacts, and calendar features, audited one at a time against the legacy inbox. Where DMTAP genuinely loses a capability, this says so.</p>
-      </div>
+          <div class="priv-grid">
+            <ul class="priv-list reveal">
+              <li>
+                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 8l9 5 9-5" stroke-linecap="round"/></svg>
+                <div><h3>Sealed sender</h3><p>Intermediaries relay a MOTE without ever learning who sent it.</p></div>
+              </li>
+              <li>
+                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6" cy="12" r="2.4"/><circle cx="12" cy="6" r="2.4"/><circle cx="18" cy="12" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M8 11l2-3M14 6.5l2 3M16 14l-2 3M10 15l-2-1" stroke-linecap="round"/></svg>
+                <div><h3>Mixnet + cover traffic</h3><p>Onion-routed hops, mixing delays, and padding hide timing and size — email's tolerance for latency is what makes this affordable.</p></div>
+              </li>
+              <li>
+                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v4M12 17v4M3 12h4M17 12h4" stroke-linecap="round"/><circle cx="12" cy="12" r="5"/></svg>
+                <div><h3>Push, not poll</h3><p>Your always-on node receives through the mixnet — there's no store-and-poll step for an observer to time.</p></div>
+              </li>
+              <li>
+                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6l7-3Z" stroke-linejoin="round"/></svg>
+                <div><h3>Private lookups</h3><p>Name→key resolution is routed through the mixnet too, so the directory never learns who's asking about whom.</p></div>
+              </li>
+            </ul>
 
-      <div class="parity-tally reveal">
-        <div class="pt-stat"><span class="pt-num">34</span><span class="pt-label">clean<br>same or better</span></div>
-        <div class="pt-stat"><span class="pt-num">16</span><span class="pt-label">different<br>works, changed shape</span></div>
-        <div class="pt-stat"><span class="pt-num">2</span><span class="pt-label">n/a<br>legacy premise doesn't survive — correctly</span></div>
-        <div class="pt-stat"><span class="pt-num">1</span><span class="pt-label">harder<br>disclosed, not hidden</span></div>
-      </div>
-
-      <div class="grid-3">
-        <div class="card reveal" data-d="1">
-          <span class="num">§17.1 · #36</span>
-          <h3>Contact verification is the real upgrade</h3>
-          <p>Legacy contacts are unauthenticated names. Here every contact is a key, audited by transparency logs and verifiable out-of-band — the one place parity wasn't the goal, improvement was.</p>
-        </div>
-        <div class="card reveal" data-d="2">
-          <span class="num">§17.1 · #4</span>
-          <h3>Search stays on your device</h3>
-          <p>No provider ever builds a searchable index of your mail. Your always-on node indexes everything locally — the same capability as a server, just held by you instead of them.</p>
-        </div>
-        <div class="card reveal" data-d="3">
-          <span class="num">§17.6</span>
-          <h3>What's still open</h3>
-          <p>Full-fidelity encrypted export/backup and a zero-setup org directory aren't fully specified yet — real gaps, tracked in the open spec rather than glossed over.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ PRIVACY / HONEST STATUS ============ -->
-  <section id="privacy">
-    <div class="wrap">
-      <div class="section-head reveal">
-        <p class="eyebrow"><span class="tag">spec §6</span> privacy, honestly</p>
-        <h2>Metadata-private by architecture, not by promise</h2>
-        <p class="lede">Content privacy is table stakes. DMTAP also treats the social graph itself — who talks to whom, when, how much — as something to protect.</p>
-      </div>
-
-      <figure class="illo-frame reveal" style="margin-bottom:36px;max-width:620px;">
-        <div class="illo-tiers" role="img" aria-label="Diagram comparing the two transport tiers: fast, a solid direct line from sender to recipient marked live today, versus private, a dashed line through several mixnet relay hops marked design target, not yet deployed.">
-          <div class="illo-tier-row">
-            <div class="illo-tier-tt"><span class="name fast mono">fast</span><span class="status">direct · seconds</span></div>
-            <svg viewBox="0 0 400 44" aria-hidden="true">
-              <circle cx="16" cy="22" r="8" class="c-indigo"/>
-              <path d="M28 22H372" class="c-indigo" stroke-width="2.5" fill="none"/>
-              <circle cx="384" cy="22" r="8" class="c-indigo"/>
-            </svg>
-            <span class="pill good mono" style="justify-self:start;">live today</span>
-          </div>
-          <div class="illo-tier-row">
-            <div class="illo-tier-tt"><span class="name priv mono">private</span><span class="status">mixnet · minutes</span></div>
-            <svg viewBox="0 0 400 44" aria-hidden="true">
-              <circle cx="16" cy="22" r="8" class="c-violet"/>
-              <path d="M28 22 L94 10 L160 32 L226 10 L292 32 L358 14 L372 22" class="c-violet" stroke-width="2" fill="none" stroke-dasharray="5 5"/>
-              <circle cx="94" cy="10" r="4.5" class="c-violet" opacity="0.7"/>
-              <circle cx="160" cy="32" r="4.5" class="c-violet" opacity="0.7"/>
-              <circle cx="226" cy="10" r="4.5" class="c-violet" opacity="0.7"/>
-              <circle cx="292" cy="32" r="4.5" class="c-violet" opacity="0.7"/>
-              <circle cx="358" cy="14" r="4.5" class="c-violet" opacity="0.7"/>
-              <circle cx="384" cy="22" r="8" fill="none" class="c-violet" stroke-width="2"/>
-            </svg>
-            <span class="pill warn mono" style="justify-self:start;">design target — not yet deployed</span>
+            <div class="honest-box reveal">
+              <p class="eyebrow">honest boundary · §6.6</p>
+              <p><strong>DMTAP targets a global passive adversary</strong> — one that can watch traffic everywhere, but not inject, drop, or delay it at will.</p>
+              <ul class="honest-list">
+                <li>A global <em>active</em> adversary with unlimited resources can still degrade anonymity — cover traffic and mixing approach a perfect defense asymptotically, never for free.</li>
+                <li>Large-file bulk transfer trades some of that protection for speed (the <span class="mono">fast</span>/onion tier, not the full mixnet) — a disclosed tradeoff, not a hidden one.</li>
+                <li>A seized or keylogged device exposes its whole synced mailbox, not a slice — mitigated by at-rest encryption and recovery, not eliminated.</li>
+                <li>v0 key transparency is tamper-evident, not yet equivocation-proof across multiple logs — a real, stated tension while KT gossip matures.</li>
+                <li><strong>Today, only the <span class="mono">fast</span> tier actually runs end-to-end.</strong> <code>node/src/onion.rs</code>'s Sphinx onion-wrap is a structural, keyed-BLAKE3 stand-in for the real mix cryptography (X25519/ChaCha20-Poly1305/LIONESS) — it models the cell layout and replay-freshness contract, not live mix crypto, and no mix network is deployed. The <span class="mono">private</span> tier above is this project's design target, tracked as the top roadmap item, not something delivered yet.</li>
+              </ul>
+              <p>The protocol is specified so that <strong>private</strong> (full mixnet, minutes) is the eventual default and <strong>fast</strong> (direct, seconds) is the disclosed-cost opt-in; until the mixnet workstream above lands, every message actually ships on the <strong>fast</strong> tier. Honest, disclosed limits beat a marketing promise of "perfectly anonymous."</p>
+            </div>
           </div>
         </div>
-        <figcaption class="illo-caption">Every message today ships on the solid line. The dashed line is the specified, roadmapped default — not something currently running.</figcaption>
-      </figure>
+      </section>
 
-      <div class="priv-grid">
-        <ul class="priv-list reveal">
-          <li>
-            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 8l9 5 9-5" stroke-linecap="round"/></svg>
-            <div><h3>Sealed sender</h3><p>Intermediaries relay a MOTE without ever learning who sent it.</p></div>
-          </li>
-          <li>
-            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6" cy="12" r="2.4"/><circle cx="12" cy="6" r="2.4"/><circle cx="18" cy="12" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M8 11l2-3M14 6.5l2 3M16 14l-2 3M10 15l-2-1" stroke-linecap="round"/></svg>
-            <div><h3>Mixnet + cover traffic</h3><p>Onion-routed hops, mixing delays, and padding hide timing and size — email's tolerance for latency is what makes this affordable.</p></div>
-          </li>
-          <li>
-            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v4M12 17v4M3 12h4M17 12h4" stroke-linecap="round"/><circle cx="12" cy="12" r="5"/></svg>
-            <div><h3>Push, not poll</h3><p>Your always-on node receives through the mixnet — there's no store-and-poll step for an observer to time.</p></div>
-          </li>
-          <li>
-            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6l7-3Z" stroke-linejoin="round"/></svg>
-            <div><h3>Private lookups</h3><p>Name→key resolution is routed through the mixnet too, so the directory never learns who's asking about whom.</p></div>
-          </li>
-        </ul>
+      <!-- ============ OPEN SOURCE / SELF-HOSTING ============ -->
+      <section id="open-source">
+        <div class="pane-crumb"><span>Envoir</span><span class="sep">›</span><span class="cur">Self-hosting</span><span class="meta"><span>spec §12</span></span></div>
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow"><span class="tag">spec §12</span> operators</p>
+            <h2>Free to self-host, forever. Paid is optional — for not running it yourself.</h2>
+            <p class="lede">Envoir is MIT-licensed end to end: protocol, node, gateway, and client. Nothing that matters is held back for a paid tier.</p>
+          </div>
 
-        <div class="honest-box reveal">
-          <p class="eyebrow">honest boundary · §6.6</p>
-          <p><strong>DMTAP targets a global passive adversary</strong> — one that can watch traffic everywhere, but not inject, drop, or delay it at will.</p>
-          <ul class="honest-list">
-            <li>A global <em>active</em> adversary with unlimited resources can still degrade anonymity — cover traffic and mixing approach a perfect defense asymptotically, never for free.</li>
-            <li>Large-file bulk transfer trades some of that protection for speed (the <span class="mono">fast</span>/onion tier, not the full mixnet) — a disclosed tradeoff, not a hidden one.</li>
-            <li>A seized or keylogged device exposes its whole synced mailbox, not a slice — mitigated by at-rest encryption and recovery, not eliminated.</li>
-            <li>v0 key transparency is tamper-evident, not yet equivocation-proof across multiple logs — a real, stated tension while KT gossip matures.</li>
-            <li><strong>Today, only the <span class="mono">fast</span> tier actually runs end-to-end.</strong> <code>node/src/onion.rs</code>'s Sphinx onion-wrap is a structural, keyed-BLAKE3 stand-in for the real mix cryptography (X25519/ChaCha20-Poly1305/LIONESS) — it models the cell layout and replay-freshness contract, not live mix crypto, and no mix network is deployed. The <span class="mono">private</span> tier above is this project's design target, tracked as the top roadmap item, not something delivered yet.</li>
-          </ul>
-          <p>The protocol is specified so that <strong>private</strong> (full mixnet, minutes) is the eventual default and <strong>fast</strong> (direct, seconds) is the disclosed-cost opt-in; until the mixnet workstream above lands, every message actually ships on the <strong>fast</strong> tier. Honest, disclosed limits beat a marketing promise of "perfectly anonymous."</p>
+          <div class="compare">
+            <div class="col reveal">
+              <h3>Self-host</h3>
+              <span class="price mono">$0 · your hardware</span>
+              <ul>
+                <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Run the node on a Pi, NAS, old laptop, or $2 VPS</li>
+                <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Full protocol surface: mesh, mail/chat/files, MLS, DMTAP-Auth — nothing gated (the mixnet is a design target, not yet real — see Honest status)</li>
+                <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Unlimited by default — the operator seam's self-host implementation is a no-op</li>
+                <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>MIT license, auditable top to bottom</li>
+              </ul>
+            </div>
+            <div class="col hosted reveal">
+              <h3>Hosted operator</h3>
+              <span class="price mono">optional · none run today</span>
+              <ul>
+                <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Someone else runs the always-on node for you</li>
+                <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Billing, quotas, and multi-tenant management</li>
+                <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Same protocol, same client, same privacy guarantees</li>
+                <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Never a crippled feature set — the paid thing is only <em>running</em> it</li>
+              </ul>
+            </div>
+          </div>
+
+          <p class="seam-note reveal">Both modes are the same code, talking through one documented contract — the <code>dmtap-seam</code>: metering, provisioning, policy, and gateway authorization. Self-host gets the unlimited defaults; a hosted operator implements the same seam without forking or gating the protocol.</p>
+
+          <div class="section-head reveal" style="margin-top:56px;">
+            <p class="eyebrow"><span class="tag">what operators see</span> the seam has two consoles</p>
+            <h3 style="font-size:1.4rem;">Domain admin, and fleet operator — neither one reads your mail</h3>
+            <p class="lede" style="margin-top:10px;">The org console administers <em>names</em> under a domain, never a sovereign member's key. The fleet superadmin view is explicitly content-blind — health and metering, never message content.</p>
+          </div>
+          <div class="shot-gallery reveal">
+            <figure class="shot-frame">
+              <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">console — overview</span></div>
+              <div class="shot-media-wrap">
+                <picture data-shot data-dark="assets/screens/console-overview-dark.png" data-light="assets/screens/console-overview-light.png">
+                  <img class="shot-img" src="assets/screens/console-overview-dark.png" width="1800" height="1125" loading="lazy" alt="Org console overview for @abc.com showing a 2-of-3 threshold domain authority, member and group counts, and a statement that the console administers names and operations, never a sovereign member's key.">
+                </picture>
+              </div>
+              <figcaption class="shot-caption"><b>Console — overview.</b> "Everything the console administers under @abc.com — names and operations, never a sovereign member's key."</figcaption>
+            </figure>
+            <figure class="shot-frame">
+              <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">console — members</span></div>
+              <div class="shot-media-wrap">
+                <picture data-shot data-dark="assets/screens/console-members-dark.png" data-light="assets/screens/console-members-light.png">
+                  <img class="shot-img" src="assets/screens/console-members-dark.png" width="1800" height="1125" loading="lazy" alt="Org console members list distinguishing sovereign members from org-managed accounts.">
+                </picture>
+              </div>
+              <figcaption class="shot-caption"><b>Console — members.</b> Sovereign vs. org-managed accounts, tracked separately by design.</figcaption>
+            </figure>
+            <figure class="shot-frame">
+              <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">console — directory</span></div>
+              <div class="shot-media-wrap">
+                <picture data-shot data-dark="assets/screens/console-directory-dark.png" data-light="assets/screens/console-directory-light.png">
+                  <img class="shot-img" src="assets/screens/console-directory-dark.png" width="1800" height="1125" loading="lazy" alt="Org console directory settings for a members-only DMTAP domain directory.">
+                </picture>
+              </div>
+              <figcaption class="shot-caption"><b>Console — directory.</b> The org-wide member directory, scoped and versioned.</figcaption>
+            </figure>
+            <figure class="shot-frame">
+              <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">console — billing</span></div>
+              <div class="shot-media-wrap">
+                <picture data-shot data-dark="assets/screens/console-billing-dark.png" data-light="assets/screens/console-billing-light.png">
+                  <img class="shot-img" src="assets/screens/console-billing-dark.png" width="1800" height="1125" loading="lazy" alt="Org console billing view for the domain's org-managed seats.">
+                </picture>
+              </div>
+              <figcaption class="shot-caption"><b>Console — billing.</b> Scoped to the org's own managed seats — never to what self-hosted members do.</figcaption>
+            </figure>
+            <figure class="shot-frame">
+              <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">superadmin — overview</span></div>
+              <div class="shot-media-wrap">
+                <picture data-shot data-dark="assets/screens/superadmin-overview-dark.png" data-light="assets/screens/superadmin-overview-light.png">
+                  <img class="shot-img" src="assets/screens/superadmin-overview-dark.png" width="1800" height="1125" loading="lazy" alt="Fleet superadmin overview for operator.example showing node, gateway, mix-node, and relay health across four regions, marked content-blind, and metered operations such as hosted storage and relayed bytes — deliberately not content.">
+                </picture>
+              </div>
+              <figcaption class="shot-caption"><b>Superadmin — overview.</b> "Operations only; never content" — the badge in the corner says it outright.</figcaption>
+            </figure>
+            <figure class="shot-frame">
+              <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">superadmin — fleet</span></div>
+              <div class="shot-media-wrap">
+                <picture data-shot data-dark="assets/screens/superadmin-fleet-dark.png" data-light="assets/screens/superadmin-fleet-light.png">
+                  <img class="shot-img" src="assets/screens/superadmin-fleet-dark.png" width="1800" height="1125" loading="lazy" alt="Fleet superadmin view listing nodes, gateways, mix nodes, and relays across regions.">
+                </picture>
+              </div>
+              <figcaption class="shot-caption"><b>Superadmin — fleet.</b> Every node, gateway, mix node, and relay an operator runs — infrastructure health, not mailboxes.</figcaption>
+            </figure>
+            <figure class="shot-frame">
+              <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">superadmin — abuse ops</span></div>
+              <div class="shot-media-wrap">
+                <picture data-shot data-dark="assets/screens/superadmin-abuse-dark.png" data-light="assets/screens/superadmin-abuse-light.png">
+                  <img class="shot-img" src="assets/screens/superadmin-abuse-dark.png" width="1800" height="1125" loading="lazy" alt="Fleet superadmin abuse operations queue for handling reports without exposing message content.">
+                </picture>
+              </div>
+              <figcaption class="shot-caption"><b>Superadmin — abuse ops.</b> Reports and incident handling, structured to stay content-blind.</figcaption>
+            </figure>
+            <figure class="shot-frame">
+              <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">superadmin — billing</span></div>
+              <div class="shot-media-wrap">
+                <picture data-shot data-dark="assets/screens/superadmin-billing-dark.png" data-light="assets/screens/superadmin-billing-light.png">
+                  <img class="shot-img" src="assets/screens/superadmin-billing-dark.png" width="1800" height="1125" loading="lazy" alt="Fleet superadmin billing view aggregating metered operations across the whole fleet.">
+                </picture>
+              </div>
+              <figcaption class="shot-caption"><b>Superadmin — billing.</b> Fleet-wide metering: storage, gateway sends, relayed bytes — the genuine cost centers, deliberately small.</figcaption>
+            </figure>
+          </div>
         </div>
-      </div>
-    </div>
-  </section>
+      </section>
 
-  <!-- ============ OPEN SOURCE / SELF-HOSTING ============ -->
-  <section id="open-source">
-    <div class="wrap">
-      <div class="section-head reveal">
-        <p class="eyebrow"><span class="tag">spec §12</span> operators</p>
-        <h2>Free to self-host, forever. Paid is optional — for not running it yourself.</h2>
-        <p class="lede">Envoir is MIT-licensed end to end: protocol, node, gateway, and client. Nothing that matters is held back for a paid tier.</p>
-      </div>
+      <!-- ============ TRUST ============ -->
+      <section id="trust">
+        <div class="pane-crumb"><span>Envoir</span><span class="sep">›</span><span class="cur">Trust</span><span class="meta"><span>spec §0.5</span></span></div>
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow"><span class="tag">spec §0.5</span> where state lives</p>
+            <h2>Your key, not our servers</h2>
+            <p class="lede">The middle of the network — mesh, mixnet, gateway — is built to hold no durable user data at all. Durability always lives at an edge you control.</p>
+          </div>
 
-      <div class="compare">
-        <div class="col reveal">
-          <h3>Self-host</h3>
-          <span class="price mono">$0 · your hardware</span>
-          <ul>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Run the node on a Pi, NAS, old laptop, or $2 VPS</li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Full protocol surface: mesh, mail/chat/files, MLS, DMTAP-Auth — nothing gated (the mixnet is a design target, not yet real — see Honest status)</li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Unlimited by default — the operator seam's self-host implementation is a no-op</li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>MIT license, auditable top to bottom</li>
-          </ul>
+          <div class="table-wrap reveal">
+            <table class="state-table">
+              <thead><tr><th>State</th><th>Lives on</th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td>Keys, mailbox, files, retry queue</td><td class="loc">your node</td><td>All durable state — the edge, not the middle</td></tr>
+                <tr><td>Name → key</td><td class="loc">DNS + key transparency</td><td>Stable; small; auditable for silent key swaps</td></tr>
+                <tr><td>Key → location</td><td class="loc">mesh DHT</td><td>Dynamic, signed, TTL'd, self-republished</td></tr>
+                <tr><td>In-flight ciphertext</td><td class="loc">mixnet / relay</td><td>Held only until delivered — content-blind</td></tr>
+                <tr><td>Legacy reputation</td><td class="loc">gateway</td><td>The one real operational cost, if you bridge legacy mail</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
-        <div class="col hosted reveal">
-          <h3>Hosted operator</h3>
-          <span class="price mono">optional · none run today</span>
-          <ul>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Someone else runs the always-on node for you</li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Billing, quotas, and multi-tenant management</li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Same protocol, same client, same privacy guarantees</li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>Never a crippled feature set — the paid thing is only <em>running</em> it</li>
-          </ul>
-        </div>
-      </div>
+      </section>
 
-      <p class="seam-note reveal">Both modes are the same code, talking through one documented contract — the <code>dmtap-seam</code>: metering, provisioning, policy, and gateway authorization. Self-host gets the unlimited defaults; a hosted operator implements the same seam without forking or gating the protocol.</p>
-
-      <div class="section-head reveal" style="margin-top:56px;">
-        <p class="eyebrow"><span class="tag">what operators see</span> the seam has two consoles</p>
-        <h3 style="font-size:1.4rem;">Domain admin, and fleet operator — neither one reads your mail</h3>
-        <p class="lede" style="margin-top:10px;">The org console administers <em>names</em> under a domain, never a sovereign member's key. The fleet superadmin view is explicitly content-blind — health and metering, never message content.</p>
-      </div>
-      <div class="shot-gallery reveal">
-        <figure class="shot-frame">
-          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">console — overview</span></div>
-          <div class="shot-media-wrap">
-            <picture data-shot data-dark="assets/screens/console-overview-dark.png" data-light="assets/screens/console-overview-light.png">
-              <img class="shot-img" src="assets/screens/console-overview-dark.png" width="1800" height="1125" loading="lazy" alt="Org console overview for @abc.com showing a 2-of-3 threshold domain authority, member and group counts, and a statement that the console administers names and operations, never a sovereign member's key.">
-            </picture>
-          </div>
-          <figcaption class="shot-caption"><b>Console — overview.</b> "Everything the console administers under @abc.com — names and operations, never a sovereign member's key."</figcaption>
-        </figure>
-        <figure class="shot-frame">
-          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">console — members</span></div>
-          <div class="shot-media-wrap">
-            <picture data-shot data-dark="assets/screens/console-members-dark.png" data-light="assets/screens/console-members-light.png">
-              <img class="shot-img" src="assets/screens/console-members-dark.png" width="1800" height="1125" loading="lazy" alt="Org console members list distinguishing sovereign members from org-managed accounts.">
-            </picture>
-          </div>
-          <figcaption class="shot-caption"><b>Console — members.</b> Sovereign vs. org-managed accounts, tracked separately by design.</figcaption>
-        </figure>
-        <figure class="shot-frame">
-          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">console — directory</span></div>
-          <div class="shot-media-wrap">
-            <picture data-shot data-dark="assets/screens/console-directory-dark.png" data-light="assets/screens/console-directory-light.png">
-              <img class="shot-img" src="assets/screens/console-directory-dark.png" width="1800" height="1125" loading="lazy" alt="Org console directory settings for a members-only DMTAP domain directory.">
-            </picture>
-          </div>
-          <figcaption class="shot-caption"><b>Console — directory.</b> The org-wide member directory, scoped and versioned.</figcaption>
-        </figure>
-        <figure class="shot-frame">
-          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">console — billing</span></div>
-          <div class="shot-media-wrap">
-            <picture data-shot data-dark="assets/screens/console-billing-dark.png" data-light="assets/screens/console-billing-light.png">
-              <img class="shot-img" src="assets/screens/console-billing-dark.png" width="1800" height="1125" loading="lazy" alt="Org console billing view for the domain's org-managed seats.">
-            </picture>
-          </div>
-          <figcaption class="shot-caption"><b>Console — billing.</b> Scoped to the org's own managed seats — never to what self-hosted members do.</figcaption>
-        </figure>
-        <figure class="shot-frame">
-          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">superadmin — overview</span></div>
-          <div class="shot-media-wrap">
-            <picture data-shot data-dark="assets/screens/superadmin-overview-dark.png" data-light="assets/screens/superadmin-overview-light.png">
-              <img class="shot-img" src="assets/screens/superadmin-overview-dark.png" width="1800" height="1125" loading="lazy" alt="Fleet superadmin overview for operator.example showing node, gateway, mix-node, and relay health across four regions, marked content-blind, and metered operations such as hosted storage and relayed bytes — deliberately not content.">
-            </picture>
-          </div>
-          <figcaption class="shot-caption"><b>Superadmin — overview.</b> "Operations only; never content" — the badge in the corner says it outright.</figcaption>
-        </figure>
-        <figure class="shot-frame">
-          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">superadmin — fleet</span></div>
-          <div class="shot-media-wrap">
-            <picture data-shot data-dark="assets/screens/superadmin-fleet-dark.png" data-light="assets/screens/superadmin-fleet-light.png">
-              <img class="shot-img" src="assets/screens/superadmin-fleet-dark.png" width="1800" height="1125" loading="lazy" alt="Fleet superadmin view listing nodes, gateways, mix nodes, and relays across regions.">
-            </picture>
-          </div>
-          <figcaption class="shot-caption"><b>Superadmin — fleet.</b> Every node, gateway, mix node, and relay an operator runs — infrastructure health, not mailboxes.</figcaption>
-        </figure>
-        <figure class="shot-frame">
-          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">superadmin — abuse ops</span></div>
-          <div class="shot-media-wrap">
-            <picture data-shot data-dark="assets/screens/superadmin-abuse-dark.png" data-light="assets/screens/superadmin-abuse-light.png">
-              <img class="shot-img" src="assets/screens/superadmin-abuse-dark.png" width="1800" height="1125" loading="lazy" alt="Fleet superadmin abuse operations queue for handling reports without exposing message content.">
-            </picture>
-          </div>
-          <figcaption class="shot-caption"><b>Superadmin — abuse ops.</b> Reports and incident handling, structured to stay content-blind.</figcaption>
-        </figure>
-        <figure class="shot-frame">
-          <div class="shot-chrome" aria-hidden="true"><span class="dots"><span></span><span></span><span></span></span><span class="addr mono">superadmin — billing</span></div>
-          <div class="shot-media-wrap">
-            <picture data-shot data-dark="assets/screens/superadmin-billing-dark.png" data-light="assets/screens/superadmin-billing-light.png">
-              <img class="shot-img" src="assets/screens/superadmin-billing-dark.png" width="1800" height="1125" loading="lazy" alt="Fleet superadmin billing view aggregating metered operations across the whole fleet.">
-            </picture>
-          </div>
-          <figcaption class="shot-caption"><b>Superadmin — billing.</b> Fleet-wide metering: storage, gateway sends, relayed bytes — the genuine cost centers, deliberately small.</figcaption>
-        </figure>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ TRUST ============ -->
-  <section id="trust">
-    <div class="wrap">
-      <div class="section-head reveal">
-        <p class="eyebrow"><span class="tag">spec §0.5</span> where state lives</p>
-        <h2>Your key, not our servers</h2>
-        <p class="lede">The middle of the network — mesh, mixnet, gateway — is built to hold no durable user data at all. Durability always lives at an edge you control.</p>
-      </div>
-
-      <div class="table-wrap reveal">
-        <table class="state-table">
-          <thead><tr><th>State</th><th>Lives on</th><th>Notes</th></tr></thead>
-          <tbody>
-            <tr><td>Keys, mailbox, files, retry queue</td><td class="loc">your node</td><td>All durable state — the edge, not the middle</td></tr>
-            <tr><td>Name → key</td><td class="loc">DNS + key transparency</td><td>Stable; small; auditable for silent key swaps</td></tr>
-            <tr><td>Key → location</td><td class="loc">mesh DHT</td><td>Dynamic, signed, TTL'd, self-republished</td></tr>
-            <tr><td>In-flight ciphertext</td><td class="loc">mixnet / relay</td><td>Held only until delivered — content-blind</td></tr>
-            <tr><td>Legacy reputation</td><td class="loc">gateway</td><td>The one real operational cost, if you bridge legacy mail</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ FINAL CTA ============ -->
-  <section id="get-started">
-    <div class="wrap">
-      <div class="cta-final reveal">
-        <div>
-          <p class="eyebrow"><span class="tag">start here</span></p>
-          <h2>Run your own front door.</h2>
-          <p class="lede">Two pieces of software, plus DNS you already have. The node holds the mailbox; the gateway is optional and only needed if you correspond with the legacy world.</p>
-          <div class="hero-ctas">
-            <a class="btn btn-primary" href="https://github.com/vul-os/envoir" target="_blank" rel="noopener">Get the code</a>
-            <a class="btn btn-ghost" href="https://github.com/vul-os/kotva" target="_blank" rel="noopener">Read the full spec</a>
-          </div>
-          <div class="status-pill"><span class="dot"></span>pre-alpha — spec is detailed, reference implementation is a scaffold. not production-ready.</div>
-        </div>
-        <div class="code-block">
+      <!-- ============ FINAL CTA ============ -->
+      <section id="get-started">
+        <div class="pane-crumb"><span>Envoir</span><span class="sep">›</span><span class="cur">Get started</span><span class="meta"><span>MIT</span></span></div>
+        <div class="wrap">
+          <div class="cta-final reveal">
+            <div>
+              <p class="eyebrow"><span class="tag">start here</span></p>
+              <h2>Run your own front door.</h2>
+              <p class="lede">Two pieces of software, plus DNS you already have. The node holds the mailbox; the gateway is optional and only needed if you correspond with the legacy world.</p>
+              <div class="hero-ctas">
+                <a class="btn btn-primary" href="https://github.com/vul-os/envoir" target="_blank" rel="noopener">Get the code</a>
+                <a class="btn btn-ghost" href="https://github.com/vul-os/kotva" target="_blank" rel="noopener">Read the full spec</a>
+              </div>
+              <div class="status-pill"><span class="dot"></span>pre-alpha — spec is detailed, reference implementation is a scaffold. not production-ready.</div>
+            </div>
+            <div class="code-block">
 <span class="c"># build the workspace</span>
 cargo build
 <span class="c"># run a reference node</span>
 cargo run -p envoir-node -- --help
 <span class="c"># the web client needs no build step</span>
 <span class="g">→</span> serve <span class="c">client/</span> with any static server
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
-  </section>
+      </section>
 
-</main>
+      <footer>
+        <div class="wrap">
+          <div class="foot-grid">
+            <div>
+              <div class="foot-brand">
+                <img src="assets/logo-mark.svg" width="26" height="26" alt="" aria-hidden="true">
+                <strong>Envoir</strong>
+              </div>
+              <p class="foot-desc">The open-source reference implementation of DMTAP — sovereign mail, chat, files, and login on one keypair identity.</p>
+            </div>
 
-<footer>
-  <div class="wrap">
-    <div class="foot-grid">
-      <div>
-        <div class="foot-brand">
-          <img src="assets/logo-mark.svg" width="26" height="26" alt="" aria-hidden="true">
-          <strong>Envoir</strong>
+            <div class="foot-col">
+              <h4>Product</h4>
+              <ul>
+                <li><a href="#mail">Mail</a></li>
+                <li><a href="#chat">Chat</a></li>
+                <li><a href="#files">Files</a></li>
+                <li><a href="#identity">Sign in with Envoir</a></li>
+                <li><a href="#traceability">Transport traceability</a></li>
+              </ul>
+            </div>
+
+            <div class="foot-col">
+              <h4>Docs</h4>
+              <ul>
+                <li><a href="docs.html#architecture">Architecture</a></li>
+                <li><a href="docs.html#protocol">Protocol</a></li>
+                <li><a href="docs.html#privacy">Privacy model</a></li>
+                <li><a href="docs.html#security">Security</a></li>
+                <li><a href="docs.html#self-hosting">Self-hosting</a></li>
+              </ul>
+            </div>
+
+            <div class="foot-col">
+              <h4>Open source</h4>
+              <ul>
+                <li><a href="https://github.com/vul-os/envoir" target="_blank" rel="noopener">Source (vul-os/envoir)</a></li>
+                <li><a href="https://github.com/vul-os/kotva" target="_blank" rel="noopener">Spec (vul-os/kotva)</a></li>
+                <li><a href="../LICENSE-MIT" target="_blank" rel="noopener">MIT license</a></li>
+                <li><a href="../brand/README.md" target="_blank" rel="noopener">Brand assets</a></li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="foot-bottom">
+            <span>© 2026 Envoir. MIT licensed. DMTAP is an open protocol — Envoir is one implementation of it.</span>
+            <span class="legal-links">
+              <a href="https://github.com/vul-os/kotva" target="_blank" rel="noopener">Spec</a>
+              <a href="https://github.com/vul-os/envoir" target="_blank" rel="noopener">Repo</a>
+            </span>
+          </div>
         </div>
-        <p class="foot-desc">The open-source reference implementation of DMTAP — sovereign mail, chat, files, and login on one keypair identity.</p>
-      </div>
-
-      <div class="foot-col">
-        <h4>Product</h4>
-        <ul>
-          <li><a href="#mail">Mail</a></li>
-          <li><a href="#chat">Chat</a></li>
-          <li><a href="#files">Files</a></li>
-          <li><a href="#identity">Sign in with Envoir</a></li>
-          <li><a href="#traceability">Transport traceability</a></li>
-        </ul>
-      </div>
-
-      <div class="foot-col">
-        <h4>Docs</h4>
-        <ul>
-          <li><a href="docs.html#architecture">Architecture</a></li>
-          <li><a href="docs.html#protocol">Protocol</a></li>
-          <li><a href="docs.html#privacy">Privacy model</a></li>
-          <li><a href="docs.html#security">Security</a></li>
-          <li><a href="docs.html#self-hosting">Self-hosting</a></li>
-        </ul>
-      </div>
-
-      <div class="foot-col">
-        <h4>Open source</h4>
-        <ul>
-          <li><a href="https://github.com/vul-os/envoir" target="_blank" rel="noopener">Source (vul-os/envoir)</a></li>
-          <li><a href="https://github.com/vul-os/kotva" target="_blank" rel="noopener">Spec (vul-os/kotva)</a></li>
-          <li><a href="../LICENSE-MIT" target="_blank" rel="noopener">MIT license</a></li>
-          <li><a href="../brand/README.md" target="_blank" rel="noopener">Brand assets</a></li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="foot-bottom">
-      <span>© 2026 Envoir. MIT licensed. DMTAP is an open protocol — Envoir is one implementation of it.</span>
-      <span class="legal-links">
-        <a href="https://github.com/vul-os/kotva" target="_blank" rel="noopener">Spec</a>
-        <a href="https://github.com/vul-os/envoir" target="_blank" rel="noopener">Repo</a>
-      </span>
-    </div>
+      </footer>
+    </main>
   </div>
-</footer>
+
+  <!-- ══════════ Status bar ══════════ -->
+  <div class="statusbar">
+    <span class="item"><i class="dot"></i>node: simulated</span>
+    <span class="item hide-sm mono">b3:27e1adf8946a…</span>
+    <span class="item hide-sm"><span class="pill fast mono" style="padding:1px 8px;font-size:10.5px;">fast</span> tier</span>
+    <span class="right">
+      <span class="item hide-sm" id="sb-section">Welcome</span>
+      <span class="item"><i class="dot warn-dot"></i>pre-alpha</span>
+      <span class="item">envoir 0.1.0</span>
+    </span>
+  </div>
+
+</div>
+
+<!-- ══════════ Command palette ══════════ -->
+<div class="palette-backdrop" id="paletteBackdrop" hidden>
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+    <input type="text" id="paletteInput" placeholder="Go to a section, or jump to the docs…" autocomplete="off" spellcheck="false">
+    <div class="results" id="paletteResults"></div>
+    <div class="foot"><span><kbd>↑</kbd><kbd>↓</kbd> navigate</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span></div>
+  </div>
+</div>
 
 <script src="js/mesh.js"></script>
-<script src="js/main.js"></script></body>
+<script src="js/main.js"></script>
+</body>
 </html>
