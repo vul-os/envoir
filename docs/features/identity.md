@@ -131,12 +131,24 @@ compromised bridge is a trusted third party exactly like any classical identity 
 the native path removes that trust entirely). Try the demo in
 [Settings & devices](settings.md#sign-in-with-envoir).
 
-## Multi-device
+## Devices
 
 Your devices form your own personal MLS group, syncing the mailbox, flags, labels, and file index
 as an encrypted CRDT over the mesh. Any device can send or receive; your always-on box is the
-anchor that guarantees receipt while your other devices sleep. Manage linked devices from
-[Settings & devices](settings.md#devices).
+anchor that guarantees receipt while your other devices sleep. Manage them from the **Devices**
+section of this same Identity page:
+
+- **Link a device** — click **Link device**, and on the *new* device choose "Add to my identity"
+  and scan the resulting code. This generates a fresh device subkey on the new device and asks
+  your root key to authorize it — the private root key itself never moves between devices. A short
+  pairing-word check on screen guards against a man-in-the-middle injecting a rogue device during
+  linking.
+- **Revoke a device** — find it in the device list and click the trash icon. This rotates its
+  subkey out of your cluster immediately; a lost or stolen device revoked this way can no longer
+  decrypt anything sent afterward. Your root identity is untouched.
+
+See [Settings & devices](settings.md) for the rest of the account-level surface (addresses,
+filters, node connection, notifications) that lives alongside this page.
 
 ## What's real vs. simulated today
 
