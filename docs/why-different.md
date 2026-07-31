@@ -1,0 +1,84 @@
+# Why Envoir is different
+
+Most "private" mail and chat apps ask you to trust a company instead of trusting nobody. Envoir's
+starting premise is different: **your key is your identity, not an account with a provider.**
+Everything else on this page follows from that one sentence.
+
+## The short version
+
+| | Gmail / Outlook | Signal / WhatsApp | Envoir |
+|---|---|---|---|
+| What proves it's you | A password, tied to the provider's account system | A phone number, tied to the provider's account system | An **Ed25519 keypair you generate**, tied to nothing |
+| Who can read your mail | The provider, structurally (they hold the keys) | Signal, structurally, for metadata; not content | No one but the recipient — content is end-to-end encrypted, and even *who's talking to whom* is protected against a passive observer |
+| What happens if the provider disappears | Your address and your mail both vanish with it | Your account is gone | Your **key** survives — you publish a signed move record and existing contacts follow you automatically |
+| Mail, chat, calendar, contacts, files | Separate products, separate accounts, separate trust | Chat only | **One identity**, one substrate (MOTE), all six surfaces |
+| Talk to people on old email | N/A, it *is* old email | No | Yes — an optional gateway bridges to SMTP, clearly marked as legacy so you always know which messages were end-to-end the whole way |
+| Self-hosting | Not really an option | Not really an option | A first-class, **not crippled**, mode — every protocol feature, every client, every privacy guarantee, for $0 |
+| Cryptocurrency involved | No | No | **No** — not anywhere in the project |
+
+## One key, six surfaces
+
+Mail, chat, calendar, contacts, files, and group membership are all the same underlying object —
+a signed, encrypted, content-addressed **MOTE** — rendered differently by the client depending on
+its `kind`. That's not a marketing simplification: it's why a shared folder can just *be* a group
+with file-manifests instead of a bolted-on "sharing" feature, why a calendar invite is a message
+instead of a query against a central database, and why your contacts list can show a real,
+cryptographic verification status instead of just a name and a photo. See
+[Architecture](../architecture.md) and [Protocol](../protocol.md) for how the pieces fit.
+
+## Your address is a pointer, not your identity
+
+`you@envoir.org` (or `you@yourdomain.com`) is what you give out — but it's a **discovery
+pointer**, resolved down to your key and then verified, never the identity itself. Lose the
+domain, the provider, or the DNS record, and you don't lose *you*: a signed move record rebinds
+the same key to a new address, and everyone who has already made first contact with you keeps
+routing by key, automatically, with no re-verification and no "please update your contact info"
+email. Naming itself is pluggable — a zero-authority key-name and a local petname need no network
+at all — see [Naming](../naming.md).
+
+## Metadata privacy is designed in, not bolted on — and stated honestly
+
+Content is end-to-end encrypted the way you'd expect from any modern messenger. What's less
+common is that Envoir is *designed* to also hide **who's talking to whom** from a network-level
+observer, via a mixnet with sealed sender and cover traffic — not just encrypting the envelope,
+but trying to make the envelope itself unlinkable. See [Privacy & threat model](../privacy.md) for
+the honest, falsifiable version of that claim, including exactly what it doesn't defend against.
+
+**This project would rather under-claim than over-claim.** Right now, only the `fast` (direct)
+transport tier is real end-to-end — the mixnet's onion-wrapping cryptography (`node/src/onion.rs`)
+is a structural BLAKE3 stand-in, not the real Sphinx construction, so metadata privacy is
+architecture-only until that lands. That caveat is stated on every page where it's relevant, not
+once and forgotten — see [Roadmap](../roadmap.md) and [Security](../security.md) for exactly
+what's real today versus what's specified for later.
+
+## Self-hosting is a real option, not a crippled free tier
+
+Run your own node on a Raspberry Pi, a NAS, or a $0 always-on box, and you have **every** protocol
+feature, every client, and every privacy guarantee a hosted operator could offer — the only thing
+you're giving up is someone else's convenience (warmed IPs for legacy mail, managed DNS). Native
+mesh delivery between two DMTAP identities is always free and unmetered, by protocol design, not
+by any one operator's pricing choice. See [Self-hosting a node](features/self-hosting.md).
+
+## No cryptocurrency, anywhere
+
+There is no token, no blockchain, and no coin in this project — full stop. Anti-abuse for cold
+contact uses anonymous rate-limit tokens, proof-of-work, and an optional real-money postage stamp,
+none of which are a cryptocurrency. Naming's only chain-adjacent option is an OFF-BY-DEFAULT ENS/
+SNS resolver, bound by four guardrails so it can never become a trust root. See the
+[FAQ](faq.md#is-there-a-token-or-cryptocurrency) for the full answer.
+
+## What Envoir is *not* claiming
+
+This project's credibility rests on not overclaiming, so it's worth saying plainly what this page
+is **not**:
+
+- Not "audited" — an independent cryptographic and code audit is a disclosed *gate* before any
+  production use, not a checkbox already ticked. See [Security](../security.md#the-audit-gate).
+- Not "anonymous" in the absolute sense — see [Privacy & threat model](../privacy.md) for the
+  quantified, falsifiable version.
+- Not production-ready — this is a **pre-alpha reference implementation**, a proof of the
+  protocol's shape, demonstrating it end-to-end honestly rather than a hardened mail service you
+  should trust with real correspondence today.
+
+If that's the trade you're looking for — sovereignty and an honest read on what's real, over a
+polished but closed system — [Getting started](getting-started.md) is next.

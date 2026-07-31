@@ -7,6 +7,8 @@
   "scripts": {
     "screenshotter": "node docs/capture-screenshots.mjs && node scripts/sync-site-screens.mjs",
     "sync-site-screens": "node scripts/sync-site-screens.mjs",
+    "docs:sync": "node scripts/sync-site-docs.mjs",
+    "docs:sync:check": "node scripts/sync-site-docs.mjs --check",
     "test:client": "node --test 'client/test/**/*.test.mjs'"
   }
 }
