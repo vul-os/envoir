@@ -178,10 +178,12 @@ p { margin: 0; }
 
 .mono { font-family: var(--mono); }
 
-section { position: relative; z-index: 1; padding: clamp(64px, 10vw, 116px) 0; }
+/* Tightened from clamp(64px,10vw,116px) — at 20,170px tall (~23 screens) the page read as
+   unfinished more than generous; this alone is most of a ~4,600px cut across 13 sections. */
+section { position: relative; z-index: 1; padding: clamp(40px, 6vw, 72px) 0; }
 section + section { border-top: 1px solid var(--line); }
 
-.section-head { margin-bottom: clamp(32px, 5vw, 56px); max-width: 780px; }
+.section-head { margin-bottom: clamp(22px, 3.5vw, 36px); max-width: 780px; }
 .section-head h2 { margin-bottom: 0.9rem; }
 .section-head.center { max-width: 640px; margin-left: auto; margin-right: auto; text-align: center; }
 .section-head.center .eyebrow { justify-content: center; }
@@ -315,7 +317,7 @@ section + section { border-top: 1px solid var(--line); }
 .pill.dim    { background: var(--bg-3); color: var(--text-dim); }
 
 /* ---------- hero ---------- */
-.hero { padding-top: clamp(56px, 8vw, 96px); overflow: clip; }
+.hero { padding-top: clamp(32px, 5vw, 60px); overflow: clip; }
 .hero-grid { display: grid; grid-template-columns: 1fr; gap: 48px; align-items: center; }
 @media (min-width: 980px) { .hero-grid { grid-template-columns: 1.05fr 0.95fr; gap: 40px; } }
 
@@ -360,7 +362,15 @@ section + section { border-top: 1px solid var(--line); }
 .hv-tag .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
 
 /* ---------- generic cards / grids ---------- */
-.grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; }
+/* Explicit column counts everywhere below, not auto-fit — auto-fit's column count depends on
+   container width vs. a min track size, and with --container:1200px (1072px of actual content
+   at 1440 viewport) several of these grids computed FEWER tracks than items, so a trailing
+   item wrapped alone into a new row with the grid's other, item-less tracks rendering as
+   visible dead space beside it (confirmed empirically: the "Useful with the mail" card sat
+   alone with ~700-900px of nothing beside it). Fixed track counts that evenly divide each
+   grid's real item count can't produce that partial-row gap. */
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+@media (max-width: 760px) { .grid-3 { grid-template-columns: 1fr; } }
 .card {
   padding: 26px 24px; border-radius: var(--r-lg); border: 1px solid var(--line); background: var(--bg-1);
   transition: border-color 0.25s ease, transform 0.25s var(--ease-out);
@@ -371,7 +381,8 @@ section + section { border-top: 1px solid var(--line); }
 .card p { color: var(--text-dim); font-size: 0.95rem; }
 
 /* ---------- why-different: lead cards with a small icon each ---------- */
-.why-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 22px; }
+.why-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+@media (max-width: 700px) { .why-grid { grid-template-columns: 1fr; } }
 .why-card {
   padding: 28px 26px; border-radius: var(--r-lg); border: 1px solid var(--line); background: var(--bg-1);
   display: flex; flex-direction: column; gap: 14px; transition: border-color 0.25s ease, transform 0.25s var(--ease-out);
@@ -522,7 +533,8 @@ section + section { border-top: 1px solid var(--line); }
   display: inline-block; font-family: var(--mono); font-size: 12px; letter-spacing: 0.11em; text-transform: uppercase;
   color: var(--good); border: 1px solid var(--line-2); border-radius: 999px; padding: 4px 12px; margin-bottom: 20px;
 }
-.np-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; margin-bottom: 20px; }
+.np-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; margin-bottom: 20px; }
+@media (max-width: 600px) { .np-grid { grid-template-columns: 1fr; } }
 .np-flavor { display: flex; flex-direction: column; gap: 6px; }
 .np-tt { font-family: var(--sans); font-weight: 700; font-size: 0.85rem; color: var(--text-dim); }
 .np-example { font-size: clamp(1.15rem, 0.9rem + 1vw, 1.55rem); color: var(--text); font-weight: 600; }
@@ -579,11 +591,11 @@ section + section { border-top: 1px solid var(--line); }
 .shot-caption b { color: var(--text); }
 
 /* ---------- product gallery: alternating feature rows ---------- */
-.feature-row { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: clamp(28px, 5vw, 56px); align-items: center; padding: 44px 0; }
+.feature-row { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: clamp(28px, 5vw, 56px); align-items: center; padding: 30px 0; }
 .feature-row + .feature-row { border-top: 1px solid var(--line); }
 .feature-row.reverse .feature-media { order: 2; }
 @media (max-width: 900px) {
-  .feature-row { grid-template-columns: 1fr; padding: 30px 0; }
+  .feature-row { grid-template-columns: 1fr; padding: 22px 0; }
   .feature-row.reverse .feature-media { order: 0; }
 }
 .feature-tag {
@@ -599,15 +611,21 @@ section + section { border-top: 1px solid var(--line); }
 .feature-points b { color: var(--text); }
 
 /* ---------- gallery grid: the "more of the product" wall ---------- */
-.shot-gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 22px; margin-top: 12px; }
+/* Fixed 4-up so an 8-item gallery fills exactly 2 rows with nothing left over. The one
+   7-item gallery (product section) pads its last row to 4 columns with .wide (span 2) on its
+   final card instead of leaving a bare track — see the two galleries' HTML. */
+.shot-gallery { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 12px; }
 .shot-gallery .shot-frame { display: flex; flex-direction: column; height: 100%; }
+.shot-gallery .shot-frame.wide { grid-column: span 2; }
 .shot-gallery .shot-caption { margin-top: auto; }
+@media (max-width: 980px) { .shot-gallery { grid-template-columns: repeat(2, 1fr); } .shot-gallery .shot-frame.wide { grid-column: span 2; } }
+@media (max-width: 560px) { .shot-gallery { grid-template-columns: 1fr; } .shot-gallery .shot-frame.wide { grid-column: auto; } }
 
 /* ============================================================
    WALKTHROUGH — numbered stepper, "how you'd use it"
    ============================================================ */
 .walk { display: flex; flex-direction: column; gap: 0; }
-.walk-step { display: grid; grid-template-columns: 44px 1fr; gap: 24px; padding: 30px 0; position: relative; }
+.walk-step { display: grid; grid-template-columns: 44px 1fr; gap: 24px; padding: 20px 0; position: relative; }
 .walk-step + .walk-step { border-top: 1px solid var(--line); }
 .walk-num {
   width: 44px; height: 44px; border-radius: 50%; background: var(--grad); color: #fff;
@@ -626,6 +644,12 @@ section + section { border-top: 1px solid var(--line); }
 .walk-copy p { color: var(--text-dim); font-size: 0.94rem; line-height: 1.6; max-width: 48ch; }
 .walk-copy .pill { margin-top: 12px; }
 .walk-media .shot-frame { box-shadow: var(--sh-2); }
+/* Steps 3-6 reuse screenshots already shown full-size in the Product section above (contacts,
+   compose, mail, inspector) — repeating the walkthrough narrative is worth it, repeating the
+   same image at the same full height is not. Capped narrower here; the two steps with unique
+   onboarding screenshots (1-2) keep the full walk-media width. */
+.walk-media.compact { max-width: 400px; margin-left: auto; }
+@media (max-width: 860px) { .walk-media.compact { max-width: 100%; margin-left: 0; } }
 
 /* ---------- transport traceability ---------- */
 .trace-showcase { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: clamp(28px, 5vw, 48px); align-items: center; }
@@ -639,7 +663,8 @@ section + section { border-top: 1px solid var(--line); }
 .trace-boundary strong { color: var(--text); }
 
 /* ---------- feature parity ---------- */
-.parity-tally { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; margin-bottom: 32px; }
+.parity-tally { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
+@media (max-width: 640px) { .parity-tally { grid-template-columns: repeat(2, 1fr); } }
 .pt-stat { text-align: center; padding: 22px 14px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-1); transition: border-color 0.25s ease, transform 0.25s var(--ease-out); }
 .pt-stat:hover { border-color: var(--line-2); transform: translateY(-3px); }
 .pt-num { display: block; font-family: var(--mono); font-weight: 700; font-size: clamp(1.8rem, 1.5rem + 1vw, 2.3rem); line-height: 1; margin-bottom: 8px; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; font-feature-settings: "tnum" 1; }
@@ -671,7 +696,8 @@ section + section { border-top: 1px solid var(--line); }
 .honest-list code { font-family: var(--mono); font-size: 0.92em; background: var(--bg-3); padding: 0.1em 0.4em; border-radius: 4px; }
 
 /* ---------- self-hosting / operators ---------- */
-.compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+.compare { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+@media (max-width: 700px) { .compare { grid-template-columns: 1fr; } }
 .compare .col { border: 1px solid var(--line); border-radius: var(--r-lg); padding: 26px 24px; background: var(--bg-1); }
 .compare .col.hosted { border-color: var(--line-2); background: linear-gradient(180deg, color-mix(in srgb, var(--indigo) 8%, transparent), transparent 60%), var(--bg-1); }
 .compare .col h3 { font-family: var(--sans); font-weight: 700; font-size: 1.05rem; margin-bottom: 4px; }
@@ -693,7 +719,7 @@ section + section { border-top: 1px solid var(--line); }
 
 /* ---------- final CTA ---------- */
 .cta-final {
-  border-radius: var(--r-xl); border: 1px solid var(--line-2); padding: clamp(32px, 6vw, 64px);
+  border-radius: var(--r-xl); border: 1px solid var(--line-2); padding: clamp(24px, 4vw, 44px);
   background: radial-gradient(ellipse 700px 400px at 20% 0%, color-mix(in srgb, var(--indigo) 16%, transparent), transparent 60%),
               radial-gradient(ellipse 700px 400px at 100% 100%, color-mix(in srgb, var(--violet) 14%, transparent), transparent 60%),
               var(--bg-1);
@@ -716,8 +742,8 @@ section + section { border-top: 1px solid var(--line); }
 .status-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
 
 /* ---------- footer ---------- */
-footer { padding: 56px 0 40px; border-top: 1px solid var(--line); }
-.foot-grid { display: grid; grid-template-columns: 1.4fr repeat(3, 1fr); gap: 32px; margin-bottom: 44px; }
+footer { padding: 40px 0 28px; border-top: 1px solid var(--line); }
+.foot-grid { display: grid; grid-template-columns: 1.4fr repeat(3, 1fr); gap: 32px; margin-bottom: 30px; }
 @media (max-width: 800px) { .foot-grid { grid-template-columns: repeat(2, 1fr); } }
 .foot-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .foot-brand img { width: 26px; height: 26px; border-radius: 6px; }
