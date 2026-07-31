@@ -2,9 +2,9 @@
 //
 // Captures the Envoir Management Console (console/): runs the real "connect your domain" setup
 // (generates a real Ed25519 domain-authority keypair + seeds a believable demo org), then the
-// Overview, Members, Directory and Billing views in both themes where useful.
+// Overview, Members, Directory and Billing views, each in both themes.
 
-import { goToView, setTheme, waitForText, wait } from '../lib.mjs';
+import { goToView, captureThemePair, waitForText, wait } from '../lib.mjs';
 
 export async function run(page, baseUrl, capture) {
   await page.goto(baseUrl, { waitUntil: 'networkidle0' });
@@ -23,31 +23,25 @@ export async function run(page, baseUrl, capture) {
 
   // ---- Overview ---------------------------------------------------------------------------------
   await goToView(page, 'overview');
-  await capture('console-overview-dark.png', {
+  await captureThemePair(page, capture, 'console-overview', {
     assert: () => waitForText(page, '#view', 'Overview'),
   });
-
-  await setTheme(page, 'light');
-  await capture('console-overview-light.png', {
-    assert: () => waitForText(page, '#view', 'Overview'),
-  });
-  await setTheme(page, 'dark');
 
   // ---- Members (sovereign vs org-managed custody) ------------------------------------------------
   await goToView(page, 'members');
-  await capture('console-members-dark.png', {
+  await captureThemePair(page, capture, 'console-members', {
     assert: () => waitForText(page, '#view', 'Members'),
   });
 
   // ---- Directory (GAL) --------------------------------------------------------------------------
   await goToView(page, 'directory');
-  await capture('console-directory-dark.png', {
+  await captureThemePair(page, capture, 'console-directory', {
     assert: () => waitForText(page, '#view', 'Directory'),
   });
 
-  // ---- Billing (dmtap-seam) ----------------------------------------------------------------------
+  // ---- Billing (the operator seam's metering) -----------------------------------------------------
   await goToView(page, 'billing');
-  await capture('console-billing-dark.png', {
+  await captureThemePair(page, capture, 'console-billing', {
     assert: () => waitForText(page, '#view', 'Billing'),
   });
 }

@@ -36,19 +36,36 @@ up, including on error or Ctrl-C.
 
 | App | Files |
 |---|---|
-| client | `onboarding-safety.png`\*, `onboarding-identity.png`\*, `mail-dark.png`, `mail-light.png`, `mail-mobile.png`, `path-graph.png`, `chat-dark.png`, `chat-light.png`, `chat-mobile.png`, `calendar-dark.png`, `calendar-light.png`, `calendar-mobile.png`, `contacts-dark.png`, `contacts-mobile.png`, `files-dark.png`, `files-light.png`, `identity-dark.png`, `identity-light.png`, `identity-mobile.png` |
-| console | `console-overview-dark.png`, `console-overview-light.png`, `console-members-dark.png`, `console-directory-dark.png`, `console-billing-dark.png` |
-| superadmin | `superadmin-overview-dark.png`, `superadmin-overview-light.png`, `superadmin-fleet-dark.png`, `superadmin-abuse-dark.png`, `superadmin-billing-dark.png` |
+| client | `onboarding-safety.png`\*, `onboarding-identity.png`\* (dark-only — see below), `mail-dark.png`/`mail-light.png`, `path-graph.png`/`path-graph-light.png`, `inspector-dark.png`/`inspector-light.png` (MOTE inspector), `compose-dark.png`/`compose-light.png`, `chat-dark.png`/`chat-light.png`, `calendar-dark.png`/`calendar-light.png` (month view), `calendar-agenda-dark.png`/`calendar-agenda-light.png` (agenda panel open), `contacts-dark.png`/`contacts-light.png`, `files-dark.png`/`files-light.png`, `identity-dark.png`/`identity-light.png`, `groups-dark.png`/`groups-light.png`, `settings-dark.png`/`settings-light.png` |
+| console | `console-overview-dark.png`/`console-overview-light.png`, `console-members-dark.png`/`console-members-light.png`, `console-directory-dark.png`/`console-directory-light.png`, `console-billing-dark.png`/`console-billing-light.png` |
+| superadmin | `superadmin-overview-dark.png`/`superadmin-overview-light.png`, `superadmin-fleet-dark.png`/`superadmin-fleet-light.png`, `superadmin-abuse-dark.png`/`superadmin-abuse-light.png`, `superadmin-billing-dark.png`/`superadmin-billing-light.png` |
 | status | `status-operational.png`, `status-light.png`, `status-degraded.png`, `status-outage.png`, `status-user.png` |
 | site | `landing-hero.png`, `landing-hero-light.png` |
 
-\* non-required "bonus" shots.
+\* non-required "bonus" shots. Every other client/console/superadmin view is captured as a
+matched dark+light pair by clicking the app's real theme toggle (`captureThemePair` in
+`docs/screenshotter/lib.mjs`) — **except** `onboarding-safety.png`/`onboarding-identity.png`,
+which stay dark-only: `client/index.html` hardcodes `data-theme="dark"` until the shell mounts,
+so there is no real toggle to click during onboarding, and this pipeline does not fake a theme
+with injected CSS.
 
-Note: the `-mobile.png` shots (a narrow-viewport capture of the same view) and the `calendar-*` /
-`contacts-*` shots document the client's Calendar/Contacts parity and its responsive layout down
-to phone width; `docs/screenshotter/apps/client.mjs` is still being extended with the capture
-calls for these views, so re-running `npm run screenshotter` today will not yet regenerate them —
-until then, treat the images already committed in `docs/img/` as current.
+Note: the `*-mobile.png` shots still committed in `docs/img/` (`mail-mobile.png`,
+`chat-mobile.png`, `calendar-mobile.png`, `contacts-mobile.png`, `identity-mobile.png`) are
+**stale** — no current driver regenerates them, so treat them as historical rather than current,
+and they are excluded from the `site/assets/screens/` sync below.
+
+## Syncing into the site
+
+`site/` is mirrored verbatim to vulos.org by the fleet-wide landing collector, so it must be
+self-contained — it can't reach into `docs/img/`. `scripts/sync-site-screens.mjs` copies the
+site-facing subset of `docs/img/` into `site/assets/screens/` against an explicit manifest (not a
+glob), and is chained onto `npm run screenshotter` automatically (also runnable standalone via
+`npm run sync-site-screens`). It is a hard gate, not a best-effort copy: it exits non-zero and
+refuses to sync anything if a manifest file is missing from `docs/img/`, if a dark/light pair is
+incomplete, or if what lands in `site/assets/screens/` doesn't exactly match what was expected
+(the directory is wiped and fully rewritten every run, so a renamed/removed shot can never leave
+a stale orphan behind). `status-*.png`, `landing-hero*.png` and the `*-mobile.png` shots above are
+deliberately excluded from the manifest.
 
 ## Environment overrides
 
@@ -65,8 +82,13 @@ Only needed if your machine differs from the reference dev box:
 - `docs/capture-screenshots.mjs` — orchestrator: starts/stops servers, launches/closes the
   browser, runs each app, prints the summary and sets the exit code.
 - `docs/screenshotter/lib.mjs` — shared infra: the static server, the puppeteer-core loader, the
-  results ledger, and the `capture()` / `goToView()` / `setTheme()` / `waitForText()` helpers.
+  results ledger, and the `capture()` / `goToView()` / `setTheme()` / `captureThemePair()` /
+  `waitForText()` helpers. `captureThemePair()` is the dark-then-light-then-back-to-dark sequence
+  every paired view uses — see the client/console/superadmin drivers for the pattern.
 - `docs/screenshotter/apps/*.mjs` — one module per app, each exporting `run(page, baseUrl, capture)`.
+- `scripts/sync-site-screens.mjs` — copies the site-facing subset of `docs/img/` into
+  `site/assets/screens/` against an explicit, coverage-checked manifest (see "Syncing into the
+  site" above).
 
 ## Note on the UI redesign in flight
 

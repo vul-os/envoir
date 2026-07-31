@@ -206,3 +206,15 @@ export async function setTheme(page, theme, { toggleSelector = '#theme-toggle', 
   const got = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
   if (got !== theme) throw new Error(`theme toggle did not switch to "${theme}" (still "${got}")`);
 }
+
+// Captures the dark+light pair for one view in one call — the "goToView-ish, assert, capture,
+// toggle theme via the REAL toggle, assert again, capture, toggle back" sequence that used to be
+// hand-duplicated per view per app. `assert` is re-run for both shots (the DOM node/text it
+// checks for should be theme-independent). Leaves the app back in dark theme afterwards so
+// callers can keep chaining captures without re-deriving the current theme.
+export async function captureThemePair(page, capture, baseName, { assert, toggleSelector = '#theme-toggle' } = {}) {
+  await capture(`${baseName}-dark.png`, { assert });
+  await setTheme(page, 'light', { toggleSelector });
+  await capture(`${baseName}-light.png`, { assert });
+  await setTheme(page, 'dark', { toggleSelector });
+}
