@@ -20,8 +20,8 @@
   var rafId = null;
   var lastTime = 0;
 
-  var ACCENT_1 = [91, 157, 255];   // #5B9DFF
-  var ACCENT_2 = [124, 92, 255];   // #7C5CFF
+  var ACCENT_1 = [76, 77, 255];    // #4C4DFF — indigo (client/css/app.css --indigo)
+  var ACCENT_2 = [154, 77, 255];   // #9A4DFF — violet (client/css/app.css --violet)
 
   function lerpColor(a, b, t) {
     return [

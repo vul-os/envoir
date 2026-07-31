@@ -33,6 +33,32 @@
     });
   }
 
+  /* ---------------- theme-aware screenshots ----------------
+   * Every product screenshot is wrapped in <picture data-shot data-dark="..."
+   * data-light="...">, with a <source media="(prefers-color-scheme: dark)">
+   * for the pre-JS / no-JS paint (follows the OS theme) and a light-theme
+   * <img> as the safe fallback. Once this runs, it overrides that in BOTH
+   * directions to track the page's own toggle (data-theme), same as the
+   * app itself does — a visitor who flips the site to light shouldn't see
+   * dark-mode screenshots, and vice versa, regardless of their OS setting. */
+  function initThemeShots() {
+    var pics = document.querySelectorAll("picture[data-shot]");
+    if (!pics.length) return;
+
+    function apply() {
+      var dark = root.getAttribute("data-theme") !== "light";
+      pics.forEach(function (pic) {
+        var img = pic.querySelector("img");
+        if (!img) return;
+        var wanted = dark ? pic.getAttribute("data-dark") : pic.getAttribute("data-light");
+        if (wanted && img.getAttribute("src") !== wanted) img.setAttribute("src", wanted);
+      });
+    }
+
+    apply();
+    window.addEventListener("envoir:theme-changed", apply);
+  }
+
   /* ---------------- scroll reveals ---------------- */
   function initReveals() {
     var items = document.querySelectorAll(".reveal");
@@ -273,6 +299,7 @@
 
   function init() {
     initTheme();
+    initThemeShots();
     initReveals();
     initAddress();
     initNavLinks();
