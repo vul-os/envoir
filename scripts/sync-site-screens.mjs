@@ -25,8 +25,19 @@
 // This guard has been mutation-tested per the repo's standing rule that a guard you only read is
 // not a guard: deleting an expected file and re-running this script must fail loudly and
 // non-zero, not print PASS. See the commit that introduced this file for the paste of both runs.
+//
+// Page-weight step (site/ landing wave, 2026-07-31): docs/img/ shots come straight off a
+// 2880x1800 Retina capture (~450-950 KB each, ~19 MB for the site-facing subset alone) — too
+// heavy for a marketing page. Every file this script lands in site/assets/screens/ is
+// downsized (max 1800px wide, never upscaled) and palette-quantized to 256 colours (PNG8 —
+// these are flat UI screenshots, not photos; verified visually with no banding at that depth)
+// via `magick`. If `magick` isn't on PATH, falls back to `sips -Z` (resize only, no palette
+// step — bigger files, but still bounded) so this never hard-fails a machine without
+// ImageMagick. Filenames and the coverage guard above are untouched by this — same names, same
+// count, just lighter bytes.
 
-import { readdirSync, existsSync, copyFileSync, mkdirSync, rmSync } from 'node:fs';
+import { readdirSync, existsSync, copyFileSync, mkdirSync, rmSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -34,6 +45,23 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
 const SRC = join(REPO_ROOT, 'docs', 'img');
 const DEST = join(REPO_ROOT, 'site', 'assets', 'screens');
+
+const MAX_WIDTH = 1800; // plenty for a 2x-retina-looking page shot at the widths this site uses
+
+function optimizeImage(path) {
+  try {
+    execFileSync('magick', [path, '-resize', `${MAX_WIDTH}x>`, '-strip', '-colors', '256', `PNG8:${path}`], { stdio: 'ignore' });
+    return 'magick';
+  } catch (e) {
+    try {
+      execFileSync('sips', ['-Z', String(MAX_WIDTH), path], { stdio: 'ignore' });
+      return 'sips';
+    } catch (e2) {
+      console.error(`sync-site-screens: WARNING — neither magick nor sips could run on ${path}; shipping the full-size, unoptimized copy.`);
+      return null;
+    }
+  }
+}
 
 // ---- manifest -----------------------------------------------------------------------------
 // One entry per view. `pair: true` entries expect BOTH `${base}-dark.png` and `${base}-light.png`
@@ -119,7 +147,17 @@ function main() {
   // Wipe and rewrite DEST every run so it can never silently drift from MANIFEST above.
   rmSync(DEST, { recursive: true, force: true });
   mkdirSync(DEST, { recursive: true });
-  for (const { src, destName } of expected) copyFileSync(src, join(DEST, destName));
+  let bytesBefore = 0, bytesAfter = 0, magickCount = 0, sipsCount = 0, unoptimizedCount = 0;
+  for (const { src, destName } of expected) {
+    const destPath = join(DEST, destName);
+    copyFileSync(src, destPath);
+    bytesBefore += statSync(destPath).size;
+    const via = optimizeImage(destPath);
+    if (via === 'magick') magickCount++;
+    else if (via === 'sips') sipsCount++;
+    else unoptimizedCount++;
+    bytesAfter += statSync(destPath).size;
+  }
 
   // Coverage-count assertion, re-derived from the filesystem (not the in-memory `expected` array)
   // so a copy that silently no-oped can't slip through: what landed must exactly equal what was
@@ -141,9 +179,14 @@ function main() {
 
   const pairedCount = MANIFEST.filter((e) => e.pair).length;
   const unpairedCount = MANIFEST.filter((e) => !e.pair).length;
+  const mb = (n) => (n / (1024 * 1024)).toFixed(1);
   console.log(
     `sync-site-screens: OK — ${landed.length} file(s) synced into site/assets/screens/ ` +
     `(${pairedCount} paired view(s) × 2 themes, ${unpairedCount} intentionally-unpaired dark-only shot(s)).`,
+  );
+  console.log(
+    `sync-site-screens: optimized ${magickCount} via magick, ${sipsCount} via sips fallback, ` +
+    `${unoptimizedCount} unoptimized — ${mb(bytesBefore)} MB -> ${mb(bytesAfter)} MB.`,
   );
 }
 
