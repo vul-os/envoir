@@ -82,11 +82,11 @@ space. A node with no legacy correspondents never needs this at all:
 ENVOIR_GATEWAY_BIN=/path/to/ephor-gateway cargo run -p envoir-node -- gateway run
 ```
 
-See [`node/tests/gateway_dispatch.rs`](../node/tests/gateway_dispatch.rs) for exactly what this
+See [Running the gateway](features/running-the-gateway.md) for the full build/configure/run
+walkthrough (IMAP/POP3/submission ports, DKIM delegation, anti-spam, the SSRF guard), and
+[`node/tests/gateway_dispatch.rs`](../node/tests/gateway_dispatch.rs) for exactly what this
 handoff does and does not guarantee today (it fails closed with a clear error when no such binary
-is reachable), and the Ephor repo's own README for the gateway's own configuration — inbound MX
-listener, DKIM/attestation selector, STARTTLS, DNS-based MX/MTA-STS resolution — none of which
-lives in this repository anymore.
+is reachable).
 
 ## Open the web client
 
@@ -134,6 +134,10 @@ cd fuzz   && cargo +nightly fuzz run envelope -- -max_total_time=5
 
 ## Where to go next
 
+- [Your identity & safety numbers](features/identity.md) — create your identity in the web client
+  and see what "your key is your identity" looks like in practice.
+- [Mail](features/mail.md), [Compose & send](features/compose.md), and the rest of
+  [Using Envoir](overview.md#map-of-the-docs) for day-to-day walkthroughs.
 - [Architecture](architecture.md) for how the pieces fit together.
 - [Protocol](protocol.md) for what DMTAP actually specifies.
 - [Roadmap](roadmap.md) for an honest read on what's implemented vs. stubbed.

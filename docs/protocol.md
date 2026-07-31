@@ -146,7 +146,7 @@ operators. None of this is a cryptocurrency — see the
 DMTAP is deployed self-hosted (free, unrestricted) or via a hosted operator that implements the
 **operator seam** (spec §12, [`crates/dmtap-seam`](../crates/dmtap-seam)) for billing and
 multi-tenant management. The inviolable rule: privacy, cryptography, and recovery are never
-behind that seam. See [architecture.md](architecture.md#where-an-operators-billing-sits).
+behind that seam. See [architecture.md](architecture.md#where-a-third-party-operators-tooling-sits).
 
 ## Conformance levels
 
