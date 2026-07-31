@@ -1,8 +1,22 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+// Resolve the theme BEFORE first paint: an explicit stored choice wins, otherwise the
+// visitor's OS preference. This stylesheet has no prefers-color-scheme block — every
+// theme value hangs off :root[data-theme] — so without this the page would paint in
+// whatever <html> hardcoded and only correct itself once main.js ran.
+// <html> deliberately carries NO data-theme now; it used to hardcode "dark", which is
+// what forced a light-preferring visitor into dark on every first visit.
+try {
+  var s = localStorage.getItem('envoir-theme');
+  var t = (s === 'light' || s === 'dark') ? s
+        : (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  document.documentElement.setAttribute('data-theme', t);
+} catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+</script>
 <title>Envoir — sovereign mail, chat &amp; files on one key</title>
 <meta name="description" content="Envoir is the open-source reference of DMTAP: mail, chat, files and login on one keypair identity, held by a node you run, designed to move through a mesh and mixnet that hides who talks to whom. No crypto, no token — an open protocol with a legacy-email bridge.">
   <link rel="canonical" href="https://vulos.org/projects/envoir/">

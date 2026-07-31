@@ -23,12 +23,36 @@
     try { window.dispatchEvent(new Event("envoir:theme-changed")); } catch (e) { /* older browsers */ }
   }
 
+  function stored() {
+    try {
+      var v = localStorage.getItem(STORAGE_KEY);
+      return v === "light" || v === "dark" ? v : null;
+    } catch (e) { return null; }   // storage disabled (private mode, blocked cookies)
+  }
+
+  function systemTheme() {
+    try {
+      return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    } catch (e) { return "dark"; }
+  }
+
   function initTheme() {
-    var saved = null;
-    try { saved = localStorage.getItem(STORAGE_KEY); } catch (e) { /* storage disabled */ }
-    // dark is the deliberate primary; only a returning visitor's explicit
-    // choice moves it to light.
-    applyTheme(saved === "light" ? "light" : "dark");
+    // The visitor's OS preference is the default; an explicit toggle overrides it and
+    // persists. (This page used to force dark on every first visit and only honour a
+    // stored "light" — so someone whose system is set to light was shown dark and had
+    // to opt back in to their own setting. The stylesheet has no prefers-color-scheme
+    // block, all theming hangs off data-theme, so this resolution has to happen here
+    // and in the inline head script that runs before first paint.)
+    applyTheme(stored() || systemTheme());
+
+    // Keep following the system while there is no explicit choice, so a visitor who
+    // flips their OS theme with the page open sees it change.
+    try {
+      var mq = window.matchMedia("(prefers-color-scheme: light)");
+      var onChange = function () { if (!stored()) applyTheme(systemTheme()); };
+      if (mq.addEventListener) mq.addEventListener("change", onChange);
+      else if (mq.addListener) mq.addListener(onChange);   // Safari < 14
+    } catch (e) { /* matchMedia unavailable */ }
 
     var toggle = document.getElementById("theme-toggle");
     if (!toggle) return;

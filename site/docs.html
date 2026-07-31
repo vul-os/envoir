@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -29,7 +29,14 @@
 <script>
 // Match the theme the visitor already chose on the landing page (same "envoir-theme" key,
 // same data-theme attribute) so navigating in from index.html never flashes the wrong theme.
-try { var t = localStorage.getItem('envoir-theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+// With NO stored choice, follow the visitor's OS preference — this used to fall through to
+// whatever <html> hardcoded ("dark"), so a light-preferring visitor was shown dark.
+try {
+  var s = localStorage.getItem('envoir-theme');
+  var t = (s === 'light' || s === 'dark') ? s
+        : (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  document.documentElement.setAttribute('data-theme', t);
+} catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
 </script>
 
 <!-- SOVEREIGNTY: zero network requests. marked, mermaid, and highlight.js are vendored locally -->
@@ -432,10 +439,25 @@ function applyTheme(theme){
   document.documentElement.setAttribute('data-theme', theme);
   try { window.dispatchEvent(new Event('envoir:theme-changed')); } catch(e){}
 }
+function storedTheme(){
+  try { const v = localStorage.getItem(THEME_KEY); return (v === 'light' || v === 'dark') ? v : null; }
+  catch(e){ return null; }
+}
+function systemTheme(){
+  try { return matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; }
+  catch(e){ return 'dark'; }
+}
 (function initTheme(){
-  let saved = null;
-  try { saved = localStorage.getItem(THEME_KEY); } catch(e){}
-  applyTheme(saved === 'light' ? 'light' : 'dark');
+  // Explicit choice wins; otherwise follow the OS. (The head script already resolved this
+  // before paint — re-running it here keeps the toggle's aria state in sync.)
+  applyTheme(storedTheme() || systemTheme());
+  // Keep following the system while the visitor has made no explicit choice.
+  try {
+    const mq = matchMedia('(prefers-color-scheme: light)');
+    const onChange = () => { if (!storedTheme()) applyTheme(systemTheme()); };
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else if (mq.addListener) mq.addListener(onChange);
+  } catch(e){}
   document.getElementById('theme-toggle').addEventListener('click', () => {
     const next = isDark() ? 'light' : 'dark';
     applyTheme(next);
