@@ -5,7 +5,7 @@
 Envoir ships exactly one piece of software: the **node**. Everything else in this repository —
 the web client, the admin consoles, the status page — is a client of it. A second, optional piece,
 the **gateway**, exists but no longer lives in this repository at all — it moved permanently to
-the separate **[Ephor broker repo](https://github.com/vul-os/ephor)**, and the node only keeps a
+the separate **[Pier broker repo](https://github.com/vul-os/pier)**, and the node only keeps a
 thin dispatch shim that hands off to an externally-built gateway binary as a genuinely separate OS
 process (see [features/self-hosting.md](#self-hosting)).
 
@@ -34,7 +34,7 @@ flowchart LR
     end
 
     subgraph Legacy["Legacy email — optional"]
-        Gateway["Ephor repo (github.com/vul-os/ephor)<br/>separate repo/process, the one thing that speaks SMTP"]
+        Gateway["Pier repo (github.com/vul-os/pier)<br/>separate repo/process, the one thing that speaks SMTP"]
         SMTP["SMTP / the existing internet"]
     end
 
@@ -75,9 +75,9 @@ A node MAY additionally run in **relay mode** (helping NAT'd peers reach each ot
 public address) or **mix mode** (be a mixnet hop). These are capabilities of the same binary, not
 separate programs — see [`node/README.md`](https://github.com/vul-os/envoir/blob/main/node/README.md).
 
-## The gateway — external, in the Ephor repo (optional)
+## The gateway — external, in the Pier repo (optional)
 
-Not part of this workspace: built from [`github.com/vul-os/ephor`](https://github.com/vul-os/ephor)
+Not part of this workspace: built from [`github.com/vul-os/pier`](https://github.com/vul-os/pier)
 as its `gateway` coordinator kind, with zero crate dependency on `envoir` in either direction. It's
 the **only** component that speaks SMTP, and the only one that is not content-blind (the legacy leg
 is unavoidably plaintext). It:

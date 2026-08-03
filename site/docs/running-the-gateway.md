@@ -16,15 +16,15 @@ invokes `ENVOIR_GATEWAY_BIN`, and the option is there whenever you need it.
 ## Building and running it
 
 The gateway is **not part of this workspace** — it ships from the separate
-**[Ephor broker repo](https://github.com/vul-os/ephor)** as `cargo build -p gateway` there,
-binary name `ephor-gateway`, run as a genuinely separate OS process, never linked into the node's
+**[Pier broker repo](https://github.com/vul-os/pier)** as `cargo build -p pier-gateway` there,
+binary name `pier-gateway`, run as a genuinely separate OS process, never linked into the node's
 own address space:
 
 ```sh
-# in the Ephor repo
-cargo build -p gateway
+# in the Pier repo
+cargo build -p pier-gateway
 GATEWAY_IMAP_ENABLE=1 GATEWAY_POP3_ENABLE=1 GATEWAY_SUBMISSION_ENABLE=1 \
-  cargo run -p gateway -- run
+  cargo run -p pier-gateway -- run
 ```
 
 This runs real IMAP (`:1143`), POP3 (`:1110`), and SMTP-submission (`:1587`) servers by default,
@@ -33,14 +33,14 @@ plus the inbound MX listener that actually receives legacy mail for your domain.
 Point `envoir-node`'s dispatch shim at the resulting binary:
 
 ```sh
-ENVOIR_GATEWAY_BIN=/path/to/ephor-gateway cargo run -p envoir-node -- gateway run
+ENVOIR_GATEWAY_BIN=/path/to/pier-gateway cargo run -p envoir-node -- gateway run
 ```
 
 `envoir-node` keeps only a thin dispatch shim (`envoir-node gateway <args>` / `--gateway <args>`)
 that `exec`s the externally-built binary — see
 [`node/tests/gateway_dispatch.rs`](https://github.com/vul-os/envoir/blob/main/node/tests/gateway_dispatch.rs) for exactly what that
 handoff does and does not guarantee (it fails closed with a clear error when no such binary is
-reachable), and the Ephor repo's own README for the gateway's full configuration — inbound MX
+reachable), and the Pier repo's own README for the gateway's full configuration — inbound MX
 listener, DKIM/attestation selector, STARTTLS, DNS-based MX/MTA-STS resolution — none of which
 lives in this repository anymore.
 
@@ -85,7 +85,7 @@ key by challenge–response.
 
 ## Fail-closed SSRF guard
 
-As last measured before the gateway moved to the Ephor repo: outbound MX/MTA-STS resolution
+As last measured before the gateway moved to the Pier repo: outbound MX/MTA-STS resolution
 refuses to connect to a destination that resolves only to a loopback, private, link-local, or
 cloud-metadata address (including an IPv4-mapped IPv6 address judged by its embedded v4 form) —
 otherwise a legacy sender could aim the gateway at the operator's own internal network. An

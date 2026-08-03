@@ -4,7 +4,7 @@
 
 This walks through building the workspace and running the real, working pieces: the reference
 node's delivery engine and daemon, and the web client. The legacy gateway is **not part of this
-workspace** — it moved to the separate, permanent **[Ephor broker repo](https://github.com/vul-os/ephor)**
+workspace** — it moved to the separate, permanent **[Pier broker repo](https://github.com/vul-os/pier)**
 (the `gateway` coordinator kind); see the root [README's gateway section](https://github.com/vul-os/envoir/blob/main/README.md#node-binary-and-the-gateway-optional-external)
 for how `envoir-node` hands off to a binary built from there. Every command below is copied from
 the actual CLI entry points (`node/src/main.rs`) — nothing aspirational.
@@ -28,7 +28,7 @@ The workspace ([`Cargo.toml`](https://github.com/vul-os/envoir/blob/main/Cargo.t
 see the manifest's own comment for why). The substrate — what used to be the in-tree `dmtap-core`/
 `dmtap-mail` crates — is now a tag-pinned git dependency on
 [vul-os/kotva](https://github.com/vul-os/kotva); the legacy gateway isn't a member at all anymore,
-having moved to the separate [Ephor repo](https://github.com/vul-os/ephor).
+having moved to the separate [Pier repo](https://github.com/vul-os/pier).
 
 ## Run the node
 
@@ -67,7 +67,7 @@ cargo run -p envoir-node -- run    # the daemon; Ctrl-C to stop
 ```
 
 Legacy IMAP/POP3/SMTP-submission clients aren't served by the node — only a separate gateway
-binary, built from the external [Ephor repo](https://github.com/vul-os/ephor), speaks those
+binary, built from the external [Pier repo](https://github.com/vul-os/pier), speaks those
 protocols (see below). The node's own client-sync surface is
 JMAP, opt-in via `ENVOIR_JMAP=1` (see [`node/src/config.rs`](https://github.com/vul-os/envoir/blob/main/node/src/config.rs) for the full
 `ENVOIR_*` environment reference).
@@ -75,13 +75,13 @@ JMAP, opt-in via `ENVOIR_JMAP=1` (see [`node/src/config.rs`](https://github.com/
 ## Run the gateway (optional, external)
 
 The legacy SMTP/IMAP/POP3 bridge is **not part of this workspace** — it ships from the separate
-**[Ephor broker repo](https://github.com/vul-os/ephor)** (`cargo build -p gateway` there, binary
-name `ephor-gateway`) as a genuinely separate OS process, never linked into the node's own address
+**[Pier broker repo](https://github.com/vul-os/pier)** (`cargo build -p pier-gateway` there, binary
+name `pier-gateway`) as a genuinely separate OS process, never linked into the node's own address
 space. A node with no legacy correspondents never needs this at all:
 
 ```sh
-# build the gateway from the Ephor repo, then point the node's dispatch shim at it
-ENVOIR_GATEWAY_BIN=/path/to/ephor-gateway cargo run -p envoir-node -- gateway run
+# build the gateway from the Pier repo, then point the node's dispatch shim at it
+ENVOIR_GATEWAY_BIN=/path/to/pier-gateway cargo run -p envoir-node -- gateway run
 ```
 
 See [Running the gateway](#running-the-gateway) for the full build/configure/run
@@ -124,7 +124,7 @@ cargo test -p integration           # cross-component adversarial + end-to-end t
 # dmtap-core / dmtap-mail (canonical CBOR, conformance vectors, IMAP/POP3/SMTP/JMAP protocol core)
 # are consumed as a tag-pinned git dependency now — `cargo test -p dmtap-core` no longer resolves
 # from this workspace; their own test suites live in github.com/vul-os/kotva.
-# The legacy gateway's tests moved with it to github.com/vul-os/ephor (`cargo test -p gateway` there).
+# The legacy gateway's tests moved with it to github.com/vul-os/pier (`cargo test -p pier-gateway` there).
 ```
 
 Formal verification and fuzzing need extra tooling and are covered in [security.md](#security):

@@ -1,4 +1,4 @@
-// no-broker-dep:allow-file: doc comment notes `envoir-gateway` moved out to the Ephor broker repo,
+// no-broker-dep:allow-file: doc comment notes `envoir-gateway` moved out to the Pier broker repo,
 // taking its own gateway-composing integration tests with it -- an
 // exclusion, not a dependency.
 
@@ -7,7 +7,7 @@
 //! This crate has no library surface of its own — it exists to host end-to-end tests under
 //! `tests/` that compose the **real** crates (`envoir-node`, `dmtap-mail`, `dmtap-core`) with no
 //! mocks between components. envoir is now node-only: the legacy SMTP/IMAP/POP3 gateway (spec §7,
-//! `envoir-gateway`) moved out to the Ephor broker repo, taking its own gateway-composing
+//! `envoir-gateway`) moved out to the Pier broker repo, taking its own gateway-composing
 //! integration coverage (formerly `legacy_to_dmtap.rs`, `full_roundtrip.rs`, `gateway_provenance.rs`,
 //! `gateway_authz_antispam.rs`) with it. What remains here is everything that exercises this
 //! repo's own node/mesh/naming/deniable/MLS stack. See the individual test files:

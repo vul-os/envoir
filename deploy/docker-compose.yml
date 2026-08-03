@@ -1,6 +1,6 @@
 # no-broker-dep:allow-file: comments explain the gateway service moved permanently out of this
-# repository to the separate, external Ephor broker repo -- no service in
-# this compose file runs or depends on ephor.
+# repository to the separate, external Pier broker repo -- no service in
+# this compose file runs or depends on pier.
 
 # Envoir self-host stack: the node (reference client — identity/mesh/mail-projection scaffold;
 # NOT yet a production mail server). Read deploy/README.md before deploying this anywhere but a
@@ -8,9 +8,9 @@
 # hardened self-host infrastructure.
 #
 # The legacy SMTP/IMAP/POP3 gateway is NOT built or run by this compose stack — it moved
-# permanently out of this repository to the separate, external Ephor broker repo
-# (https://github.com/vul-os/ephor, its `gateway` coordinator kind). If you want one, build
-# `ephor-gateway` from that repo and run it as its own process/container, then point this node
+# permanently out of this repository to the separate, external Pier broker repo
+# (https://github.com/vul-os/pier, its `gateway` coordinator kind). If you want one, build
+# `pier-gateway` from that repo and run it as its own process/container, then point this node
 # at it with ENVOIR_GATEWAY_BIN — see deploy/README.md.
 #
 # Build context is `..` (the repo root) because the node binary lives in the shared Cargo
@@ -52,10 +52,10 @@ services:
     image: envoir-node:local
     environment:
       - ENVOIR_DATA_DIR=/data
-      # Uncomment and point at a gateway binary built from the separate Ephor repo, mounted or
+      # Uncomment and point at a gateway binary built from the separate Pier repo, mounted or
       # otherwise reachable inside this container, if you want the node's `gateway`/`--gateway`
       # dispatch shim to hand off to one:
-      # - ENVOIR_GATEWAY_BIN=/path/to/ephor-gateway
+      # - ENVOIR_GATEWAY_BIN=/path/to/pier-gateway
     ports:
       - "${NODE_MESH_PORT:-4600}:4600" # the mesh transport (ENVOIR_NODE_BIND)
     volumes:

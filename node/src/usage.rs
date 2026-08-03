@@ -1,4 +1,4 @@
-// no-broker-dep:allow-file: doc comment notes the one role that remains (Ephor) bills nothing and
+// no-broker-dep:allow-file: doc comment notes the one role that remains (Pier) bills nothing and
 // nothing here is wired to a bridge -- states the ABSENCE of a dependency.
 
 //! Hosted-node **storage** seam — the node side of the operator seam (spec §12.2, §12.3, §12.4).
@@ -20,7 +20,7 @@
 //!
 //! **No such meter exists in this suite today.** The hosted control plane these counters were
 //! originally shaped for (envoir-cloud) no longer exists, and reachability — the only operator
-//! role that remains — is Ephor, which bills nothing. So nothing here is wired to a bridge, and
+//! role that remains — is Pier, which bills nothing. So nothing here is wired to a bridge, and
 //! nothing should be: these are LOCAL counters a node keeps about itself.
 //!
 //! The contract below is written down anyway, because the failure it prevents is expensive and

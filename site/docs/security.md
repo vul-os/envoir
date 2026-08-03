@@ -147,12 +147,12 @@ directly:
   built without persistence) — a restarted node reloads the same anti-rollback/anti-abuse state
   rather than starting over at a weaker baseline an attacker could force by causing a crash.
 - **The gateway fails closed against SSRF.** As last measured before the gateway moved
-  permanently out of this repository to the separate [Ephor broker repo](https://github.com/vul-os/ephor):
+  permanently out of this repository to the separate [Pier broker repo](https://github.com/vul-os/pier):
   its outbound MX/MTA-STS resolution refuses to connect to a destination that resolves only to a
   loopback, private, link-local, or cloud-metadata address (including an IPv4-mapped IPv6 address
   judged by its embedded v4 form) — otherwise a legacy sender could aim the gateway at the
   operator's own internal network. An explicitly configured pinned address is the one deliberate,
-  documented exemption. Current status lives in the Ephor repo, not here.
+  documented exemption. Current status lives in the Pier repo, not here.
 
 ## The mixnet anonymity simulator
 

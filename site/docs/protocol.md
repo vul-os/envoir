@@ -106,7 +106,7 @@ for the full model and
 [features/transport-traceability.md](#transport-traceability) for how a recipient can
 verify a message actually crossed a gateway (and thus why it's billed). The gateway does not live
 in this repository — it already moved permanently to the separate
-**[Ephor broker repo](https://github.com/vul-os/ephor)** (its `gateway` coordinator kind), with
+**[Pier broker repo](https://github.com/vul-os/pier)** (its `gateway` coordinator kind), with
 zero crate dependency on `envoir` in either direction.
 
 ## Client access

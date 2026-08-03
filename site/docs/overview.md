@@ -90,7 +90,7 @@ then how it all works, then the operator-grade advanced material at the bottom:
 | `formal/`, `fuzz/`, `integration/` | ProVerif symbolic models, wire-decoder fuzzing, adversarial cross-component tests |
 
 **Not in this repository:** the legacy-mail gateway — it moved permanently to
-[`github.com/vul-os/ephor`](https://github.com/vul-os/ephor) as its `gateway` coordinator kind —
+[`github.com/vul-os/pier`](https://github.com/vul-os/pier) as its `gateway` coordinator kind —
 and `crates/dmtap-core`/`crates/dmtap-mail`, now `kotva-core`/`kotva-mail` in the sibling
 **vul-os/kotva** repo, consumed here as a tag-pinned git dependency.
 

@@ -1,5 +1,5 @@
 <!-- no-broker-dep:allow-file: deploy docs explain the gateway moved permanently to the separate,
-     external Ephor broker repo, with build instructions for that OTHER repo
+     external Pier broker repo, with build instructions for that OTHER repo
      -- describes an external, optional component, not a dependency of this one. -->
 
 # Self-hosting Envoir
@@ -10,9 +10,9 @@ Message Transfer & Access Protocol, KOTVA's mail profile) — a Dockerfile, a `d
 an env-var reference, and a one-command wrapper script.
 
 **The legacy SMTP/IMAP/POP3 gateway is not part of this workspace or this scaffold.** It moved
-permanently to the separate, external **[Ephor broker repo](https://github.com/vul-os/ephor)**
+permanently to the separate, external **[Pier broker repo](https://github.com/vul-os/pier)**
 (its `gateway` coordinator kind), with zero crate dependency on `envoir` in either direction. If
-you correspond with the legacy email world, build `ephor-gateway` from that repo, run it as its
+you correspond with the legacy email world, build `pier-gateway` from that repo, run it as its
 own process (a container of your own, a bare-metal service, whatever you prefer), and point this
 node's dispatch shim at the resulting binary with `ENVOIR_GATEWAY_BIN` — see "The gateway
 (external, optional)" below. A node with no legacy correspondents never needs to touch any of
@@ -110,13 +110,13 @@ full list with defaults, or `node/src/config.rs`'s own doc comment for the autho
 Legacy IMAP/POP3/SMTP-submission clients aren't served by the node, and this scaffold builds no
 gateway image. If you want to bridge to the legacy email world:
 
-1. Clone and build the gateway from the separate **[Ephor repo](https://github.com/vul-os/ephor)**
-   (`cargo build -p gateway` there, binary name `ephor-gateway`) — its own README documents its
+1. Clone and build the gateway from the separate **[Pier repo](https://github.com/vul-os/pier)**
+   (`cargo build -p pier-gateway` there, binary name `pier-gateway`) — its own README documents its
    `GATEWAY_*` environment variables (inbound MX listener, DKIM/attestation selector, STARTTLS,
    DNS-based MX/MTA-STS resolution), none of which live in this repository anymore.
 2. Run it as its own process — its own container, a bare-metal service, a separate VM — reachable
    from wherever you run `envoir-node`.
-3. Set `ENVOIR_GATEWAY_BIN=/path/to/ephor-gateway` and invoke `envoir-node gateway run` (or
+3. Set `ENVOIR_GATEWAY_BIN=/path/to/pier-gateway` and invoke `envoir-node gateway run` (or
    `envoir-node --gateway run`) to have the node's dispatch shim exec it.
 
 A node with no legacy correspondents never needs any of this. See the root
@@ -177,7 +177,7 @@ no CLI binary of its own. `envoir-node init` (and `record`) does print the recor
 formatted as the spec's TXT line (base64url `ik=`, per §3.9.1/§3.2), so you just copy it into your
 zone through your own DNS provider/registrar; there is no key-transparency (KT) log integration
 wired up either — see spec §3.5 for what a real KT log needs to provide. If you run a gateway
-(built from the separate Ephor repo), also publish a normal `MX` record for your domain pointing
+(built from the separate Pier repo), also publish a normal `MX` record for your domain pointing
 at wherever you forward inbound port 25 to that gateway, plus the SPF/DKIM-selector/DMARC records
 the spec's §7.3 assumes (a delegated DKIM selector, not your DMTAP key) — the gateway's own README
 documents its exact configuration.
@@ -193,7 +193,7 @@ documents its exact configuration.
 | Node client protocols | JMAP is native on the node (`ENVOIR_JMAP`, opt-in, app-password auth); legacy IMAP/POP3/SMTP-submission live only on an externally-built gateway (see above), never in this image |
 | Node mesh transport | The real libp2p mesh (`crates/dmtap-p2p`) is proven at the crate level but not yet the node daemon's default transport — see [`docs/roadmap.md`](../docs/roadmap.md) |
 | Mixnet | `node/src/onion.rs`'s Sphinx onion-wrap is a structural, keyed-BLAKE3 stand-in for the real mix cryptography — no live mix network runs; only the `fast` (direct) tier is real end-to-end today. See [`docs/roadmap.md`](../docs/roadmap.md). |
-| Gateway | Not part of this repo or this scaffold — build and run it from the separate [Ephor repo](https://github.com/vul-os/ephor) |
+| Gateway | Not part of this repo or this scaffold — build and run it from the separate [Pier repo](https://github.com/vul-os/pier) |
 | `_dmtap` DNS record | Generated correctly by `init`/`record`; publishing to your zone is still a manual/operator step, no KT log wired up |
 | Build reproducibility | Committed `Cargo.lock`, builder image pinned, the Dockerfile builds `--locked` |
 | Security review | None yet — pre-alpha |
@@ -202,6 +202,6 @@ documents its exact configuration.
 
 - Root project README: [`../README.md`](../README.md)
 - Node crate docs: [`../node/README.md`](../node/README.md)
-- Gateway (separate repo): [github.com/vul-os/ephor](https://github.com/vul-os/ephor)
+- Gateway (separate repo): [github.com/vul-os/pier](https://github.com/vul-os/pier)
 - Normative spec (sibling repo): [github.com/vul-os/kotva](https://github.com/vul-os/kotva) —
   naming/DNS is §3 (`03-naming.md`), the gateway is §7 (`07-gateway.md`)

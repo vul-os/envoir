@@ -1,14 +1,14 @@
 # no-broker-dep:allow-file: workspace root comments (legacy SS7 gateway) document that `envoir-gateway`
-# moved OUT of this repo permanently to the separate Ephor broker repo --
+# moved OUT of this repo permanently to the separate Pier broker repo --
 # an architectural history note, not a dependency; this workspace's own
-# cargo tree carries no ephor crate (verified: C-DEP rust examined 1029
+# cargo tree carries no pier crate (verified: C-DEP rust examined 1029
 # entries, zero hits).
 
 # Envoir OSS monorepo — Cargo workspace.
 # Reference implementation of the Decentralized Message Transfer & Access Protocol.
 # Fully open source, dual-licensed MIT OR Apache-2.0. Envoir is not a business and runs no
 # control plane: the node binary carries every mesh role. The optional legacy mail gateway has
-# MOVED OUT of this repo to the Ephor broker repo (github.com/vul-os/ephor, the `gateway`
+# MOVED OUT of this repo to the Pier broker repo (github.com/vul-os/pier, the `gateway`
 # coordinator kind); envoir is node-only. The node keeps only a thin dispatch shim
 # (`envoir-node --gateway`, see node/src/main.rs) that execs an externally-built gateway binary
 # via `ENVOIR_GATEWAY_BIN` — it no longer builds or contains the gateway. A third-party operator
@@ -50,7 +50,7 @@ exclude = ["crates/dmtap-postage-patala"]
 # is why this workspace's crates went ungated for so long — no CI runner has a patala sibling.
 # `default-members` narrows what gets BUILT; only `exclude` removes a crate from RESOLUTION.
 # SlipScan documented this same empirical finding independently (see its root Cargo.toml), and
-# ephor hit it too; three repos, one lesson.
+# pier hit it too; three repos, one lesson.
 #
 # Build the adapter on its own, which now needs the patala sibling present:
 #   cargo build --manifest-path crates/dmtap-postage-patala/Cargo.toml
@@ -77,7 +77,7 @@ default-members = [
 # DEPENDENCIES, never a path dep across repos (the isango churn lesson, owner directive #1). envoir
 # keeps its existing `use dmtap_core::…` / `use dmtap_mail::…` / `use dmtap_sync::…` source
 # unchanged via cargo's dependency-rename (`package = "kotva-core"` etc). The legacy mail gateway
-# moved to the Ephor broker repo (the `gateway` coordinator kind); envoir is now node-only.
+# moved to the Pier broker repo (the `gateway` coordinator kind); envoir is now node-only.
 #
 # THE CONVERSION IS NOW FINISHED (2026-07-30): all three of `kotva-core`, `kotva-mail`, `kotva-sync`
 # are live on crates.io (0.2.0, 0.2.0, 0.1.0) and every workspace dep below resolves from the

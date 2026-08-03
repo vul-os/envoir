@@ -1,5 +1,5 @@
 # no-broker-dep:allow-file: comment clarifies the fuzz target is the alias codec, not the now
-# out-of-repo (moved to Ephor) legacy SMTP gateway crate -- a
+# out-of-repo (moved to Pier) legacy SMTP gateway crate -- a
 # disambiguating note, not a dependency.
 
 # cargo-fuzz project — NOT a member of the main `envoir` workspace (the `[workspace]` table
@@ -34,7 +34,7 @@ path = "../crates/dmtap-clustersync"
 # --- node key-derived gateway alias (§3.9, §7) — `envoir-node`'s library crate is named `dmtap`
 # (see `../node/Cargo.toml` `[lib]`); every existing consumer in this workspace (`integration`,
 # `dmtap-p2p`) imports it the same way, as `dmtap::...`. Note this is the node's OWN key-derived
-# alias codec (naming.rs), not the (now out-of-repo, moved to Ephor) legacy SMTP gateway crate.
+# alias codec (naming.rs), not the (now out-of-repo, moved to Pier) legacy SMTP gateway crate.
 [dependencies.envoir-node]
 path = "../node"
 

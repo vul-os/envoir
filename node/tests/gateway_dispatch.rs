@@ -1,6 +1,6 @@
 // no-broker-dep:allow-file: an #[ignore]'d test's doc comment explains the POP3 bridge moved out to
-// the Ephor broker repo (this crate is node-only) and needs
-// ENVOIR_GATEWAY_BIN pointed at an external Ephor checkout to exercise --
+// the Pier broker repo (this crate is node-only) and needs
+// ENVOIR_GATEWAY_BIN pointed at an external Pier checkout to exercise --
 // an optional, external, ignored-by-default test path, not a dependency.
 
 //! Proves the `envoir-node gateway` / `--gateway` privilege-separation seam actually launches the
@@ -9,11 +9,11 @@
 //! mechanism and its `TODO(privsep)`.
 //!
 //! The `envoir-gateway` binary itself no longer lives in this workspace — the legacy SMTP/IMAP/
-//! POP3 bridge moved out to the Ephor broker repo (this repo is node-only). `cargo build
+//! POP3 bridge moved out to the Pier broker repo (this repo is node-only). `cargo build
 //! --workspace` here therefore never produces an `envoir-gateway` binary next to `envoir-node`,
 //! so the tests below that require a REAL sibling binary to exec are `#[ignore]`d (they still
 //! document and remain runnable against a locally-built `envoir-gateway`, e.g. via
-//! `ENVOIR_GATEWAY_BIN` pointed at an Ephor checkout's build output). The dispatch mechanism's
+//! `ENVOIR_GATEWAY_BIN` pointed at a Pier checkout's build output). The dispatch mechanism's
 //! own fail-closed behavior when NO gateway binary is reachable is still exercised unconditionally
 //! below (`missing_gateway_binary_fails_closed_with_a_clear_error_and_nonzero_exit`), since that
 //! property holds with zero dependency on the binary actually existing anywhere.
@@ -31,8 +31,8 @@ fn gateway_bin() -> PathBuf {
 }
 
 #[test]
-#[ignore = "requires a real envoir-gateway binary; that crate now lives in the Ephor repo, not \
-            this workspace — point ENVOIR_GATEWAY_BIN at an Ephor build to run this locally"]
+#[ignore = "requires a real envoir-gateway binary; that crate now lives in the Pier repo, not \
+            this workspace — point ENVOIR_GATEWAY_BIN at a Pier build to run this locally"]
 fn gateway_subcommand_execs_the_dedicated_gateway_binary() {
     let gw = gateway_bin();
     assert!(
@@ -61,8 +61,8 @@ fn gateway_subcommand_execs_the_dedicated_gateway_binary() {
 }
 
 #[test]
-#[ignore = "requires a real envoir-gateway binary; that crate now lives in the Ephor repo, not \
-            this workspace — point ENVOIR_GATEWAY_BIN at an Ephor build to run this locally"]
+#[ignore = "requires a real envoir-gateway binary; that crate now lives in the Pier repo, not \
+            this workspace — point ENVOIR_GATEWAY_BIN at a Pier build to run this locally"]
 fn dash_dash_gateway_flag_is_accepted_as_an_alias() {
     let output = Command::new(env!("CARGO_BIN_EXE_envoir-node"))
         .arg("--gateway")
@@ -74,8 +74,8 @@ fn dash_dash_gateway_flag_is_accepted_as_an_alias() {
 }
 
 #[test]
-#[ignore = "requires a real envoir-gateway binary; that crate now lives in the Ephor repo, not \
-            this workspace — point ENVOIR_GATEWAY_BIN at an Ephor build to run this locally"]
+#[ignore = "requires a real envoir-gateway binary; that crate now lives in the Pier repo, not \
+            this workspace — point ENVOIR_GATEWAY_BIN at a Pier build to run this locally"]
 fn gateway_dispatch_forwards_arguments_unchanged() {
     // `personal` with no config path argument is the gateway's own usage-error path — proving
     // argv[2..] reaches the gateway binary's own argument parser intact.
@@ -111,8 +111,8 @@ fn missing_gateway_binary_fails_closed_with_a_clear_error_and_nonzero_exit() {
 }
 
 #[test]
-#[ignore = "requires a real envoir-gateway binary; that crate now lives in the Ephor repo, not \
-            this workspace — point ENVOIR_GATEWAY_BIN at an Ephor build to run this locally"]
+#[ignore = "requires a real envoir-gateway binary; that crate now lives in the Pier repo, not \
+            this workspace — point ENVOIR_GATEWAY_BIN at a Pier build to run this locally"]
 fn envoir_gateway_bin_override_is_honored() {
     let real_gateway = gateway_bin();
     assert!(real_gateway.exists(), "envoir-gateway must be built for this test — run `cargo build --workspace`");

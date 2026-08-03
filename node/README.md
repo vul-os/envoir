@@ -1,5 +1,5 @@
 <!-- no-broker-dep:allow-file: README states the legacy gateway lives permanently in the separate
-     Ephor broker repo, never in this crate -- an exclusion, not a dependency. -->
+     Pier broker repo, never in this crate -- an exclusion, not a dependency. -->
 
 # envoir-node
 
@@ -15,7 +15,7 @@ specification (DMTAP is its mail profile). This crate is a **reference, not norm
 The node runs the libp2p **mesh**, the **Send API** (§13.5.1), and **JMAP** (§8.1) — JMAP is the
 node's native, and only, client surface. It does **not** run any legacy protocol server: the
 IMAP/POP3/SMTP-submission surfaces live **only on the gateway binary built from the separate
-[Ephor repo](https://github.com/vul-os/ephor)** (spec §7), never in this crate. There
+[Pier repo](https://github.com/vul-os/pier)** (spec §7), never in this crate. There
 are therefore no `ENVOIR_IMAP_PORT`/`ENVOIR_POP3_PORT`/`ENVOIR_SMTP_PORT`/`ENVOIR_MAIL_HOST` knobs
 on the node.
 

@@ -16,7 +16,7 @@ You will get an acknowledgement within **72 hours** and a status update at least
 - **Identity & key handling** — any path that leaks, mishandles or lets another party impersonate a keypair identity.
 - **Crypto** — flaws in the MLS/X3DH/HPKE usage, sealed-sender, or the mesh/mixnet metadata-privacy guarantees.
 - **Transport-path provenance** — claiming more anonymity than a tier provides.
-- **Legacy gateway** — leaks across the DMTAP↔SMTP boundary (built and reported against the separate [Ephor repo](https://github.com/vul-os/ephor), not this one).
+- **Legacy gateway** — leaks across the DMTAP↔SMTP boundary (built and reported against the separate [Pier repo](https://github.com/vul-os/pier), not this one).
 
 Out of scope: vulnerabilities requiring an already-compromised host, and issues in third-party services the operator configures.
 

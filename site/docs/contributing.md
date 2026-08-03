@@ -21,7 +21,7 @@ should generally start there, not in this repo's code.
   `dmtap-deniable`, `dmtap-clustersync`) carry a detailed capability/status table in their module
   docs or README. `dmtap-mail` (client-protocol servers) lives in the sibling
   [vul-os/kotva](https://github.com/vul-os/kotva) repo now, and the legacy gateway lives in the
-  separate [Ephor repo](https://github.com/vul-os/ephor) — neither is built from this workspace.
+  separate [Pier repo](https://github.com/vul-os/pier) — neither is built from this workspace.
 
 ## Building and testing
 

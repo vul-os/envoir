@@ -1,4 +1,4 @@
-// no-broker-dep:allow-file: test comment notes `envoir-gateway` moved out of this repo to the Ephor
+// no-broker-dep:allow-file: test comment notes `envoir-gateway` moved out of this repo to the Pier
 // broker repo -- documents an exclusion, not a dependency.
 
 //! `cargo test`-visible proof that the conformance-runner engine is green over the current
@@ -428,7 +428,7 @@ fn a_meaningful_share_of_construction_todo_cases_are_executed() {
          directly, plus more via dmtap-auth/dmtap-naming/dmtap-deniable/dmtap-mls/dmtap-clustersync \
          — see the Cargo.toml comment; this floor dropped from 77 to 65 when the 12 legacy-SMTP- \
          gateway cases (DMTAP-GWALIAS-*/DMTAP-GWATT-*/DMTAP-GWNAME-*/DMTAP-LEG-*) were removed \
-         along with `envoir-gateway`, which moved out of this repo to the Ephor broker repo), got \
+         along with `envoir-gateway`, which moved out of this repo to the Pier broker repo), got \
          {} ({executed:?}) — did construction::run_construction_case regress?",
         executed.len()
     );

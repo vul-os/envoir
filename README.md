@@ -45,11 +45,11 @@ never a coin.
 **This repository is node-only.** Two pieces that used to live here moved out, each for the same
 reason — a shared, single-owner implementation beats a copy forked into every consumer:
 
-- **The legacy-mail gateway** — the optional SMTP/IMAP/POP3 bridge — folded into the **[Ephor
-  broker repo](https://github.com/vul-os/ephor)** as its `gateway` coordinator kind: one
+- **The legacy-mail gateway** — the optional SMTP/IMAP/POP3 bridge — folded into the **[Pier
+  broker repo](https://github.com/vul-os/pier)** as its `gateway` coordinator kind: one
   accountable, swappable, self-hostable bridge shared by every project built on the same substrate,
   rather than a copy of gateway code duplicated per client. A node with no legacy correspondents
-  never needs it at all; one with legacy correspondents points at an Ephor-run gateway, or runs its
+  never needs it at all; one with legacy correspondents points at a Pier-run gateway, or runs its
   own from that repo. See [Node binary, and the gateway](#node-binary-and-the-gateway-optional-external)
   below.
 - **The substrate** — identity, the MOTE object, content addressing, canonical CBOR, delegated
@@ -87,7 +87,7 @@ phone width. See [Security & honesty](#security--honesty) for exactly what's rea
 Three-pane conversation view with folders, color labels, star/archive/snooze, scheduled send, undo
 send, and rich compose with signatures. Every message carries a **verified ✓** badge once you've
 checked its sender's safety number, and a clear **legacy-origin** marker when it arrived through a
-gateway (an optional Ephor-hosted bridge, not part of this repo — see below) rather than pure-mesh.
+gateway (an optional Pier-hosted bridge, not part of this repo — see below) rather than pure-mesh.
 
 <p align="center">
   <img src="docs/img/mail-dark.png#gh-dark-mode-only" width="860" alt="Mail — dark theme">
@@ -225,8 +225,8 @@ flowchart LR
         KT["domain directory +<br/>key transparency (dmtap-naming)"]
     end
 
-    subgraph Ephor["Ephor broker repo — separate project, optional"]
-        Gateway["gateway coordinator kind<br/>github.com/vul-os/ephor<br/>the one component that speaks SMTP"]
+    subgraph Pier["Pier broker repo — separate project, optional"]
+        Gateway["gateway coordinator kind<br/>github.com/vul-os/pier<br/>the one component that speaks SMTP"]
         SMTP["SMTP / the existing internet"]
     end
 
@@ -249,7 +249,7 @@ flowchart LR
 
 Nobody runs Envoir as a business, and there is no control plane. In **self-host** mode every
 `dmtap-seam` hook is unlimited/no-op, so the OSS stack is fully functional standalone. If a
-third-party **operator** runs a node (or an Ephor gateway) for other people, they can add quotas,
+third-party **operator** runs a node (or a Pier gateway) for other people, they can add quotas,
 usage accounting, and legacy-egress authorization at the `dmtap-seam` boundary — `dmtap-operator` is
 a working, non-commercial reference implementation of exactly that (see its crate docs) — without
 forking the protocol. Nothing behind that seam can ever gate privacy, cryptography, or recovery.
@@ -280,7 +280,7 @@ forking the protocol. Nothing behind that seam can ever gate privacy, cryptograp
 | [`integration/`](integration), [`fuzz/`](fuzz), [`formal/`](formal) | Cross-component + adversarial tests, wire-decoder fuzzing, ProVerif symbolic models |
 | [`brand/`](brand) | Logo marks, wordmark, and the Aurora Indigo design tokens |
 
-**No longer in this repository:** `gateway/` (now `github.com/vul-os/ephor`'s `gateway` coordinator
+**No longer in this repository:** `gateway/` (now `github.com/vul-os/pier`'s `gateway` coordinator
 kind) and `crates/dmtap-core` / `crates/dmtap-mail` (now `kotva-core` / `kotva-mail` in
 `github.com/vul-os/kotva`, consumed here as a tag-pinned git dependency — see
 [What is Envoir](#what-is-envoir) above).
@@ -294,12 +294,12 @@ runs inside it (spec §8.5, native-only).
 For backward compatibility, `envoir-node` still accepts a `gateway <args>` / `--gateway <args>`
 subcommand that hands off to a **separate, externally built gateway binary** as a genuinely separate
 OS process (`exec` on Unix), never linking gateway code into the node's own address space. That
-gateway binary is no longer built from this workspace — it now ships from the **[Ephor broker
-repo](https://github.com/vul-os/ephor)** (`cargo build -p gateway` there, binary name
-`ephor-gateway`). Point the node at it with `ENVOIR_GATEWAY_BIN=/path/to/ephor-gateway`; a node
+gateway binary is no longer built from this workspace — it now ships from the **[Pier broker
+repo](https://github.com/vul-os/pier)** (`cargo build -p pier-gateway` there, binary name
+`pier-gateway`). Point the node at it with `ENVOIR_GATEWAY_BIN=/path/to/pier-gateway`; a node
 with no legacy correspondents never needs to set this at all. See
 [`node/tests/gateway_dispatch.rs`](node/tests/gateway_dispatch.rs) for exactly what this dispatch
-shim does and does not guarantee today, and the Ephor repo's own README for running a gateway.
+shim does and does not guarantee today, and the Pier repo's own README for running a gateway.
 
 A gateway is not a privileged tier of node, and running one costs nothing to Envoir and requires no
 payment method anywhere. To run one, an operator needs a public, static IP with correct **reverse
@@ -324,8 +324,8 @@ cargo run -p envoir-node -- init   # once, to create a keystore
 cargo run -p envoir-node -- run
 
 # Optional: bridge to legacy SMTP by pointing the node's dispatch shim at a gateway binary built
-# from the separate Ephor repo (see "Node binary, and the gateway" above) — nothing to build here
-ENVOIR_GATEWAY_BIN=/path/to/ephor-gateway cargo run -p envoir-node -- gateway run
+# from the separate Pier repo (see "Node binary, and the gateway" above) — nothing to build here
+ENVOIR_GATEWAY_BIN=/path/to/pier-gateway cargo run -p envoir-node -- gateway run
 ```
 
 The web client needs no build step — no framework, no npm, no CDNs:
@@ -355,7 +355,7 @@ messaging, privacy, the legacy gateway, clients, anti-abuse, conformance and mor
 error codes (§21 plus the extension profiles that register their own), grounded against current
 standards, plus a compiled spec PDF. This repo is one
 implementation of that spec — the node — and no longer carries the gateway's own share of the
-catalog (the gateway, and its conformance coverage, moved to Ephor). Conformance is checked
+catalog (the gateway, and its conformance coverage, moved to Pier). Conformance is checked
 mechanically by [`crates/conformance-runner`](crates/conformance-runner) — see
 [Security & honesty](#security--honesty).
 
@@ -384,7 +384,7 @@ process/UX MUST with no bytes to recompute) and 162 are construction recipes thi
 build yet, most still awaiting triage. That remainder is a real gap, stated as one, not a rounding
 of "passing" upward. One category, **Legacy** (44 cases, the gateway's own share of the catalog),
 now executes **zero** cases from this repo *by design*: gateway logic — and the harness that proves
-it — moved to the Ephor repo along with the gateway itself, so this repo's honest number for that
+it — moved to the Pier repo along with the gateway itself, so this repo's honest number for that
 category is genuinely zero, not a skip waiting to be filled in here. Alongside the catalog run,
 `conformance-runner`'s own `vectors.json` passes all 87 of its generated wire/pub/pubsub vectors,
 and a further 24 sync-substrate vectors pass against the shared CRDT algebra. The node's
@@ -397,14 +397,14 @@ production deployment. Treat everything here as pre-alpha.
 from the open internet and runs the corresponding parsers — historically the most exploited code in
 mail — so it must never run in a process that holds, or could ever load, this node's `IK`, device
 keys, or MOTE store. That is now enforced by the strongest possible construction: the gateway isn't
-just a separate binary, it's a **separate repository** (`github.com/vul-os/ephor`) with zero crate
+just a separate binary, it's a **separate repository** (`github.com/vul-os/pier`) with zero crate
 dependency on this one in either direction, so `envoir-node` cannot contain gateway parser code in
 its address space even in principle. The node's own `gateway`/`--gateway` dispatch shim
 ([`node/src/main.rs`](node/src/main.rs)) still hands off to whatever gateway binary
 `ENVOIR_GATEWAY_BIN` points at as a genuinely separate OS process (`exec` on Unix, replacing the
 process image outright), and fails closed with a clear error when no such binary is reachable — see
 [`node/tests/gateway_dispatch.rs`](node/tests/gateway_dispatch.rs). Wiring that shim up to a real
-Ephor-built gateway today is a manual step (build the Ephor binary, point
+Pier-built gateway today is a manual step (build the Pier binary, point
 `ENVOIR_GATEWAY_BIN` at it); it is not yet a zero-configuration `cargo build --workspace` experience
 the way the in-tree gateway once was, and is tracked as follow-up rather than claimed as done.
 

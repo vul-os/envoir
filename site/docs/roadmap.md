@@ -46,13 +46,13 @@ the spec's own roadmap markers, it doesn't belong here.
   SORT/THREAD, BINARY), POP3, SMTP-submission, and JMAP Core/Mail servers, plus autodiscovery
   (Thunderbird, Apple, Microsoft); the legacy-protocol front-ends (IMAP/POP3/SMTP-submission) are
   served by the gateway binary built from the separate
-  [Ephor repo](https://github.com/vul-os/ephor) (its own `GATEWAY_IMAP_ENABLE`/
+  [Pier repo](https://github.com/vul-os/pier) (its own `GATEWAY_IMAP_ENABLE`/
   `GATEWAY_POP3_ENABLE`/`GATEWAY_SUBMISSION_ENABLE` toggles, not part of this workspace) — the
   node binary itself only enables this crate's native, JMAP-only surface (`ENVOIR_JMAP`, no legacy
   protocols). See the KOTVA repo's own capability matrix for exactly what's done vs. explicitly
   deferred (real TLS, DEFLATE compression, cross-server CATENATE URLFETCH, JMAP push transport).
 - **The legacy gateway** — no longer part of this repository; it moved permanently to the separate
-  [Ephor broker repo](https://github.com/vul-os/ephor) as its `gateway` coordinator kind. As last
+  [Pier broker repo](https://github.com/vul-os/pier) as its `gateway` coordinator kind. As last
   measured before the move: a real inbound MX
   listener with STARTTLS, a real pre-`DATA` anti-abuse gate (RBL/DNSBL, SPF, DMARC-`p=` awareness,
   greylisting, per-IP rate limits), real gateway attestation sealing, real delegated-selector DKIM

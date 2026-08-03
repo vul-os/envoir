@@ -1,5 +1,5 @@
 // no-broker-dep:allow-file: doc comment notes the legacy SMTP gateway (spec section 7) moved out of
-// this repo entirely to the Ephor broker repo -- history, not a dependency.
+// this repo entirely to the Pier broker repo -- history, not a dependency.
 
 //! Executes `suite.json` `construction-todo` cases: cases with no committed byte-exact fixture
 //! yet, where the catalog instead gives a `construction` recipe in English (e.g. "Envelope with
@@ -228,7 +228,7 @@ pub fn run_construction_case(case: &SuiteCase) -> CaseOutcome {
 /// dependency graph (investigated by reading the relevant module — in `dmtap-core` and, since this
 /// crate now also depends on `dmtap-auth`/`dmtap-naming`/`dmtap-deniable`/`dmtap-mls` for the cases
 /// whose behavior lives one layer above `dmtap-core` proper, in those crates too — not guessed).
-/// The legacy SMTP gateway (§7) moved out of this repo entirely (to the Ephor broker repo along
+/// The legacy SMTP gateway (§7) moved out of this repo entirely (to the Pier broker repo along
 /// with its own conformance coverage), so every DMTAP-GW*/DMTAP-LEG-* case is now out of scope
 /// here rather than driven or skipped. Grouped by root cause so the coverage report reads as an
 /// honest, categorized gap list rather than one generic "todo".

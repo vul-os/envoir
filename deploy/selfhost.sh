@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # no-broker-dep:allow-file: self-host script comments explain a legacy-mail gateway is NOT part of
-# this stack and must be built SEPARATELY from the external Ephor repo if
+# this stack and must be built SEPARATELY from the external Pier repo if
 # wanted -- an optional, explicitly-external instruction, no dependency here.
 
 # Envoir self-host — one-command bring-up wrapper around docker compose.
@@ -8,7 +8,7 @@
 # What this does (nothing more): pick a docker compose invocation, make sure deploy/.env exists
 # (copying deploy/.env.example on first run), build the node image from the real workspace, and
 # start it in the background. It does not touch anything outside deploy/. The legacy gateway is
-# NOT part of this stack — it moved to the separate Ephor repo (github.com/vul-os/ephor); see
+# NOT part of this stack — it moved to the separate Pier repo (github.com/vul-os/pier); see
 # deploy/README.md if you want to run one alongside this.
 #
 # Usage:
@@ -58,7 +58,7 @@ case "$cmd" in
         echo
         echo "Started. Node mesh transport listening on \${NODE_MESH_PORT:-4600} (host)."
         echo "No legacy gateway is built/run by this stack — see deploy/README.md if you want one"
-        echo "(built separately from https://github.com/vul-os/ephor)."
+        echo "(built separately from https://github.com/vul-os/pier)."
         echo "First time only: create the node's identity keystore with"
         echo "  docker compose -f deploy/docker-compose.yml run --rm node init"
         echo "See deploy/README.md for the full rundown."
