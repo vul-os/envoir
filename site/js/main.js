@@ -213,9 +213,35 @@
   var RAIL_IDS = ["top", "chat", "calendar", "contacts", "files", "identity", "groups"];
   var LIST_IDS = ["top", "why", "naming", "product", "how-to", "traceability", "parity", "privacy", "open-source", "trust", "get-started"];
 
+  /* Below 1080px the folder column is hidden, which used to leave the page with
+     no section navigation at all — one ~31,000px scroll and no way to jump or
+     to judge how much was left. Mirror the same folder list into a sticky
+     scrollable strip. Built FROM the folder list rather than written out again,
+     so the two cannot drift apart. */
+  function buildSectionStrip() {
+    var folders = document.getElementById("folders");
+    var pane = document.querySelector(".reading-pane");
+    if (!folders || !pane || document.querySelector(".section-strip")) return;
+    var strip = document.createElement("nav");
+    strip.className = "section-strip";
+    strip.setAttribute("aria-label", "Sections");
+    $$(".folder[data-folder]", folders).forEach(function (a) {
+      var link = document.createElement("a");
+      link.href = a.getAttribute("href");
+      link.dataset.folder = a.dataset.folder;
+      var svg = a.querySelector("svg");
+      var label = a.querySelector("span");
+      link.innerHTML = (svg ? svg.outerHTML : "") + "<span>" + (label ? label.textContent : "") + "</span>";
+      strip.appendChild(link);
+    });
+    pane.insertBefore(strip, pane.firstChild);
+  }
+
   function initShellNav() {
     var pane = document.querySelector(".reading-pane");
     if (!pane) return;
+
+    buildSectionStrip();
 
     var railEls = {};
     $$(".rail-btn[data-rail]").forEach(function (a) { railEls[a.dataset.rail] = a; });
@@ -226,24 +252,129 @@
     function setRail(id) {
       Object.keys(railEls).forEach(function (k) { railEls[k].classList.toggle("on", k === id); });
     }
+    var stripEls = {};
+    $$(".section-strip a[data-folder]").forEach(function (a) { stripEls[a.dataset.folder] = a; });
+
     function setFolder(id) {
       Object.keys(folderEls).forEach(function (k) { folderEls[k].classList.toggle("on", k === id); });
+      Object.keys(stripEls).forEach(function (k) {
+        var on = k === id;
+        stripEls[k].classList.toggle("on", on);
+        // Keep the active chip reachable — a highlight scrolled out of the
+        // strip tells the reader nothing.
+        if (on && stripEls[k].scrollIntoView) {
+          stripEls[k].scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+        }
+      });
       if (sbSection && SECTION_LABEL[id]) sbSection.textContent = SECTION_LABEL[id];
     }
 
     if (!("IntersectionObserver" in window)) return;
 
+    /* Which element actually scrolls decides the observer root. On desktop the
+       reading pane is a fixed-height scroller; below 820px it becomes
+       `height: auto` and the WINDOW scrolls instead. Observing against the pane
+       there is meaningless: the root is then as tall as its own content, every
+       section intersects permanently, and the percentage rootMargin resolves to
+       a fixed slice ~3700px down — so the highlight sat on whatever section
+       happened to live there ("Your address") and never moved, at any scroll
+       position. Re-evaluated on resize because the breakpoint can be crossed. */
+    function scrollRoot() {
+      return pane.scrollHeight > pane.clientHeight + 1 ? pane : null;
+    }
+
+    var railIO = null, listIO = null;
     var railTargets = RAIL_IDS.map(function (id) { return document.getElementById(id); }).filter(Boolean);
-    var railIO = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) { if (e.isIntersecting) setRail(e.target.id); });
-    }, { root: pane, rootMargin: "-40% 0px -55% 0px" });
+    var listTargets = LIST_IDS.map(function (id) { return document.getElementById(id); }).filter(Boolean);
+    var visible = {};
+
+    function wire() {
+      if (railIO) railIO.disconnect();
+      if (listIO) listIO.disconnect();
+      visible = {};
+      var root = scrollRoot();
+
+      railIO = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) { if (e.isIntersecting) setRail(e.target.id); });
+      }, { root: root, rootMargin: "-40% 0px -55% 0px" });
+      railTargets.forEach(function (el) { railIO.observe(el); });
+
+      // "last entry wins" is wrong whenever more than one section is in view —
+      // notably on first paint, where the callback ended on the LAST of them.
+      // Track the visible set and always take the FIRST in document order.
+      listIO = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) visible[e.target.id] = true; else delete visible[e.target.id];
+        });
+        for (var i = 0; i < LIST_IDS.length; i++) {
+          if (visible[LIST_IDS[i]]) { setFolder(LIST_IDS[i]); return; }
+        }
+      }, { root: root, rootMargin: "-12% 0px -70% 0px" });
+      listTargets.forEach(function (el) { listIO.observe(el); });
+    }
+
+    wire();
+    var rewire;
+    addEventListener("resize", function () {
+      clearTimeout(rewire);
+      rewire = setTimeout(wire, 200);
+    }, { passive: true });
+  }
+
+  function _unusedShellNavTail() {
+    var railTargets = [];
+    var railIO = new IntersectionObserver(function () {}, {});
     railTargets.forEach(function (el) { railIO.observe(el); });
 
-    var listTargets = LIST_IDS.map(function (id) { return document.getElementById(id); }).filter(Boolean);
-    var listIO = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) { if (e.isIntersecting) setFolder(e.target.id); });
-    }, { root: pane, rootMargin: "-12% 0px -70% 0px" });
-    listTargets.forEach(function (el) { listIO.observe(el); });
+  }
+
+  /* ---------------- full-size screen viewer ----------------
+     Each tour capture sits in a ~325px card where none of the UI its caption
+     describes can actually be read. Turn the media area into a button that
+     opens the same file full size. Built at runtime so the markup stays plain
+     <figure>/<picture> and every shot gets it without being listed twice. */
+  function initShotZoom() {
+    var figures = $$(".shot-frame .shot-media-wrap");
+    if (!figures.length) return;
+
+    var dlg = document.createElement("dialog");
+    dlg.id = "shot-lightbox";
+    dlg.setAttribute("aria-label", "Screenshot, full size");
+    dlg.innerHTML =
+      '<button class="lb-x" type="button" aria-label="Close">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>' +
+      '</button><img alt=""><p class="lb-cap"></p>';
+    document.body.appendChild(dlg);
+    var lbImg = dlg.querySelector("img");
+    var lbCap = dlg.querySelector(".lb-cap");
+    dlg.querySelector(".lb-x").addEventListener("click", function () { dlg.close(); });
+    // A click whose target IS the dialog landed outside the image.
+    dlg.addEventListener("click", function (e) { if (e.target === dlg) dlg.close(); });
+
+    figures.forEach(function (wrap) {
+      var img = wrap.querySelector("img");
+      if (!img) return;
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = wrap.className;
+      btn.setAttribute("aria-label", "Open this screenshot full size");
+      while (wrap.firstChild) btn.appendChild(wrap.firstChild);
+      var cue = document.createElement("span");
+      cue.className = "zoom-cue";
+      cue.setAttribute("aria-hidden", "true");
+      cue.textContent = "enlarge";
+      btn.appendChild(cue);
+      wrap.replaceWith(btn);
+
+      btn.addEventListener("click", function () {
+        // currentSrc, so the theme-matched source is what opens.
+        lbImg.src = img.currentSrc || img.src;
+        lbImg.alt = img.alt || "";
+        var cap = btn.closest(".shot-frame").querySelector(".shot-caption");
+        lbCap.innerHTML = cap ? cap.innerHTML : "";
+        dlg.showModal();
+      });
+    });
   }
 
   /* ---------------- count-up for the parity tally ---------------- */
@@ -389,6 +520,7 @@
     initNavLinks();
     initProgress();
     initShellNav();
+  initShotZoom();
     initCounters();
     initPalette();
   }
