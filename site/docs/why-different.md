@@ -67,7 +67,7 @@ There is no token, no blockchain, and no coin in this project — full stop. Ant
 contact uses anonymous rate-limit tokens, proof-of-work, and an optional real-money postage stamp,
 none of which are a cryptocurrency. Naming's only chain-adjacent option is an OFF-BY-DEFAULT ENS/
 SNS resolver, bound by four guardrails so it can never become a trust root. See the
-[FAQ](#faq#is-there-a-token-or-cryptocurrency) for the full answer.
+[FAQ](#faq) for the full answer.
 
 ## What Envoir is *not* claiming
 

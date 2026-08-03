@@ -101,7 +101,7 @@ correspondents never invokes one, and it MAY be self-hosted for $0. It bridges a
 key can present a stable, **key-derived alias** at any gateway with zero registration, so a
 legacy sender can already reach you before you've registered anywhere, and both directions of the
 bridge (inbound legacy → DMTAP, outbound DMTAP → legacy) run their own anti-spam gate rather than
-sharing one. See [features/self-hosting.md](#self-hosting#the-gateway-address-mapping)
+sharing one. See [features/self-hosting.md](#self-hosting#the-gateway-address-mapping-in-brief)
 for the full model and
 [features/transport-traceability.md](#transport-traceability) for how a recipient can
 verify a message actually crossed a gateway (and thus why it's billed). The gateway does not live
@@ -118,7 +118,7 @@ keypair itself.
 
 ## Delegated capabilities, and Envoir Send
 
-A [`CapabilityToken`](https://github.com/vul-os/envoir/blob/main/crates/dmtap-core/src/capability.rs) is a signed, offline-verifiable,
+A [`CapabilityToken`](https://github.com/vul-os/kotva/blob/main/crates/kotva-core/src/capability.rs) is a signed, offline-verifiable,
 UCAN-profile grant of one narrow `(resource, ability, caveats)` right from an issuer key to an
 audience key — chainable, and each link in the chain may only *narrow* what its parent granted,
 never widen it. A grant is revoked by publishing a separate, KT-logged revocation, which reaches

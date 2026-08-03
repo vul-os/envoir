@@ -16,7 +16,7 @@ organization, and membership in any addressable [groups](groups.md) you share.
 
 Every card shows one of three states front and center:
 
-- **Verified** — you've compared this contact's [safety number](identity.md#safety-numbers)
+- **Verified** — you've compared this contact's [safety number](identity.md)
   out-of-band and confirmed the key. Look for the ✓ badge.
 - **TOFU-pinned** — trust-on-first-use: you've exchanged messages, so a key is pinned, but you
   haven't independently verified it yet.

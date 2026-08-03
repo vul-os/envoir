@@ -72,7 +72,7 @@ This note exists specifically so the client never claims a message was sent when
 
 ## Programmatic sending — Envoir Send
 
-A [`CapabilityToken`](https://github.com/vul-os/envoir/blob/main/crates/dmtap-core/src/capability.rs) is a signed, offline-verifiable,
+A [`CapabilityToken`](https://github.com/vul-os/kotva/blob/main/crates/kotva-core/src/capability.rs) is a signed, offline-verifiable,
 chainable grant of one narrow `(resource, ability, caveats)` right — real and tested in
 `dmtap-core` today. The natural application built on it is **Envoir Send**, a Resend-style
 programmatic mail-sending API: mint a narrowly-scoped, send-only capability per API key, and a

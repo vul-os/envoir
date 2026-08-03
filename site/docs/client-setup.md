@@ -67,6 +67,6 @@ or CalDAV client has no way to render.
 
 Real TLS termination and a couple of niche extensions (cross-server CATENATE URLFETCH, exotic
 nested-message BODYSTRUCTURE envelopes, JMAP push transport) are explicitly deferred as transport
-concerns — see [`crates/dmtap-mail/README.md`](https://github.com/vul-os/envoir/blob/main/crates/dmtap-mail/README.md) (now in the
+concerns — see [`kotva-mail/README.md`](https://github.com/vul-os/kotva/blob/main/crates/kotva-mail/README.md) (now in the
 sibling [vul-os/kotva](https://github.com/vul-os/kotva) repo as `kotva-mail`) for the exact
 capability matrix.

@@ -11,7 +11,7 @@ system, it fixes what a name must ultimately resolve to and lets naming systems 
 that fixed point. See spec §3 (naming & key transparency), §3.12 (the pluggable resolver-type
 framework), and §3.13 (name forms) for the normative text; this repo's reference implementation
 lives in [`crates/dmtap-naming`](../crates/dmtap-naming) (the resolver types) and
-[`crates/dmtap-core/src/keyname.rs`](../crates/dmtap-core/src/keyname.rs) (the key-name codec).
+[`kotva-core/src/keyname.rs`](https://github.com/vul-os/kotva/blob/main/crates/kotva-core/src/keyname.rs) (the key-name codec).
 
 ## The invariant: identity ≠ name
 
@@ -56,7 +56,7 @@ directory, no DNS, no registration, and no consensus: `words(truncate(BLAKE3(IK)
 data words plus one checksum word, hyphen-joined (9 words total), drawn from an embedded
 1024-word pronounceable list. Two different keys yield different key-names by construction; a
 mistyped or mis-heard word fails the checksum and refuses to resolve, rather than silently
-landing on a different key ([`keyname::verify`](../crates/dmtap-core/src/keyname.rs)).
+landing on a different key ([`keyname::verify`](https://github.com/vul-os/kotva/blob/main/crates/kotva-core/src/keyname.rs)).
 
 Resolution here is not a lookup at all — it's the forward derivation run again and compared:
 [`SelfResolver::resolve`](../crates/dmtap-naming/src/restype.rs) checks the checksum, re-derives

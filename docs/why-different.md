@@ -24,7 +24,7 @@ its `kind`. That's not a marketing simplification: it's why a shared folder can 
 with file-manifests instead of a bolted-on "sharing" feature, why a calendar invite is a message
 instead of a query against a central database, and why your contacts list can show a real,
 cryptographic verification status instead of just a name and a photo. See
-[Architecture](../architecture.md) and [Protocol](../protocol.md) for how the pieces fit.
+[Architecture](architecture.md) and [Protocol](protocol.md) for how the pieces fit.
 
 ## Your address is a pointer, not your identity
 
@@ -34,21 +34,21 @@ domain, the provider, or the DNS record, and you don't lose *you*: a signed move
 the same key to a new address, and everyone who has already made first contact with you keeps
 routing by key, automatically, with no re-verification and no "please update your contact info"
 email. Naming itself is pluggable — a zero-authority key-name and a local petname need no network
-at all — see [Naming](../naming.md).
+at all — see [Naming](naming.md).
 
 ## Metadata privacy is designed in, not bolted on — and stated honestly
 
 Content is end-to-end encrypted the way you'd expect from any modern messenger. What's less
 common is that Envoir is *designed* to also hide **who's talking to whom** from a network-level
 observer, via a mixnet with sealed sender and cover traffic — not just encrypting the envelope,
-but trying to make the envelope itself unlinkable. See [Privacy & threat model](../privacy.md) for
+but trying to make the envelope itself unlinkable. See [Privacy & threat model](privacy.md) for
 the honest, falsifiable version of that claim, including exactly what it doesn't defend against.
 
 **This project would rather under-claim than over-claim.** Right now, only the `fast` (direct)
 transport tier is real end-to-end — the mixnet's onion-wrapping cryptography (`node/src/onion.rs`)
 is a structural BLAKE3 stand-in, not the real Sphinx construction, so metadata privacy is
 architecture-only until that lands. That caveat is stated on every page where it's relevant, not
-once and forgotten — see [Roadmap](../roadmap.md) and [Security](../security.md) for exactly
+once and forgotten — see [Roadmap](roadmap.md) and [Security](security.md) for exactly
 what's real today versus what's specified for later.
 
 ## Self-hosting is a real option, not a crippled free tier
@@ -65,7 +65,7 @@ There is no token, no blockchain, and no coin in this project — full stop. Ant
 contact uses anonymous rate-limit tokens, proof-of-work, and an optional real-money postage stamp,
 none of which are a cryptocurrency. Naming's only chain-adjacent option is an OFF-BY-DEFAULT ENS/
 SNS resolver, bound by four guardrails so it can never become a trust root. See the
-[FAQ](faq.md#is-there-a-token-or-cryptocurrency) for the full answer.
+[FAQ](faq.md) for the full answer.
 
 ## What Envoir is *not* claiming
 
@@ -73,8 +73,8 @@ This project's credibility rests on not overclaiming, so it's worth saying plain
 is **not**:
 
 - Not "audited" — an independent cryptographic and code audit is a disclosed *gate* before any
-  production use, not a checkbox already ticked. See [Security](../security.md#the-audit-gate).
-- Not "anonymous" in the absolute sense — see [Privacy & threat model](../privacy.md) for the
+  production use, not a checkbox already ticked. See [Security](security.md#the-audit-gate).
+- Not "anonymous" in the absolute sense — see [Privacy & threat model](privacy.md) for the
   quantified, falsifiable version.
 - Not production-ready — this is a **pre-alpha reference implementation**, a proof of the
   protocol's shape, demonstrating it end-to-end honestly rather than a hardened mail service you

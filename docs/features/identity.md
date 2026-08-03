@@ -108,7 +108,7 @@ you out, because DMTAP deliberately doesn't have one.
 ## Groups as identities
 
 A group is simply an identity that has members — its own keypair, its own address on the same
-naming ladder as a person. See [Groups](groups.md) and [Files & sharing](files.md#shared-folders-are-groups).
+naming ladder as a person. See [Groups](groups.md) and [Files & sharing](files.md#sharing-a-file).
 
 ## Signing in with your key — DMTAP-Auth
 

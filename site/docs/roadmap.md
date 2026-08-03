@@ -82,7 +82,7 @@ the spec's own roadmap markers, it doesn't belong here.
   default) and capability-gated (the daemon only enables the listener after a genuine, verified
   self-issued `pub-1` capability is presented through the same fail-closed path a remote grant
   would use — never an unconditional bypass). A node that never opts in advertises no `pub-1`
-  grant and serves nothing (§22.6.1). See [`node/README.md`](https://github.com/vul-os/envoir/blob/main/node/README.md#dmtap-pub-serving-spec-2225226-opt-in).
+  grant and serves nothing (§22.6.1). See [`node/README.md`](https://github.com/vul-os/envoir/blob/main/node/README.md#dmtap-pub-serving-spec-225226-opt-in).
 - **The deniable 1:1 mode** (`crates/dmtap-deniable`) and **MLS groups** (`crates/dmtap-mls`) —
   implemented with dedicated crates; see [security.md](#security#formal-proverif-models) for
   the formal proofs covering the deniable handshake specifically.
