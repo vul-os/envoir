@@ -55,7 +55,7 @@ test('timeAgo renders through Intl.RelativeTimeFormat with the original threshol
 
 test('fmtBytes keeps the compact unit style but renders the decimal via the host locale', () => {
   assert.equal(fmtBytes(512), '512 B');                                // sub-KB path unchanged
-  const dec = (v) => v.toLocaleString([], { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const dec = (v: number) => v.toLocaleString([], { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   assert.equal(fmtBytes(1536), dec(1.5) + ' KB');
   assert.equal(fmtBytes(1.5 * 1024 * 1024), dec(1.5) + ' MB');
 });

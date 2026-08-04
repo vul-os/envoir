@@ -18,11 +18,24 @@ import { sanitizeNode, SANITIZE_ALLOWED_TAGS } from '../js/ui.js';
 import { isDnsShapedAddress, sanitizeAddressInput } from '../js/identity.js';
 
 // ---- A minimal fake DOM node, just enough surface for sanitizeNode's walk -------------------
+// Structurally shaped to satisfy ui.d.ts's SanitizableElementNode/SanitizableTextNode — the
+// sidecar type declaration for ui.js's DOM-facing sanitizeNode(), which ui.js itself (plain JS,
+// unconverted — see ui.d.ts's header) is never checked against directly.
+type FakeNode = FakeElement | FakeText;
+
 class FakeText {
-  constructor(text) { this.nodeType = 3; this.textContent = text; }
+  nodeType: number;
+  textContent: string;
+  _parent: FakeElement | null = null;
+  constructor(text: string) { this.nodeType = 3; this.textContent = text; }
 }
 class FakeElement {
-  constructor(tagName, attrs = {}, children = []) {
+  nodeType: number;
+  tagName: string;
+  childNodes: FakeNode[];
+  _attrs: Map<string, string>;
+  _parent: FakeElement | null;
+  constructor(tagName: string, attrs: Record<string, string> = {}, children: FakeNode[] = []) {
     this.nodeType = 1;
     this.tagName = tagName.toUpperCase();
     this._attrs = new Map(Object.entries(attrs));
@@ -31,18 +44,18 @@ class FakeElement {
     for (const c of children) c._parent = this;
   }
   get attributes() { return [...this._attrs.entries()].map(([name, value]) => ({ name, value })); }
-  getAttribute(name) { return this._attrs.has(name) ? this._attrs.get(name) : null; }
-  setAttribute(name, value) { this._attrs.set(name, value); }
-  removeAttribute(name) { this._attrs.delete(name); }
-  get textContent() { return this.childNodes.map((c) => c.textContent).join(''); }
-  replaceWith(node) {
-    const idx = this._parent.childNodes.indexOf(this);
-    this._parent.childNodes[idx] = node;
+  getAttribute(name: string): string | null { return this._attrs.has(name) ? this._attrs.get(name)! : null; }
+  setAttribute(name: string, value: string): void { this._attrs.set(name, value); }
+  removeAttribute(name: string): void { this._attrs.delete(name); }
+  get textContent(): string { return this.childNodes.map((c) => c.textContent).join(''); }
+  replaceWith(node: FakeNode): void {
+    const idx = this._parent!.childNodes.indexOf(this);
+    this._parent!.childNodes[idx] = node;
     node._parent = this._parent;
   }
 }
-const mkText = (s) => new FakeText(s);
-const root = (...children) => new FakeElement('DIV', {}, children);
+const mkText = (s: string): FakeText => new FakeText(s);
+const root = (...children: FakeNode[]): FakeElement => new FakeElement('DIV', {}, children);
 
 test('sanitizeNode drops a disallowed tag (script) but keeps its text, inert', () => {
   const r = root(new FakeElement('SCRIPT', {}, [mkText("alert('xss')")]));
@@ -123,7 +136,7 @@ test('sanitizeNode recurses into allowed nested formatting (b inside p stays str
   const p = new FakeElement('P', {}, [mkText('plain '), b]);
   sanitizeNode(root(p), mkText);
   assert.equal(p.childNodes.length, 2);
-  assert.equal(p.childNodes[1].tagName, 'B');
+  assert.equal((p.childNodes[1] as FakeElement).tagName, 'B');
   assert.equal(p.childNodes[1].nodeType, 1);
 });
 

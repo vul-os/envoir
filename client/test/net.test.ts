@@ -24,11 +24,13 @@
 // them; that they import cleanly here is itself the "DOM-free" claim under test.
 
 import { test } from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { SendClient, SendApiError, sendMode, sendMail, DEFAULT_BASE_URL } from '../js/net/send.js';
 import { JmapClient, JmapError, JmapResponse, CAP_CORE, CAP_MAIL, CAP_SUBMISSION } from '../js/net/jmap.js';
 import { state, resolveNodeConfig } from '../js/store.js';
+import type { State, NodeConfig } from '../js/store.js';
 import { mergeLocalMail, syncNow, connect } from '../js/net/sync.js';
 // compose.js is DOM-flavored but imports cleanly under Node (all document use is inside
 // functions); the send paths under test only touch the DOM via toast(), stubbed by useDom().
@@ -36,36 +38,50 @@ import { commitSend, commitSendReal } from '../js/compose.js';
 
 // ---- harness helpers ------------------------------------------------------------------------
 
+// The shape send.js/jmap.js actually pass as `init` — narrower than the DOM lib's own
+// `RequestInit` (whose `headers`/`body` are the multi-form `HeadersInit`/`BodyInit` unions),
+// because every real call site in this codebase builds a plain string-keyed headers object and a
+// JSON.stringify'd string body (never a Headers/FormData/etc. instance).
+interface MockRequestInit {
+  method?: string;
+  headers: Record<string, string>;
+  body?: string;
+  signal?: AbortSignal;
+}
+
 // Swap in a fetch mock for one test, recording every call; restored automatically afterwards.
 // `impl(url, init, n)` returns (or throws) what the mocked network does for call number n.
-function useFetch(t, impl) {
-  const calls = [];
+function useFetch(
+  t: TestContext,
+  impl: (url: string, init: MockRequestInit, n: number) => Response | Promise<Response>,
+): Array<{ url: string; init: MockRequestInit }> {
+  const calls: Array<{ url: string; init: MockRequestInit }> = [];
   const prev = globalThis.fetch;
-  globalThis.fetch = async (url, init = {}) => {
+  globalThis.fetch = (async (url: string | URL, init: MockRequestInit = { headers: {} }) => {
     const n = calls.push({ url: String(url), init });
     return impl(String(url), init, n);
-  };
+  }) as typeof fetch;
   t.after(() => { globalThis.fetch = prev; });
   return calls;
 }
 
 // A JSON Response exactly as the node writes it (Content-Type: application/json body).
-const jsonRes = (status, body) =>
+const jsonRes = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 // Patch a top-level field of the shared store state for one test; restored afterwards.
-function patchState(t, key, value) {
+function patchState<K extends keyof State>(t: TestContext, key: K, value: State[K]): void {
   const prev = state[key];
   state[key] = value;
   t.after(() => { state[key] = prev; });
 }
 
 // Inject a host config (the Tauri seam resolveNodeConfig() prefers) for one test.
-function injectNodeConfig(t, cfg) {
+function injectNodeConfig(t: TestContext, cfg: Partial<NodeConfig> | undefined): void {
   const prev = globalThis.__ENVOIR_NODE__;
   globalThis.__ENVOIR_NODE__ = cfg;
   t.after(() => {
-    if (prev === undefined) delete globalThis.__ENVOIR_NODE__;
+    if (prev === undefined) delete (globalThis as { __ENVOIR_NODE__?: Partial<NodeConfig> }).__ENVOIR_NODE__;
     else globalThis.__ENVOIR_NODE__ = prev;
   });
 }
@@ -74,10 +90,10 @@ function injectNodeConfig(t, cfg) {
 // document.getElementById('toast') and writes innerHTML. Returns the captured toast messages.
 // (refreshComposeNote()'s document.querySelector also lands here and finds nothing — correct:
 // no compose is open.) The pending auto-hide timer is cleared afterwards so tests exit cleanly.
-function useDom(t) {
-  const toasts = [];
+function useDom(t: TestContext): string[] {
+  const toasts: string[] = [];
   const toastEl = {
-    _h: null,
+    _h: null as ReturnType<typeof setTimeout> | null,
     setAttribute() {},
     classList: { add() {}, remove() {}, toggle() {} },
     querySelector: () => null,
@@ -87,10 +103,12 @@ function useDom(t) {
     get() { return toasts[toasts.length - 1] || ''; },
   });
   const prev = globalThis.document;
-  globalThis.document = { getElementById: () => toastEl, querySelector: () => null };
+  // The mock only covers the one DOM surface toast()/refreshComposeNote() actually touch —
+  // deliberately not a full `Document`, hence the cast.
+  globalThis.document = { getElementById: () => toastEl, querySelector: () => null } as unknown as Document;
   t.after(() => {
-    clearTimeout(toastEl._h);
-    if (prev === undefined) delete globalThis.document;
+    clearTimeout(toastEl._h ?? undefined);
+    if (prev === undefined) delete (globalThis as { document?: Document }).document;
     else globalThis.document = prev;
   });
   return toasts;
@@ -119,7 +137,7 @@ test('SendClient.send posts the exact /v1/send request and parses the receipt', 
   assert.equal(init.headers['Content-Type'], 'application/json');
   assert.equal(init.headers.Accept, 'application/json');
   // The Resend-shaped body dmtap-send deserializes (crates/dmtap-send/src/http.rs).
-  assert.deepEqual(JSON.parse(init.body), {
+  assert.deepEqual(JSON.parse(init.body!), {
     from: 'you@node.test', to: 'bob@peer.example', subject: 'hi', body: 'hello', mime: 'raw-mime',
   });
   assert.deepEqual(receipt, RECEIPT);
@@ -131,7 +149,7 @@ test('SendClient.send omits mime when not provided and defaults from/subject/bod
   assert.equal(client.sendUrl, `${DEFAULT_BASE_URL}/v1/send`);
 
   await client.send({ to: 'bob@peer.example' });
-  const body = JSON.parse(calls[0].init.body);
+  const body = JSON.parse(calls[0].init.body!);
   // `mime` is an optional field server-side; an absent one must be ABSENT, not null/''.
   assert.deepEqual(body, { from: '', to: 'bob@peer.example', subject: '', body: '' });
 });
@@ -154,7 +172,7 @@ test('SendClient.send fails closed before any network I/O without a token or rec
 
 // The node's full slug/status table (crates/dmtap-send: error_slug + SendError::http_status,
 // plus the adapter-level bad_request) and the human sentence send.js maps each onto.
-const NODE_ERRORS = [
+const NODE_ERRORS: Array<[string, number, string]> = [
   ['bad_request', 400, 'the message was rejected as malformed'],
   ['unauthorized', 401, 'the send token was rejected'],
   ['revoked', 401, 'the send token has been revoked'],
@@ -190,7 +208,7 @@ test('SendClient.send surfaces an unknown slug via its detail — nothing is sil
   useFetch(t, () => jsonRes(422, { error: 'brand_new_slug', detail: 'something specific went wrong' }));
   await assert.rejects(
     () => new SendClient({ token: 'tok' }).send({ to: 'bob@peer.example' }),
-    (e) => e.slug === 'brand_new_slug' && e.message === 'something specific went wrong',
+    (e) => (e as SendApiError).slug === 'brand_new_slug' && (e as SendApiError).message === 'something specific went wrong',
   );
 });
 
@@ -218,8 +236,8 @@ test('SendClient.send rejects a 200 whose body is not the receipt shape', async 
     ? new Response('not json', { status: 200 })
     : jsonRes(200, { ok: true })));
   const client = new SendClient({ token: 'tok' });
-  await assert.rejects(() => client.send({ to: 'b@x' }), (e) => e.slug === 'malformed');
-  await assert.rejects(() => client.send({ to: 'b@x' }), (e) => e.slug === 'malformed');
+  await assert.rejects(() => client.send({ to: 'b@x' }), (e) => (e as SendApiError).slug === 'malformed');
+  await assert.rejects(() => client.send({ to: 'b@x' }), (e) => (e as SendApiError).slug === 'malformed');
 });
 
 // ---- sendMode() / sendMail(): the app-facing tier logic -------------------------------------
@@ -234,7 +252,7 @@ test('sendMode is seam in real mode without a send token, real with one', (t) =>
   // Drive resolveNodeConfig() through the injected-host seam so the test needs no localStorage.
   injectNodeConfig(t, { baseUrl: 'http://n.test:4700', username: 'you@n.test', appPassword: 'pw', sendToken: '' });
   assert.equal(sendMode(), 'seam');
-  globalThis.__ENVOIR_NODE__.sendToken = 'sk-cap';
+  globalThis.__ENVOIR_NODE__!.sendToken = 'sk-cap';
   assert.equal(sendMode(), 'real');
 });
 
@@ -247,13 +265,13 @@ test('sendMail resolves the node config and defaults from to the connected accou
   assert.deepEqual(receipt, RECEIPT);
   assert.equal(calls[0].url, 'http://n.test:4700/v1/send');
   assert.equal(calls[0].init.headers.Authorization, 'Bearer sk-cap');
-  assert.equal(JSON.parse(calls[0].init.body).from, 'you@n.test');
+  assert.equal(JSON.parse(calls[0].init.body!).from, 'you@n.test');
 });
 
 test('sendMail without a configured send token fails closed before the wire', async (t) => {
   injectNodeConfig(t, { baseUrl: 'http://n.test:4700', username: 'you@n.test', appPassword: 'pw', sendToken: '' });
   const calls = useFetch(t, () => { throw new Error('must not be reached'); });
-  await assert.rejects(() => sendMail({ to: 'bob@peer.example' }), (e) => e.slug === 'no_token');
+  await assert.rejects(() => sendMail({ to: 'bob@peer.example' }), (e) => (e as SendApiError).slug === 'no_token');
   assert.equal(calls.length, 0);
 });
 
@@ -262,7 +280,7 @@ test('sendMail without a configured send token fails closed before the wire', as
 // The node's Session resource, mirrored field-for-field from
 // crates/dmtap-mail/src/jmap.rs session_resource() so the client is tested against the
 // exact JSON the node serves at GET /jmap/session.
-function sessionResource(accountId, baseUrl, stateToken) {
+function sessionResource(accountId: string, baseUrl: string, stateToken: string) {
   return {
     capabilities: {
       [CAP_CORE]: {
@@ -294,7 +312,7 @@ function sessionResource(accountId, baseUrl, stateToken) {
   };
 }
 
-const expectedBasic = (user, pass) => 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
+const expectedBasic = (user: string, pass: string) => 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
 
 test('JmapClient.discover sends Basic auth and adopts the advertised account + URLs', async (t) => {
   const calls = useFetch(t, () =>
@@ -349,7 +367,7 @@ test('JmapClient.request posts the RFC 8620 envelope and parses methodResponses'
   assert.equal(calls[0].url, `${client.baseUrl}/jmap/api/`);
   assert.equal(calls[0].init.method, 'POST');
   assert.equal(calls[0].init.headers.Authorization, expectedBasic('a@n', 'pw'));
-  assert.deepEqual(JSON.parse(calls[0].init.body), {
+  assert.deepEqual(JSON.parse(calls[0].init.body!), {
     using: [CAP_CORE, CAP_MAIL, CAP_SUBMISSION],
     methodCalls: [['Mailbox/get', { accountId: 'a@n', ids: null }, 'mb']],
   });
@@ -370,10 +388,10 @@ test('JmapClient.emailQueryGet chains query→get via a verbatim back-reference'
   const client = new JmapClient({ username: 'a@n', appPassword: 'pw' });
 
   const got = await client.emailQueryGet(null, ['id', 'subject']);
-  const sent = JSON.parse(calls[0].init.body);
+  const sent = JSON.parse(calls[0].init.body!);
   // The `#ids` ResultReference (RFC 8620 §3.7) must reach the node untouched — it resolves there.
   assert.deepEqual(sent.methodCalls[1][1]['#ids'], { resultOf: 'q', name: 'Email/query', path: '/ids' });
-  assert.deepEqual(got.list, [{ id: 'e1' }]);
+  assert.deepEqual(got!.list, [{ id: 'e1' }]);
 });
 
 test('JmapResponse.arguments throws on a method-level error invocation', async (t) => {
@@ -398,8 +416,8 @@ test('JmapClient.request rejects 401, non-2xx, and a body without methodResponse
   const client = new JmapClient({ username: 'a@n', appPassword: 'pw' });
   await assert.rejects(() => client.request([]), (e) => e instanceof JmapError && e.status === 401);
   await assert.rejects(() => client.request([]),
-    (e) => e.status === 500 && e.body && e.body.detail === 'boom');
-  await assert.rejects(() => client.request([]), (e) => /malformed JMAP response/.test(e.message));
+    (e) => (e as JmapError).status === 500 && ((e as JmapError).body as { detail?: string } | null)?.detail === 'boom');
+  await assert.rejects(() => client.request([]), (e) => /malformed JMAP response/.test((e as JmapError).message));
 });
 
 test('JmapClient.emailChanges flags cannotCalculateChanges instead of faking an empty delta', async (t) => {
@@ -457,7 +475,7 @@ test('resolveNodeConfig: an injected config without a sendToken falls back to th
   assert.equal(cfg.sendToken, 'sk-user');                // capability: the user's
 
   // ...but a token the shell DOES inject wins over the saved one.
-  globalThis.__ENVOIR_NODE__.sendToken = 'sk-shell';
+  globalThis.__ENVOIR_NODE__!.sendToken = 'sk-shell';
   assert.equal(resolveNodeConfig().sendToken, 'sk-shell');
 });
 
@@ -478,7 +496,7 @@ const mkDraft = (over = {}) => ({
 });
 
 // Real-mode session: live node + send token via the injected-host seam, empty mailbox.
-function useRealSession(t) {
+function useRealSession(t: TestContext) {
   patchState(t, 'mail', []);
   patchState(t, 'ui', { ...state.ui, selected: new Set() });
   patchState(t, 'net', { ...state.net, mode: 'real', accountId: 'you@n.test' });
@@ -492,7 +510,7 @@ test('commitSendReal fans out one POST per recipient and records ALL of them as 
 
   await commitSendReal(mkDraft({ to: 'a@x, b@x, c@x' }));
 
-  assert.deepEqual(calls.map((c) => JSON.parse(c.init.body).to), ['a@x', 'b@x', 'c@x']);
+  assert.deepEqual(calls.map((c) => JSON.parse(c.init.body!).to), ['a@x', 'b@x', 'c@x']);
   assert.equal(state.mail.length, 1);
   const sent = state.mail[0];
   assert.equal(sent.folder, 'sent');
@@ -508,15 +526,15 @@ test('commitSendReal fans out one POST per recipient and records ALL of them as 
 test('commitSendReal on PARTIAL failure records only accepted recipients and drafts the rest', async (t) => {
   useRealSession(t);
   const toasts = useDom(t);
-  const calls = useFetch(t, (u, init) => (JSON.parse(init.body).to === 'b@x'
+  const calls = useFetch(t, (u, init) => (JSON.parse(init.body!).to === 'b@x'
     ? jsonRes(422, { error: 'unresolvable_recipient', detail: 'no key for b@x' })
     : jsonRes(200, RECEIPT)));
 
   await commitSendReal(mkDraft({ to: 'a@x, b@x, c@x' }));
 
   assert.equal(calls.length, 3, 'a mid-list failure must not abort the rest of the fan-out');
-  const sent = state.mail.find((th) => th.folder === 'sent');
-  const draft = state.mail.find((th) => th.folder === 'drafts');
+  const sent = state.mail.find((th) => th.folder === 'sent')!;
+  const draft = state.mail.find((th) => th.folder === 'drafts')!;
   assert.deepEqual(sent.msgs[0].to, ['a@x', 'c@x'], 'only actually-sent recipients are recorded');
   assert.deepEqual(sent.msgs[0].nodeIds, [RECEIPT.id, RECEIPT.id]);
   assert.deepEqual(draft.msgs[0].to, ['b@x'], 'the draft covers exactly the failed recipient');
@@ -560,7 +578,7 @@ test('commitSendReal sends rich text as plain text and says so', async (t) => {
 
   await commitSendReal(mkDraft({ to: 'a@x', body: 'hello <b>world</b>', _text: 'hello world' }));
 
-  assert.equal(JSON.parse(calls[0].init.body).body, 'hello world');
+  assert.equal(JSON.parse(calls[0].init.body!).body, 'hello world');
   assert.equal(state.mail[0].msgs[0].html, false);
   assert.equal(state.mail[0].msgs[0].body, 'hello world');
   assert.ok(toasts[toasts.length - 1].includes('as plain text'),
@@ -653,8 +671,22 @@ test('mergeLocalMail lets a server thread win when it adopts the local thread id
   assert.equal(merged[0].subject, 'server copy');
 });
 
-// A JMAP Email exactly as pullMail requests it (EMAIL_PROPS subset).
-const jmapEmail = (over = {}) => ({
+// A JMAP Email exactly as pullMail requests it (EMAIL_PROPS subset, net/sync.js).
+interface JmapEmailLike {
+  id: string;
+  threadId: string;
+  mailboxIds: Record<string, boolean>;
+  keywords: Record<string, boolean>;
+  receivedAt: string;
+  subject: string;
+  size: number;
+  hasAttachment: boolean;
+  from: Array<{ email: string }>;
+  to: Array<{ email: string }>;
+  textBody: Array<{ partId: string }>;
+  bodyValues: Record<string, { value: string }>;
+}
+const jmapEmail = (over: Partial<JmapEmailLike> = {}): JmapEmailLike => ({
   id: 'e1', threadId: 'T1', mailboxIds: { mb1: true }, keywords: { $seen: true },
   receivedAt: '2026-07-01T10:00:00Z', subject: 'Server thread', size: 10, hasAttachment: false,
   from: [{ email: 'ada@peer.example' }], to: [{ email: 'you@n.test' }],
@@ -696,12 +728,12 @@ test('syncNow rebuild preserves local drafts and dedupes a sent record the node 
 
 // The full JMAP wire for connect(): session discovery + Mailbox/get + Email/query→get, using the
 // node's exact envelopes (call ids 'mb'/'q'/'g' match net/jmap.js).
-function useJmapNode(t, emails) {
+function useJmapNode(t: TestContext, emails: JmapEmailLike[]) {
   return useFetch(t, (url, init) => {
     if (url.endsWith('/jmap/session')) {
       return jsonRes(200, sessionResource('you@n.test', 'http://n.test:4700', '1'));
     }
-    const req = JSON.parse(init.body);
+    const req = JSON.parse(init.body!);
     if (req.methodCalls[0][0] === 'Mailbox/get') {
       return jsonRes(200, {
         methodResponses: [['Mailbox/get', { accountId: 'you@n.test', list: [{ id: 'mb1', role: 'inbox', name: 'Inbox' }], notFound: [] }, 'mb']],

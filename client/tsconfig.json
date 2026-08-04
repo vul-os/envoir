@@ -1,0 +1,23 @@
+{
+  "//": [
+    "Type-checks client/test/*.test.ts against hand-written sidecar .d.ts files in client/js/.",
+    "client/js/*.js itself is intentionally NOT converted or type-checked here: it is served",
+    "straight to the browser via a bare <script type=\"module\"> with no bundler in front of it",
+    "(see client/index.html), so turning it into real TypeScript would require adding a build",
+    "step this repo does not have. See the migration report for the full reasoning."
+  ],
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "noEmit": true,
+    "allowJs": false,
+    "checkJs": false,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"]
+  },
+  "include": ["test/**/*.ts", "js/**/*.d.ts"]
+}

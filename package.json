@@ -9,6 +9,11 @@
     "sync-site-screens": "node scripts/sync-site-screens.mjs",
     "docs:sync": "node scripts/sync-site-docs.mjs",
     "docs:sync:check": "node scripts/sync-site-docs.mjs --check",
-    "test:client": "node --test 'client/test/**/*.test.mjs'"
+    "test:client": "node --test 'client/test/**/*.test.ts'",
+    "typecheck:client": "tsc --noEmit -p client/tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
   }
 }
