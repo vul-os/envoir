@@ -3,7 +3,7 @@
 // (domain-anchored §7.2a for nodes+gateways; operator-diversity §4.4.8 for mix nodes), reputation
 // (§9.6 for gateways+mix), per-kind operational metrics, and enroll / decommission actions.
 
-import { state, component, liveFleet, byKind, uid, persist, KIND, REGIONS, regionName, regionFlag, counts, SELF_OPERATOR } from '../store.js';
+import { state, component, liveFleet, byKind, uid, persist, KIND, REGIONS, regionName, regionFlag, SELF_OPERATOR } from '../store.js';
 import { bus } from '../bus.js';
 import {
   el, esc, icon, healthDot, healthPill, attestBadge, repBar, meter, sparkline, emptyState,
