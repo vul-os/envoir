@@ -443,7 +443,7 @@ export const EMOJI = [
 
 // A searchable emoji panel: quick row + type-to-filter grid. Keyboard: type filters, ↵ picks
 // the first result, Esc closes. Used by chat reactions and the composer emoji button.
-export function emojiPanel(anchor, onPick, opts = {}) {
+export function emojiPanel(anchor, onPick) {
   document.querySelector('.emoji-panel')?.remove();
   document.querySelector('.react-pop')?.remove();
   const panel = el(`<div class="emoji-panel" role="dialog" aria-label="Pick an emoji">

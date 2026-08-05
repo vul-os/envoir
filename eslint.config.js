@@ -55,7 +55,12 @@ export default defineConfig([
     rules: {
       // The JS-safe correctness rules that actually catch bugs in unbundled
       // ES modules with no other static analysis ever run on them.
-      'no-unused-vars': 'error',
+      // argsIgnorePattern only (not varsIgnorePattern): the fleet's bus.js
+      // dispatch-table stub is a real, repo-wide convention (see
+      // client|console|superadmin/js/bus.js: `setView: (_v) => {}`, filled
+      // in later at mount time) — a documented-but-unused parameter, not
+      // dead code. Ordinary unused local/module-level vars still get flagged.
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'no-implicit-globals': 'error',
       'no-self-assign': 'error',
       'no-constant-binary-expression': 'error',
@@ -78,7 +83,12 @@ export default defineConfig([
       globals: { ...globals.serviceworker },
     },
     rules: {
-      'no-unused-vars': 'error',
+      // argsIgnorePattern only (not varsIgnorePattern): the fleet's bus.js
+      // dispatch-table stub is a real, repo-wide convention (see
+      // client|console|superadmin/js/bus.js: `setView: (_v) => {}`, filled
+      // in later at mount time) — a documented-but-unused parameter, not
+      // dead code. Ordinary unused local/module-level vars still get flagged.
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'no-implicit-globals': 'error',
       'no-self-assign': 'error',
       'no-constant-binary-expression': 'error',
@@ -105,7 +115,12 @@ export default defineConfig([
       globals: { ...globals.node },
     },
     rules: {
-      'no-unused-vars': 'error',
+      // argsIgnorePattern only (not varsIgnorePattern): the fleet's bus.js
+      // dispatch-table stub is a real, repo-wide convention (see
+      // client|console|superadmin/js/bus.js: `setView: (_v) => {}`, filled
+      // in later at mount time) — a documented-but-unused parameter, not
+      // dead code. Ordinary unused local/module-level vars still get flagged.
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'no-implicit-globals': 'error',
       'no-self-assign': 'error',
       'no-constant-binary-expression': 'error',

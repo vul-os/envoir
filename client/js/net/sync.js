@@ -13,7 +13,7 @@
 //   Email from/to/subject/receivedAt/bodyValues → message fields
 
 import { state, resolveNodeConfig, setNetStatus, uid } from '../store.js';
-import { FOLDERS, LABELS } from '../seed.js';
+import { FOLDERS } from '../seed.js';
 import { currentIdentity } from '../identity.js';
 import { JmapClient } from './jmap.js';
 
