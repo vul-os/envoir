@@ -32,6 +32,7 @@ export function renderUser(root, actions) {
         <p>${heroSub(u, overall)}</p>
         <div class="uh-tags"><span class="pill dim sm">${icon('user')} <span class="mono">${esc(u.address)}</span></span><span class="pill dim sm">${icon('server')} <span class="mono">${esc(u.node)}</span></span></div>
       </div>
+      <button class="icon-btn" id="refresh" title="Refresh" aria-label="Refresh status">${icon('refresh')}</button>
     </section>
 
     ${u.affecting.length ? `
@@ -95,6 +96,8 @@ export function renderUser(root, actions) {
       <span class="dr-t">${esc(timeAgo(d.ts))}</span>
     </div>`;
   }).join('');
+
+  root.querySelector('#refresh').onclick = () => actions.refresh ? actions.refresh() : location.reload();
 }
 
 function heroSub(u, overall) {

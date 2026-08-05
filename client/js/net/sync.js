@@ -201,6 +201,16 @@ function reselectInbox() {
   state.ui.mailLabel = null;
 }
 
+// Bumped by every connect() call and by disconnect(), so an in-flight connect() can tell once
+// its own pullMail() resolves whether it is still the current one. #nodeconnect ("Connect &
+// sync" in settings.js) is never disabled while a connect() is in flight, and #nodedisconnect /
+// #nodesync stay clickable too if the view was rendered while already REAL — so a fast reconnect
+// double-click, or a disconnect (or a newer connect) landing mid-pull, is genuinely reachable.
+// Without this guard a superseded call would apply stale results after the fact: mergeLocalMail()
+// reads the CURRENT state.mail, which by then could be the freshly reseeded simulation from an
+// intervening disconnect(), silently resurrecting the connection the user just tore down.
+let connEpoch = 0;
+
 /**
  * Connect to the node with an explicit config, sync mail, and flip to REAL mode on success.
  * On any failure the store is left in SIMULATION mode (the demo keeps working). Returns
@@ -214,10 +224,16 @@ export async function connect(cfg) {
   // A RE-connect from real mode must not destroy locally-originated threads; the FIRST connect
   // (from sim) replaces wholesale — seed/sim data must never leak into the live mailbox.
   const wasReal = state.net.mode === 'real';
+  const myEpoch = ++connEpoch;
   setNetStatus({ status: 'connecting', error: null });
   const client = new JmapClient(cfg);
   try {
     const { threads, sessionState } = await pullMail(client);
+    if (myEpoch !== connEpoch) return { ok: false, mode: state.net.mode, reason: 'superseded' };
+    // The epoch check just above is the reentrancy guard: nothing can have called disconnect()
+    // or started a newer connect() between reading wasReal and this write without also bumping
+    // connEpoch and returning early here first.
+    // eslint-disable-next-line require-atomic-updates -- reentrancy already guarded, see comment above.
     state.mail = wasReal ? mergeLocalMail(threads) : threads;
     reselectInbox();
     setNetStatus({
@@ -226,6 +242,7 @@ export async function connect(cfg) {
     });
     return { ok: true, mode: 'real', count: threads.length };
   } catch (err) {
+    if (myEpoch !== connEpoch) return { ok: false, mode: state.net.mode, reason: 'superseded' };
     setNetStatus({ mode: 'sim', status: 'error', error: err && err.message ? err.message : String(err), client: null });
     return { ok: false, mode: 'sim', reason: err && err.message ? err.message : 'unreachable' };
   }
@@ -247,6 +264,8 @@ export async function autoConnect() {
 
 /** Drop back to SIMULATION mode (used by the Settings "Disconnect" affordance). */
 export function disconnect() {
+  // Invalidate any connect() still in flight — see the connEpoch comment above connect().
+  connEpoch++;
   setNetStatus({ mode: 'sim', status: 'idle', error: null, client: null, sessionState: null });
 }
 

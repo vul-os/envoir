@@ -294,7 +294,7 @@ async function checkPage(browser, base, path, theme, vp) {
     const dead = theme === 'dark' ? p.light : p.dark;
     if (dead > 0) fail('both-themes-visible', where,
       `${p.scope}: ${dead} off-theme image(s) painted alongside ${live} on-theme`);
-    if (live === 0 && dead === 0) return;   // page does not use the paired model
+    if (live === 0 && dead === 0) { note(`${where}: ${p.scope} — page does not use the paired-theme-image model`); return; }
     if (live === 0) fail('no-image-visible', where, `${p.scope}: nothing painted for the ${theme} theme`);
   });
   console404.forEach(u => fail('http-error', where, u));

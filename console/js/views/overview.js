@@ -11,6 +11,7 @@ import { esc, icon, safetyGrid, safetyWords, emptyState, toast, timeAgo, copyBtn
 export function render(root) {
   root.className = 'view scroll-view';
   const d = state.domain;
+  let rotateBusy = false;
   const active = state.members.filter(m => m.status === 'active');
   const sovereign = active.filter(m => m.custody === 'sovereign').length;
   const managed = active.filter(m => m.custody === 'org-managed').length;
@@ -162,9 +163,17 @@ export function render(root) {
   root.querySelectorAll('[data-go]').forEach(b => b.onclick = () => bus.setView(b.dataset.go));
   root.querySelector('.auth-facts').appendChild(copyBtn(d.authorityIk, 'Copy authority IK'));
   root.querySelector('#rotate').onclick = async () => {
+    if (rotateBusy) return;
+    rotateBusy = true;
     const ok = await collectThreshold(d.threshold, 'Rotate the directory-signing key',
       `A new directory-signing key will be generated and every future DomainDirectory version signed under it. Existing published versions remain valid under the old key in the KT log.`);
+    // Reentrancy is already guarded by the `if (rotateBusy) return;` check above this block.
+    // eslint-disable-next-line require-atomic-updates -- reentrancy already guarded, see comment above.
+    rotateBusy = false;
     if (!ok) return;
+    // Same reentrancy guard covers this write: no other invocation of this handler could have
+    // run between the read of d.threshold above and this assignment.
+    // eslint-disable-next-line require-atomic-updates -- reentrancy already guarded, see comment above.
     d.dirSigningKeyId = Math.random().toString(36).slice(2, 14) + '·dir';
     await republishDirectory('directory-signing key rotated (threshold)');
     toast(`${icon('check')} Directory key rotated · directory re-signed`);
