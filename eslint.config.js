@@ -159,16 +159,6 @@ export default defineConfig([
   // — they cannot downgrade severity — so a per-file rule override is the
   // tightest tool that keeps the finding on screen.
   {
-    // resolveIdentityAvatar(id, ...) (avatar.js) awaits gravatarUrl()/
-    // identiconDataUri() then assigns id._avatarSrc/id._avatarKind — called
-    // from identity.js's refreshAvatar() after both load/create AND any
-    // profile edit (setProfile). Whether two of those calls can overlap for
-    // the same identity object (e.g. a rapid double-save) was not ruled out,
-    // so this is left flagged rather than suppressed as safe.
-    files: ['client/js/avatar.js'],
-    rules: { 'require-atomic-updates': 'warn' },
-  },
-  {
     // connect() (net/sync.js) awaits pullMail() then assigns state.mail.
     // Its caller, the #nodeconnect handler in client/js/views/settings.js,
     // never disables the connect button during the await, so a fast double

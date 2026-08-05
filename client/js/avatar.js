@@ -67,19 +67,28 @@ export async function identiconDataUri(keyBytes, size = 128) {
 export async function resolveIdentityAvatar(id, rawPublicKeyBytes) {
   if (!id) return null;
   if (id.avatarUrl) { id._avatarSrc = id.avatarUrl; id._avatarKind = 'url'; return id._avatarSrc; }
+  // Concurrent calls for the SAME identity are reachable in practice: profileModal.js's avatar
+  // fields (URL / Gravatar toggle) and name fields each commit independently through their own
+  // debounce, and setProfile() calls refreshAvatar() unconditionally on every commit — so editing
+  // one field while another field's debounced commit is still in flight starts a second,
+  // overlapping resolution for the same `id`. Stamp a generation token before any await, and only
+  // let the call that is still the newest one when it returns actually write the result, so an
+  // in-flight call a newer edit has superseded can't clobber it with a stale value once it
+  // resolves later.
+  const gen = (id._avatarGen = (id._avatarGen || 0) + 1);
   if (id.gravatarEnabled) {
     try {
-      id._avatarSrc = await gravatarUrl(id.primary || id.name);
-      id._avatarKind = 'gravatar';
+      const src = await gravatarUrl(id.primary || id.name);
+      if (id._avatarGen === gen) { id._avatarSrc = src; id._avatarKind = 'gravatar'; }
       return id._avatarSrc;
     } catch { /* fall through to the identicon rung */ }
   }
   try {
-    id._avatarSrc = await identiconDataUri(rawPublicKeyBytes);
-    id._avatarKind = 'identicon';
+    const src = await identiconDataUri(rawPublicKeyBytes);
+    if (id._avatarGen === gen) { id._avatarSrc = src; id._avatarKind = 'identicon'; }
     return id._avatarSrc;
   } catch {
-    id._avatarSrc = null; id._avatarKind = 'initials';
-    return null;
+    if (id._avatarGen === gen) { id._avatarSrc = null; id._avatarKind = 'initials'; }
+    return id._avatarSrc ?? null;
   }
 }
