@@ -123,6 +123,8 @@ function grantModal() {
         busy = true;
         const ok = await collectThreshold(state.domain.threshold, 'Grant domain-owner authority',
           `Granting full domain authority to ${subject}. This holder will be able to participate in rotating the anchor and the directory key.`);
+        // Reentrancy is already guarded by the `if (busy) return;` check above this block.
+        // eslint-disable-next-line require-atomic-updates -- reentrancy already guarded, see comment above.
         busy = false;
         if (!ok) return;
       }

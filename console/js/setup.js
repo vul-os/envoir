@@ -71,6 +71,9 @@ export function renderSetup(onDone) {
           o.classList.add('hidden');
           onDone();
         } catch (err) {
+          // `busy` is guarded by the `if (busy) return; busy = true;` check above, so this
+          // handler cannot re-enter itself while its own await is outstanding.
+          // eslint-disable-next-line require-atomic-updates -- reentrancy already guarded, see comment above.
           busy = false; go.disabled = false; go.innerHTML = `${icon('key')} Generate authority &amp; open console`;
           toast(`${icon('warn')} Setup failed: ${esc(err.message)}`);
         }

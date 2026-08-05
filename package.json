@@ -10,10 +10,14 @@
     "docs:sync": "node scripts/sync-site-docs.mjs",
     "docs:sync:check": "node scripts/sync-site-docs.mjs --check",
     "test:client": "node --test 'client/test/**/*.test.ts'",
-    "typecheck:client": "tsc --noEmit -p client/tsconfig.json"
+    "typecheck:client": "tsc --noEmit -p client/tsconfig.json",
+    "lint": "eslint ."
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.0.0",
+    "eslint": "^10.8.0",
+    "globals": "^17.9.0",
     "typescript": "^5.7.0"
   }
 }

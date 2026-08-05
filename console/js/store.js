@@ -11,7 +11,7 @@
 //   caps      — admin role capabilities, UCAN-style, delegable + revocable (§13.5.1)
 //   audit     — the KT-logged, owner-visible event trail (§3.5, §13.5.1 "KT-logged & owner-visible")
 
-import { generateKeypair, deriveSafetyFromString, sha256, toB64u } from './crypto.js';
+import { generateKeypair, sha256, toB64u } from './crypto.js';
 
 const LS = 'envoir.console.v1';
 
@@ -155,6 +155,11 @@ export async function verifyKtCheckpoint() {
 // Produces @abc.com with a threshold-held authority, a mix of sovereign + org-managed members,
 // standing groups, delegated admin roles, and an initial KT trail. `authority` is created by
 // session.js (real keypair); this fills the rest.
+// seed() runs exactly once, from setup.js's onboarding flow, before the console has any other
+// entry point into `state` — so the several `state.x = ...` assignments below that follow an
+// `await` are not reachable by a concurrent caller. Each is annotated individually rather than
+// disabling the rule for the whole file, since a future caller of seed() from a second surface
+// would be exactly the case require-atomic-updates exists to catch.
 export async function seed(domainName, authority) {
   const now = Date.now();
   const DAY = 86400e3, HOUR = 3600e3, MIN = 60e3;
@@ -243,6 +248,7 @@ export async function seed(domainName, authority) {
       members: memberLocals.map(l => `${l}@${domainName}`), created: opts.created || (now - 100 * DAY),
     };
   };
+  // eslint-disable-next-line require-atomic-updates -- seed() single-invocation, see comment above the function.
   state.groups = [
     await gk('All staff', 'all', 'broadcast', ['you', 'ada', 'theo', 'priya', 'sam'], { membershipVisible: false, joinPolicy: 'closed' }),
     await gk('Engineering', 'team', 'channel', ['ada', 'theo', 'priya'], { joinPolicy: 'request' }),
@@ -250,6 +256,7 @@ export async function seed(domainName, authority) {
   ];
 
   // Admin capabilities (spec §13.5.1). domain-owner is the threshold root; others delegated.
+  // eslint-disable-next-line require-atomic-updates -- seed() single-invocation, see comment above the function.
   state.caps = [
     { id: uid('c'), role: 'domain-owner', subject: `you@${domainName}`, subjectName: 'You', delegatedFrom: 'domain authority (threshold)', issued: now - 210 * DAY, expires: null, revoked: false, threshold: true },
     { id: uid('c'), role: 'domain-admin', subject: `priya@${domainName}`, subjectName: 'Priya Nair', delegatedFrom: 'domain-owner', issued: now - 175 * DAY, expires: null, revoked: false },
@@ -257,11 +264,13 @@ export async function seed(domainName, authority) {
     { id: uid('c'), role: 'group-admin', subject: `theo@${domainName}`, subjectName: 'Theo Marsh', delegatedFrom: 'domain-admin', issued: now - 80 * DAY, expires: now + 90 * DAY, revoked: false },
   ];
 
+  // eslint-disable-next-line require-atomic-updates -- seed() single-invocation, see comment above the function.
   state.audit = [];
   await logEvent('domain', `Domain authority for ${domainName} established — threshold ${state.domain.threshold.m}-of-${state.domain.threshold.n}`, { threshold: true });
   await logEvent('member', `${state.members.length} members provisioned during setup`, {});
   await logEvent('role', `4 admin capabilities delegated from the domain authority`, {});
   await republishDirectory('initial member + group set');
+  // eslint-disable-next-line require-atomic-updates -- seed() single-invocation, see comment above the function.
   state.ready = true;
   persist();
 }
