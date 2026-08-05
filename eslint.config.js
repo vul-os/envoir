@@ -148,25 +148,6 @@ export default defineConfig([
       globals: { ...globals.browser },
     },
   },
-  // Residual findings, kept VISIBLE as warnings rather than silenced. Each of
-  // these is a genuine finding this linter has never run before caught — a
-  // real bug or an unconfirmed race, not a false positive — so a blanket
-  // eslint-disable would hide exactly the signal this config exists to
-  // surface. Downgrading file-by-file (never a blanket disable) keeps the
-  // gate green (`npm run lint` exits 0 on warnings) while these stay visible
-  // in `eslint .` output for someone to actually go fix. Narrower than a
-  // disable comment would be nice, but eslint-disable comments only silence
-  // — they cannot downgrade severity — so a per-file rule override is the
-  // tightest tool that keeps the finding on screen.
-  {
-    // connect() (net/sync.js) awaits pullMail() then assigns state.mail.
-    // Its caller, the #nodeconnect handler in client/js/views/settings.js,
-    // never disables the connect button during the await, so a fast double
-    // click is a real, unruled-out overlap. Left flagged, not suppressed as
-    // safe.
-    files: ['client/js/net/sync.js'],
-    rules: { 'require-atomic-updates': 'warn' },
-  },
   // The pre-existing TypeScript slice: client/test/*.test.ts runs under
   // `node --test` (Node globals, not browser), type-checked by
   // `tsc --noEmit -p client/tsconfig.json` (see package.json's
