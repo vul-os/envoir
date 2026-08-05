@@ -330,7 +330,7 @@ test('JmapClient.discover sends Basic auth and adopts the advertised account + U
   assert.equal(s.username, 'acct@node.test');
 });
 
-test('JmapClient Basic auth concatenates on the FIRST colon (RFC 7617)', (t) => {
+test('JmapClient Basic auth concatenates on the FIRST colon (RFC 7617)', () => {
   // An app-password may itself contain ':' — the credential must stay unambiguous.
   const client = new JmapClient({ username: 'you', appPassword: 'pa:ss:wd' });
   assert.equal(client.authHeader, expectedBasic('you', 'pa:ss:wd'));

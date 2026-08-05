@@ -1,16 +1,23 @@
 import js from '@eslint/js'
 import globals from 'globals'
+import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
-// envoir is DELIBERATELY plain JavaScript: client/, console/, superadmin/ and
-// status/ load via <script type="module" src="js/app.js"> with no bundler and
-// no build step at all. That's a standing rule (no bundler => no TypeScript),
-// not an oversight, so this config converts nothing — it only adds static
-// analysis to JS that has never had any. There is no TypeScript in the
-// frontend, so (unlike gitstate's web/eslint.config.js, the fleet reference
-// this file's shape follows) there is no typescript-eslint block here: its
-// type-aware rules have nothing to check without a tsconfig project, and
-// faking one would just be theater.
+// envoir's frontend is DELIBERATELY plain JavaScript: client/, console/,
+// superadmin/ and status/ load via <script type="module" src="js/app.js">
+// with no bundler and no build step at all. That's a standing rule (no
+// bundler => no TypeScript), not an oversight, so this config converts
+// nothing in those four surfaces — it only adds static analysis to JS that
+// has never had any.
+//
+// There IS a real, pre-existing TypeScript slice, though: client/test/*.test.ts
+// is genuine TypeScript, type-checked via tsc against hand-written sidecar
+// .d.ts files in client/js/ (see client/tsconfig.json) — a typed layer
+// describing the untyped runtime JS it sits beside, not something this
+// config converts INTO TypeScript. typescript-eslint legitimately applies to
+// that slice alone, at the bottom of this file, the same way gitstate's
+// web/eslint.config.js (the fleet reference this file's shape follows)
+// applies it to its own .ts/.tsx.
 export default defineConfig([
   globalIgnores([
     // Rust build output. `target/doc` alone is hundreds of generated files
@@ -123,6 +130,20 @@ export default defineConfig([
     ],
     languageOptions: {
       globals: { ...globals.browser },
+    },
+  },
+  // The pre-existing TypeScript slice: client/test/*.test.ts runs under
+  // `node --test` (Node globals, not browser) and is type-checked separately
+  // by `tsc --noEmit -p client/tsconfig.json` (see package.json's
+  // typecheck:client) against the sidecar .d.ts files in client/js/. No
+  // projectService/type-aware rules here — same call gitstate's reference
+  // config makes for its own plain .ts — this is syntax-level TS linting,
+  // not a second type-checker.
+  {
+    files: ['client/test/**/*.ts', 'client/js/**/*.d.ts'],
+    extends: [...tseslint.configs.recommended],
+    languageOptions: {
+      globals: { ...globals.node },
     },
   },
 ])
