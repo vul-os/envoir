@@ -159,15 +159,6 @@ export default defineConfig([
   // — they cannot downgrade severity — so a per-file rule override is the
   // tightest tool that keeps the finding on screen.
   {
-    // migrateModal(id) never reads `id`, unlike its siblings phraseModal(id)
-    // (uses id.phrase) and rotateModal(id) (uses id.fingerprint) right above
-    // it in the same file. The "New home" field is a static placeholder
-    // instead of anything derived from the identity being migrated — a real
-    // omission, not a documented-stub parameter.
-    files: ['client/js/views/identity.js'],
-    rules: { 'no-unused-vars': 'warn' },
-  },
-  {
     // renderUser(root, actions) never reads `actions` ({ setView, refresh }
     // from status/js/shell.js). Its sibling renderPublic (status/js/views/
     // public.js) wires actions.refresh to a working #refresh button;

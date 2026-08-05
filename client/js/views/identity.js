@@ -344,10 +344,11 @@ function rotateModal(id) {
 }
 
 function migrateModal(id) {
+  const local = (displayAddress(id) || '').split('@')[0] || 'you';
   const card = openModal(`<div class="id-modal">
     <div class="ev-detail-head"><h2>${icon('globe')} Migrate provider</h2><button class="icon-btn" id="mx">${icon('x')}</button></div>
     <p class="modal-note">${icon('info')} Because the identity is the key — not an account on a server — moving provider is a data transfer, not a rebuild. Point your address at a new home (or your own domain); the key, contacts, and history come with you.</p>
-    <label class="cfield"><span>New home</span><input id="mhome" placeholder="your own domain, or another Envoir-compatible provider" value="you@yourbrand.com"></label>
+    <label class="cfield"><span>New home</span><input id="mhome" placeholder="your own domain, or another Envoir-compatible provider" value="${esc(local)}@yourbrand.com"></label>
     <div class="ev-detail-foot"><span class="sim-tag">${icon('shield')} nothing left behind · simulated</span><div class="spacer"></div><button class="btn primary" id="mgo">Prepare migration</button></div>
   </div>`, { wide: true });
   card.querySelector('#mx').onclick = closeModal;
