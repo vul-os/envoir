@@ -159,15 +159,6 @@ export default defineConfig([
   // — they cannot downgrade severity — so a per-file rule override is the
   // tightest tool that keeps the finding on screen.
   {
-    // renderUser(root, actions) never reads `actions` ({ setView, refresh }
-    // from status/js/shell.js). Its sibling renderPublic (status/js/views/
-    // public.js) wires actions.refresh to a working #refresh button;
-    // renderUser's template has no refresh control at all — the
-    // authenticated "My status" view cannot be manually refreshed.
-    files: ['status/js/views/user.js'],
-    rules: { 'no-unused-vars': 'warn' },
-  },
-  {
     // note() (pushes onto `notes`) is defined but never called anywhere in
     // this file, so notes.forEach(...) at the bottom (the CLI's informational
     // report section) is permanently dead — whatever this was meant to
