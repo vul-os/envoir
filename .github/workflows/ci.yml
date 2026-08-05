@@ -343,14 +343,22 @@ jobs:
           cargo test --locked -p conformance-runner
           cargo run --locked -p conformance-runner | tail -40
 
-  # The JS surfaces — the published docs and the client's own unit tests.
+  # The JS surfaces — lint, typecheck, the published docs, and the client's
+  # own unit tests.
   #
-  # This job exists because both guards below already existed and ran NOWHERE.
-  # A gate that is never invoked by CI is indistinguishable from a gate that
+  # This job exists because these guards already existed and ran NOWHERE. A
+  # gate that is never invoked by CI is indistinguishable from a gate that
   # cannot fail, and this suite has shipped that shape before: `docs:sync:check`
   # was written with a real dry-run path and a coverage-count assertion, and
   # then sat unreferenced by any workflow. Writing the guard is half the work;
   # wiring it into the run is the half that makes it a gate.
+  #
+  # `lint` and `typecheck:client` had the SAME problem, discovered while
+  # adding the lint-config gate below: both scripts existed in package.json,
+  # both ran clean locally, and neither was referenced by any workflow step —
+  # `eslint .` and `tsc --noEmit -p client/tsconfig.json` could have gone red
+  # on any push and CI would have stayed green throughout. Added here, ahead
+  # of the gate that proves the lint config they run is itself real.
   #
   # No Rust, no KOTVA checkout: nothing here reads the spec repo, and adding a
   # dependency this job does not need is how a fast check becomes a slow one
@@ -367,6 +375,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Lint (client/console/superadmin/status buildless JS + client/test TS)
+        run: npm run lint
+
+      - name: Typecheck client/test against client/tsconfig.json
+        run: npm run typecheck:client
+
+      # Behavioural gate for the lint config itself: proves type-aware rules
+      # actually resolve type information in client/test/**/*.ts (a config
+      # can say recommendedTypeChecked and still not resolve types), that
+      # typescript is pinned exactly with node_modules agreeing (this repo's
+      # package.json had `^5.7.0` until today — a caret that would silently
+      # resolve an untested major and break typescript-eslint entirely), a
+      # real file-coverage floor, and — specific to this repo's buildless
+      # surfaces — that no-undef fires on a typo'd global, the one static
+      # defence client/console/superadmin/status have against that class of
+      # bug.
+      - name: Lint config gate (type-awareness, TS pin, coverage floor, no-undef)
+        run: npm run check:lint-config
 
       # `docs/` is the single source of truth; `site/docs/*.md` is GENERATED
       # from it by scripts/sync-site-docs.mjs. Before that script existed, nine

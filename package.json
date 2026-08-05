@@ -11,7 +11,8 @@
     "docs:sync:check": "node scripts/sync-site-docs.mjs --check",
     "test:client": "node --test 'client/test/**/*.test.ts'",
     "typecheck:client": "tsc --noEmit -p client/tsconfig.json",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "check:lint-config": "node scripts/check-lint-config.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
