@@ -159,15 +159,6 @@ export default defineConfig([
   // — they cannot downgrade severity — so a per-file rule override is the
   // tightest tool that keeps the finding on screen.
   {
-    // The #rotate handler (console/js/views/overview.js) awaits
-    // collectThreshold() then assigns d.dirSigningKeyId. Same shape as
-    // chat.js's send(): the #rotate button is never disabled during the
-    // await, so a second click before the threshold-approval flow resolves
-    // is a real, unruled-out overlap. Left flagged, not suppressed as safe.
-    files: ['console/js/views/overview.js'],
-    rules: { 'require-atomic-updates': 'warn' },
-  },
-  {
     // resolveIdentityAvatar(id, ...) (avatar.js) awaits gravatarUrl()/
     // identiconDataUri() then assigns id._avatarSrc/id._avatarKind — called
     // from identity.js's refreshAvatar() after both load/create AND any
