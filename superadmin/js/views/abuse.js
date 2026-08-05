@@ -5,8 +5,7 @@
 // credential, never to a message body, a recipient, or a sender's identity in clear (sealed sender
 // preserved, spec §6.2). Superadmin can review and, at most, throttle a credential.
 
-import { state, byKind, persist } from '../store.js';
-import { bus } from '../bus.js';
+import { state, byKind } from '../store.js';
 import { el, esc, icon, emptyState, timeAgo, repBar, repClass, toast } from '../ui.js';
 
 const SEV = { good: 'good', info: 'accent', warn: 'warn', bad: 'bad' };
