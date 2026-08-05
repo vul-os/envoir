@@ -148,17 +148,59 @@ export default defineConfig([
     },
   },
   // The pre-existing TypeScript slice: client/test/*.test.ts runs under
-  // `node --test` (Node globals, not browser) and is type-checked separately
-  // by `tsc --noEmit -p client/tsconfig.json` (see package.json's
-  // typecheck:client) against the sidecar .d.ts files in client/js/. No
-  // projectService/type-aware rules here — same call gitstate's reference
-  // config makes for its own plain .ts — this is syntax-level TS linting,
-  // not a second type-checker.
+  // `node --test` (Node globals, not browser), type-checked by
+  // `tsc --noEmit -p client/tsconfig.json` (see package.json's
+  // typecheck:client) against the sidecar .d.ts files in client/js/.
+  // client/tsconfig.json is a real, self-contained project (strict, noEmit,
+  // `include` covering exactly these two globs) that `tsc` already resolves
+  // cleanly on its own — so, unlike a repo whose only tsconfig can't build a
+  // clean program, type-aware rules genuinely apply here. recommendedTypeChecked
+  // + the explicit `project` pointer below give this slice the full type-aware
+  // set (no-floating-promises included), not just the syntax-only rules a
+  // missing/broken project would silently fall back to.
   {
     files: ['client/test/**/*.ts', 'client/js/**/*.d.ts'],
-    extends: [...tseslint.configs.recommended],
+    extends: [...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       globals: { ...globals.node },
+      parserOptions: {
+        project: ['./client/tsconfig.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      // node:test's test() returns a Promise that the RUNNER awaits
+      // internally once registration finishes — the call site is meant to be
+      // fire-and-forget, not `await`ed itself. That idiom is exactly what
+      // no-floating-promises exists to flag elsewhere, so with type-aware
+      // rules on it fires on all ~70 `test('...', async () => {...})` calls
+      // in this suite, none of which are an unhandled rejection. Rather than
+      // turning the rule off for the whole slice (which would also blind it
+      // to a genuinely unawaited promise inside a test body), allowlist just
+      // the node:test `test` import by its declaration site — the rule stays
+      // live everywhere else in these files.
+      '@typescript-eslint/no-floating-promises': [
+        'error',
+        {
+          allowForKnownSafeCalls: [
+            { from: 'package', name: 'test', package: 'node:test' },
+          ],
+        },
+      ],
+      // net.test.ts inspects captured fetch bodies via JSON.parse(), which
+      // `lib.dom`/`lib.es5` type as `any` — every assertion that then reads a
+      // field off the parsed body (`.from`, `.to`, `.methodCalls`, `.body`)
+      // trips the no-unsafe-* triad. That's inherent to asserting on an
+      // ad-hoc wire payload in a test, not a real type hole in app code.
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      // Several tests stand up a hand-rolled fake matching JmapClient's
+      // async surface (see net.test.ts's `fake.mailboxGet`/`emailQueryGet`/
+      // `emailChanges`) — `async` there only to return a Promise matching
+      // the real client's interface, with nothing to await in the body.
+      // That's a deliberate test-double shape, not an accidentally-async fn.
+      '@typescript-eslint/require-await': 'off',
     },
   },
 ])
