@@ -4,7 +4,7 @@
 // pinned messages, day dividers, typing/presence (opt-in, labelled metadata-sensitive).
 
 import { state } from '../store.js';
-import { person, PEOPLE } from '../seed.js';
+import { person } from '../seed.js';
 import { el, esc, icon, avatar, timeAgo, fmtClock, fmtDay, emptyState, trustPill, toast, openModal, closeModal, emojiPanel } from '../ui.js';
 import { buildMote, KIND } from '../mote.js';
 import { bus } from '../bus.js';
@@ -207,7 +207,7 @@ function drawMain(root) {
 
 function dayDivLabel(t) {
   const d = new Date(t), today = new Date();
-  const diff = Math.round((today.setHours(0,0,0,0) - new Date(t).setHours(0,0,0,0)) / 86400e3);
+  const diff = Math.round((today.setHours(0,0,0,0) - d.setHours(0,0,0,0)) / 86400e3);
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Yesterday';
   return fmtDay(t);
