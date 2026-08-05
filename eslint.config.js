@@ -15,9 +15,10 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 // .d.ts files in client/js/ (see client/tsconfig.json) — a typed layer
 // describing the untyped runtime JS it sits beside, not something this
 // config converts INTO TypeScript. typescript-eslint legitimately applies to
-// that slice alone, at the bottom of this file, the same way gitstate's
-// web/eslint.config.js (the fleet reference this file's shape follows)
-// applies it to its own .ts/.tsx.
+// that slice alone, at the bottom of this file, with full type-aware rules
+// (recommendedTypeChecked against client/tsconfig.json's own real, resolvable
+// project) since that tsconfig already type-checks this exact file set on
+// its own via `tsc --noEmit -p client/tsconfig.json`.
 export default defineConfig([
   globalIgnores([
     // Rust build output. `target/doc` alone is hundreds of generated files
