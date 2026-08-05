@@ -68,7 +68,7 @@ function drawDetail(root, g) {
 
     <div class="gr-explain-card">${icon('info')} Sending to <span class="key">${esc(g.address)}</span> ${g.mode === 'broadcast'
       ? 'fans out a per-member sealed copy to every subscriber (they don\'t see each other).'
-      : 'posts to the shared, ordered channel — every member sees it and each other.'} Membership is the group\'s MLS roster; every add/remove/role change is member-signed and appears in the group\'s hash-chained log (spec §5.8.2).</div>
+      : 'posts to the shared, ordered channel — every member sees it and each other.'} Membership is the group's MLS roster; every add/remove/role change is member-signed and appears in the group's hash-chained log (spec §5.8.2).</div>
 
     <div class="gr-sect-head">
       <h3>Members <span class="list-count">${g.members.length}</span></h3>
