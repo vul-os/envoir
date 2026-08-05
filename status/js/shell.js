@@ -115,7 +115,7 @@ function renderError(root, msg) {
 }
 
 // ---- sign-in (demo) -----------------------------------------------------------------------
-function signInModal(then) {
+function signInModal() {
   const card = openModal(`
     <div class="modal-head"><h2>${icon('lock')} Sign in to My status</h2><button class="icon-btn" id="sx" aria-label="Close">${icon('x')}</button></div>
     <div class="modal-body">
