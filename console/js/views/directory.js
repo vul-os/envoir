@@ -8,7 +8,7 @@
 //   2. Membership visibility is a disclosed org choice: `public` (world-listable staff page) vs
 //      `members-only` (roster served only to authenticated members).
 
-import { state, directoryEntries, republishDirectory, logEvent, member } from '../store.js';
+import { state, directoryEntries, republishDirectory, logEvent } from '../store.js';
 import { bus } from '../bus.js';
 import { el, esc, icon, custodyBadge, toast, fmtDate, emptyState, copyBtn } from '../ui.js';
 

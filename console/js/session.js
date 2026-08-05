@@ -11,7 +11,7 @@
 //     mere existence — and the ability to sign as those members — is the disclosed cost of that
 //     model; sovereign members are never in here (their private key was discarded at creation).
 
-import { generateKeypair, signWithPriv, toB64u, fromB64u } from './crypto.js';
+import { generateKeypair, signWithPriv, toB64u } from './crypto.js';
 import { openModal, closeModal, icon, esc, toast } from './ui.js';
 
 const LS_AUTH = 'envoir.console.authority.v1';
