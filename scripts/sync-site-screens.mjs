@@ -52,11 +52,11 @@ function optimizeImage(path) {
   try {
     execFileSync('magick', [path, '-resize', `${MAX_WIDTH}x>`, '-strip', '-colors', '256', `PNG8:${path}`], { stdio: 'ignore' });
     return 'magick';
-  } catch (e) {
+  } catch {
     try {
       execFileSync('sips', ['-Z', String(MAX_WIDTH), path], { stdio: 'ignore' });
       return 'sips';
-    } catch (e2) {
+    } catch {
       console.error(`sync-site-screens: WARNING — neither magick nor sips could run on ${path}; shipping the full-size, unoptimized copy.`);
       return null;
     }

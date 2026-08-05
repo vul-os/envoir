@@ -3,7 +3,7 @@
 // the loading / error orchestration: a short simulated fetch shows a shimmer, an offline hash
 // shows the error state with retry, otherwise the active view renders.
 
-import { state, rebuild, persist, setTheme, setScenario, signIn, signOut } from './store.js';
+import { state, rebuild, setTheme, setScenario, signIn, signOut } from './store.js';
 import { esc, icon, brandMark, shimmerRows, errorState, openModal, closeModal, toast } from './ui.js';
 import { renderPublic } from './views/public.js';
 import { renderUser } from './views/user.js';

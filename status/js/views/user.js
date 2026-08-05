@@ -5,7 +5,7 @@
 // it answers "is MY mail working right now, and if not, why?".
 
 import { state, componentMeta } from '../store.js';
-import { esc, icon, healthDot, healthPill, emptyState, meter, timeAgo, fmtLong, fmtBytes, COMP } from '../ui.js';
+import { esc, icon, healthPill, emptyState, meter, timeAgo, fmtBytes, COMP } from '../ui.js';
 
 const DELIVERY = {
   delivered: { cls: 'good', label: 'Delivered', icon: 'check' },

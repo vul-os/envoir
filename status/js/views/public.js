@@ -4,7 +4,7 @@
 // quiet), and a past-incident history. Legible at a glance, honest about scope.
 
 import { state, componentMeta } from '../store.js';
-import { esc, icon, healthDot, healthPill, uptimeBars, emptyState, timeAgo, fmtLong, pct, OVERALL, COMP } from '../ui.js';
+import { esc, icon, healthDot, uptimeBars, emptyState, timeAgo, fmtLong, pct, OVERALL, COMP } from '../ui.js';
 
 const IMPACT = { none: 'dim', minor: 'warn', major: 'bad', critical: 'bad' };
 const UPD = { investigating: 'bad', identified: 'warn', monitoring: 'accent', resolved: 'good', maintenance: 'accent' };
