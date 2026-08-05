@@ -12,7 +12,7 @@
 // Offboarding diverges honestly: a sovereign member's KEY SURVIVES (only the name binding is
 // revoked); an org-managed mailbox can be retained by the org (§3.10.5).
 
-import { state, uid, member, rolesOf, republishDirectory, logEvent, hueFor, group } from '../store.js';
+import { state, uid, member, rolesOf, republishDirectory, logEvent, hueFor } from '../store.js';
 import { generateKeypair } from '../crypto.js';
 import { escrowStore, escrowDrop, escrowHas, impersonateSign } from '../session.js';
 import { bus } from '../bus.js';

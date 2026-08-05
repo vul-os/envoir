@@ -4,9 +4,9 @@
 // pressure and provider mix are shown per region. Incidents are managed here (acknowledge /
 // resolve). Simulated — a production superadmin reads the operator's scaler + provider registry.
 
-import { state, REGIONS, regionName, regionFlag, liveFleet, persist } from '../store.js';
+import { state, regionName, regionFlag, persist } from '../store.js';
 import { bus } from '../bus.js';
-import { esc, icon, emptyState, timeAgo, meter, toast, openModal, closeModal } from '../ui.js';
+import { esc, icon, emptyState, timeAgo, meter, toast } from '../ui.js';
 
 const SEV = { critical: 'bad', major: 'bad', minor: 'warn', info: 'accent' };
 

@@ -43,6 +43,7 @@ export async function loadPuppeteer() {
       `Could not load puppeteer-core from:\n  ${path}\n` +
       `Set PUPPETEER_CORE_PATH to puppeteer-core's ESM entrypoint (or npm-install puppeteer-core ` +
       `locally and point this at it).\nOriginal error: ${err.message}`,
+      { cause: err },
     );
   }
 }

@@ -6,7 +6,7 @@ import { state, saveSettings, applyFilters, uid, unblockSender, allowSender, blo
 import { LABELS } from '../seed.js';
 import { currentIdentity, displayAddress, displayName, logout, addAlias, removeAlias, makePrimary } from '../identity.js';
 import { claimHandle } from '../mesh-sim.js';
-import { el, esc, icon, avatar, toast, openModal, closeModal } from '../ui.js';
+import { esc, icon, avatar, toast, openModal, closeModal } from '../ui.js';
 import { renderSignin } from '../signin.js';
 import { bus } from '../bus.js';
 import { SHORTCUTS } from '../shell.js';

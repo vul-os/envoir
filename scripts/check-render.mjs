@@ -476,6 +476,9 @@ async function main() {
       const ok = await selftest(browser, base);
       console.log(ok ? '\nSELF-TEST PASS — every check discriminates.'
                      : '\nSELF-TEST FAIL — a check did not notice its own defect.');
+      // This is a single sequential CLI run (`node scripts/check-render.mjs`); nothing else in
+      // the process touches `process.exitCode` concurrently.
+      // eslint-disable-next-line require-atomic-updates -- sequential CLI script, see comment above.
       process.exitCode = ok ? 0 : 1;
       return;
     }
@@ -511,6 +514,8 @@ async function main() {
           console.error(`    ${f.where}\n      ${f.detail}`);
         });
       }
+      // Same single sequential CLI run as above — see comment there.
+      // eslint-disable-next-line require-atomic-updates -- sequential CLI script, see comment above.
       process.exitCode = 1;
     } else {
       console.log('\ncheck-render: clean');

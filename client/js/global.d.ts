@@ -7,7 +7,6 @@
 import type { NodeConfig } from './store.js';
 
 declare global {
-  // eslint-disable-next-line no-var
   var __ENVOIR_NODE__: Partial<NodeConfig> | undefined;
 }
 

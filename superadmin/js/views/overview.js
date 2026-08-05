@@ -4,7 +4,7 @@
 // answer "is the fleet healthy, and where does it hurt?" in one screen.
 
 import {
-  state, counts, byKind, liveFleet, KIND, REGIONS, regionName, regionFlag, meterTotals, openIncidents,
+  state, counts, liveFleet, KIND, REGIONS, regionName, regionFlag, meterTotals, openIncidents,
   ktWitnessFresh, ktWitnessSplit, ktStaleCount, ktSplitCount, ktReverify, SELF_OPERATOR,
 } from '../store.js';
 import { bus } from '../bus.js';

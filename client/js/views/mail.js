@@ -2,7 +2,7 @@
 // Folders + labels rail · conversation-threaded list with multi-select + bulk actions ·
 // reading pane with per-message verified badges, legacy-origin marking, and the MOTE inspector.
 
-import { state, threadsIn, thread, unreadCount, lastTime, parseSearch, matchThread, searchIsGlobal, blockSender, allowSender, threadSender, uid, saveSettings } from '../store.js';
+import { state, threadsIn, thread, unreadCount, lastTime, parseSearch, matchThread, searchIsGlobal, blockSender, allowSender, threadSender, saveSettings } from '../store.js';
 import { FOLDERS, LABELS, person, fmtBytes } from '../seed.js';
 import { el, esc, icon, avatar, timeAgo, fmtLong, trustPill, emptyState, verifiedGlyph, showInspector, litHop, toast, renderBody, commandMenu } from '../ui.js';
 import { buildMote, KIND } from '../mote.js';
@@ -13,7 +13,6 @@ import { openCompose } from '../compose.js';
 import { respondRsvp, RSVP } from './calendar.js';
 
 export function render(root) {
-  const ui = state.ui;
   root.className = 'view mail-view' + (state.settings.mailDensity === 'compact' ? ' compact' : '');
   root.innerHTML = `
     <aside class="mail-rail">

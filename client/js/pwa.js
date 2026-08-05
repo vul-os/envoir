@@ -34,6 +34,10 @@ export async function promptInstall() {
   if (!deferredInstallPrompt) return { outcome: 'unavailable' };
   deferredInstallPrompt.prompt();
   const choice = await deferredInstallPrompt.userChoice;
+  // The browser's BeforeInstallPromptEvent fires its `userChoice` promise exactly once per
+  // captured event; nothing re-fires or reassigns `deferredInstallPrompt` while this await is
+  // pending.
+  // eslint-disable-next-line require-atomic-updates -- single-fire event, see comment above.
   deferredInstallPrompt = null;
   fireInstallListeners();
   return choice;

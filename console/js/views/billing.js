@@ -24,7 +24,6 @@ export function render(root) {
   root.className = 'view scroll-view';
   const d = state.domain;
   const p = d.policy;
-  const tier = TIERS[d.billing.tier] || TIERS.gateway_domain;
   const m = effectiveMeters();
 
   const lines = [

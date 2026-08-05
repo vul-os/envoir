@@ -3,7 +3,7 @@
 // the bus so view modules can trigger re-renders without importing the shell (no cycle).
 
 import { state, initStore, saveSettings } from './store.js';
-import { currentIdentity, displayAddress, displayName, selfPerson } from './identity.js';
+import { currentIdentity, displayAddress, selfPerson } from './identity.js';
 import { PEOPLE } from './seed.js';
 import { esc, icon, avatar, brandMark, openModal, closeModal, hideInspector, applyStagger } from './ui.js';
 import { bus } from './bus.js';

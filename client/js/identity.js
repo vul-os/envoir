@@ -104,7 +104,11 @@ export async function loadIdentity() {
     kp = { privateKey: priv };
   } catch { /* key unavailable — signing disabled, UI still works */ }
   _identity = { ...s, _kp: kp };
+  // loadIdentity() runs exactly once at app boot (see client/js/app.js) — no concurrent call
+  // can reassign `_identity` while these awaits are in flight.
+  // eslint-disable-next-line require-atomic-updates -- single-invocation guarantee, see above.
   if (!_identity.safety) _identity.safety = await deriveSafety(fromB64u(s.pub || s.ik));
+  // eslint-disable-next-line require-atomic-updates -- single-invocation guarantee, see above.
   if (!_identity.keyName) _identity.keyName = await deriveKeyName(fromB64u(s.pub || s.ik));
   if (!_identity.addresses) _identity.addresses = [alias(_identity.primary || _identity.name, 'primary')];
   if (_identity.givenName == null) _identity.givenName = '';
