@@ -159,17 +159,6 @@ export default defineConfig([
   // — they cannot downgrade severity — so a per-file rule override is the
   // tightest tool that keeps the finding on screen.
   {
-    // send() (chat.js) awaits buildMote() then clears inp.value — a textbook
-    // require-atomic-updates shape. Unlike the six already-suppressed
-    // instances elsewhere in this config, this one could NOT be confirmed
-    // single-invocation-safe: the #cs send button is never disabled while
-    // the await is in flight, so a fast second send (or the user typing
-    // during network latency) is a real, unruled-out overlap. Left flagged,
-    // not suppressed as safe.
-    files: ['client/js/views/chat.js'],
-    rules: { 'require-atomic-updates': 'warn' },
-  },
-  {
     // The #rotate handler (console/js/views/overview.js) awaits
     // collectThreshold() then assigns d.dirSigningKeyId. Same shape as
     // chat.js's send(): the #rotate button is never disabled during the

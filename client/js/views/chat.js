@@ -135,9 +135,15 @@ function drawMain(root) {
   const inp = wrap.querySelector('#ci');
   const send = async () => {
     const v = inp.value.trim(); if (!v) return;
+    // Clear (and thereby re-entry-guard) the input BEFORE the await, not after: the #cs button
+    // and Enter-to-send are never disabled while buildMote is in flight, so a fast second send
+    // (click, or Enter again) used to re-read the still-full input and resend the same text.
+    // Clearing synchronously means a second read during the await sees '' and no-ops at the
+    // `if (!v) return;` guard above.
+    inp.value = '';
     c.msgs.push({ from: 'you', me: true, t: Date.now(), body: v, reactions: {} });
     await buildMote({ to: isCh ? g.address : person(c.with).address, kind: KIND.chat, body: v, tier: 'fast', group: g || null });
-    inp.value = ''; bus.rerender();
+    bus.rerender();
     if (!isCh && Math.random() > 0.4) setTimeout(() => { c.typing = true; if (state.ui.selChat === c.id) bus.rerender();
       setTimeout(() => { c.typing = false; c.msgs.push({ from: c.with, me: false, t: Date.now(), body: pick(REPLIES), reactions: {} }); if (state.ui.selChat === c.id) bus.rerender(); }, 1400); }, 700);
   };
