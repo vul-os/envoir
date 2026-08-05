@@ -2,7 +2,7 @@
 // Provisioning), a topbar with the operator identity, fleet-health summary + search, and view
 // dispatch. Fills the bus so views trigger re-renders without importing the shell (no cycle).
 
-import { state, persist, wipe, counts, seed, openIncidents, SELF_OPERATOR } from './store.js';
+import { state, persist, wipe, counts, openIncidents, SELF_OPERATOR } from './store.js';
 import { esc, icon, brandMark, openModal, closeModal, toast, healthDot } from './ui.js';
 import { bus } from './bus.js';
 
