@@ -8,9 +8,9 @@
 import { state } from '../store.js';
 import { currentIdentity, displayAddress, displayName, logout, fromB64u, gatewayAlias } from '../identity.js';
 import { verifySafety } from '../safety.js';
-import { PEOPLE, person } from '../seed.js';
-import { el, esc, icon, avatar, initials, brandMark, toast, openModal, closeModal,
-  safetyWords, safetyGrid, safetyNumeric, timeAgo, fmtLong } from '../ui.js';
+import { PEOPLE } from '../seed.js';
+import { esc, icon, initials, toast, openModal, closeModal,
+  safetyWords, safetyGrid, safetyNumeric, timeAgo } from '../ui.js';
 import { classifyName, resolverChip, resolverDetail } from '../resolver.js';
 import { bus } from '../bus.js';
 import { openEditProfile } from '../profileModal.js';
