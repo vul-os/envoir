@@ -375,6 +375,31 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: envoir/package-lock.json
+
+      # REQUIRED, and it was missing. This job predates the lint/typecheck steps
+      # below: its original two steps (`docs:sync:check`, `test:client`) run on
+      # Node built-ins alone (`node scripts/sync-site-docs.mjs`, `node --test`),
+      # so it never needed an install and none was here. The three steps added
+      # below all resolve binaries/imports out of node_modules — `eslint` and
+      # `tsc` from .bin, and check-lint-config.mjs `import { ESLint } from
+      # 'eslint'` — so without this step every one of them dies before it lints
+      # a single file. Measured in a clean `git archive HEAD` checkout, which is
+      # what a CI runner has:
+      #
+      #   npm run lint              -> sh: eslint: command not found   (exit 127)
+      #   npm run typecheck:client  -> sh: tsc: command not found      (exit 127)
+      #   npm run check:lint-config -> ERR_MODULE_NOT_FOUND: 'eslint'  (exit 1)
+      #
+      # That fails red rather than passing green, so it is not this suite's usual
+      # silent-no-op pathology — but the gate still could not have caught a real
+      # lint or type error on any push, which is the thing wiring it into CI was
+      # supposed to buy. `npm ci` (not `install`) so the exact pinned typescript
+      # 6.0.3 from package-lock.json is what gets checked, which is precisely the
+      # property the lint-config gate's Assertion B asserts.
+      - name: Install JS toolchain (eslint, typescript)
+        run: npm ci
 
       - name: Lint (client/console/superadmin/status buildless JS + client/test TS)
         run: npm run lint
