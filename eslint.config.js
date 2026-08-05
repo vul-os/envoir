@@ -159,14 +159,6 @@ export default defineConfig([
   // — they cannot downgrade severity — so a per-file rule override is the
   // tightest tool that keeps the finding on screen.
   {
-    // note() (pushes onto `notes`) is defined but never called anywhere in
-    // this file, so notes.forEach(...) at the bottom (the CLI's informational
-    // report section) is permanently dead — whatever this was meant to
-    // surface never does.
-    files: ['scripts/check-render.mjs'],
-    rules: { 'no-unused-vars': 'warn' },
-  },
-  {
     // send() (chat.js) awaits buildMote() then clears inp.value — a textbook
     // require-atomic-updates shape. Unlike the six already-suppressed
     // instances elsewhere in this config, this one could NOT be confirmed
