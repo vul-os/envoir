@@ -10,6 +10,13 @@
 // current count of what's left.
 
 import { fmtBytes } from './seed.js';
+import {
+  el, esc, initials, openModal, closeModal,
+  toast as _sharedToast, shimmerRows as _sharedShimmerRows, emptyState as _sharedEmptyState,
+} from '../../shared/js/ui.js';
+// el/esc/initials/openModal/closeModal reproduce this app's exact prior behaviour under
+// shared/js/ui.js's defaults (see that file's header) — plain re-exports, not wrappers.
+export { el, esc, initials, openModal, closeModal };
 
 /** The minimal text-node shape sanitizeNode's walk needs (nodeType 3, plain text content). Real
  * DOM Text nodes and client/test/sanitize.test.ts's plain-object FakeText both satisfy this. */
@@ -38,9 +45,6 @@ import { fmtBytes } from './seed.js';
 /** @typedef {SanitizableElementNode | SanitizableTextNode} SanitizableChildNode */
 
 /** @typedef {{ childNodes: ArrayLike<SanitizableChildNode> & Iterable<SanitizableChildNode> }} SanitizableParent */
-
-export const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
-export const esc = (s) => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // Relative times localize via Intl.RelativeTimeFormat (narrow keeps list columns compact:
 // en "5m ago", ja "5分前") — same thresholds as before, calendar date past a week.
@@ -153,14 +157,7 @@ export function brandMark(size = 28, opts = {}) {
 }
 
 // ---- Avatars: deterministic gradient + initials -----------------------------------------
-/** @param {string | null | undefined} name @returns {string} */
-export function initials(name) {
-  const parts = (name || '?').replace(/^@/, '').split(/[\s.@]+/).filter(Boolean);
-  // [...s][0] takes the first CODE POINT — s[0] would split an astral-plane char (emoji,
-  // rare CJK) into a lone surrogate that renders as U+FFFD.
-  if (parts.length >= 2) return ([...parts[0]][0] + [...parts[1]][0]).toUpperCase();
-  return [...(parts[0] || '?')].slice(0, 2).join('').toUpperCase();
-}
+// initials() itself is imported from shared/js/ui.js above (byte-identical to console's).
 // A photo avatar (p.avatarUrl — a user-set public URL — or p._avatarSrc, the resolved
 // identity-avatar ladder from avatar.js) falls back to the initials tile on load error,
 // exactly like the identity hero has always done. Same call shape either way, so every caller
@@ -208,69 +205,28 @@ export function trustPill(trust) {
 }
 
 // ---- Toast --------------------------------------------------------------------------------
-export function toast(msg, opts = {}) {
-  const t = document.getElementById('toast');
-  const ms = opts.ms || 2800;
-  t.setAttribute('role', 'status');
-  t.setAttribute('aria-live', 'polite');
-  t.innerHTML = `<span>${msg}</span>${opts.action ? `<button class="toast-act">${esc(opts.action)}</button>` : ''}`;
-  t.classList.remove('hidden'); t.classList.add('show');
-  clearTimeout(t._h);
-  if (opts.action && opts.onAction) t.querySelector('.toast-act').onclick = () => { clearTimeout(t._h); t.classList.remove('show'); opts.onAction(); };
-  t._h = setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.classList.add('hidden'), 200); }, ms);
-  return t;
-}
+// Body (incl. the action-button support) now lives in shared/js/ui.js; this app's only historical
+// difference was its `ms` default (2800 vs the shared 3000), preserved here.
+/** @param {string} msg @param {import('../../shared/js/ui.js').ToastOpts} [opts] @returns {HTMLElement} */
+export function toast(msg, opts = {}) { return _sharedToast(msg, { ms: 2800, ...opts }); }
 
 // ---- Modal --------------------------------------------------------------------------------
-// Accessible dialog: role=dialog + aria-modal, a Tab focus-trap, initial focus onto the first
-// control, and focus restoration to whatever was focused before it opened.
-const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-let _modalReturnFocus = null;
-let _modalTrap = null;
-
-export function openModal(html, opts = {}) {
-  const m = document.getElementById('modal');
-  _modalReturnFocus = document.activeElement;
-  const labelAttr = opts.label ? ` aria-label="${esc(opts.label)}"` : '';
-  m.innerHTML = `<div class="modal-scrim"></div><div class="modal-card ${opts.wide ? 'wide' : ''} ${opts.compose ? 'compose-card' : ''}" role="dialog" aria-modal="true"${labelAttr}>${html}</div>`;
-  m.classList.remove('hidden');
-  requestAnimationFrame(() => m.classList.add('show'));
-  const card = m.querySelector('.modal-card');
-  m.querySelector('.modal-scrim').onclick = () => { if (!opts.sticky) closeModal(); };
-
-  // Focus trap — keep Tab within the dialog.
-  _modalTrap = (e) => {
-    if (e.key !== 'Tab') return;
-    const items = [...card.querySelectorAll(FOCUSABLE)].filter(el => el.offsetParent !== null);
-    if (!items.length) return;
-    const first = items[0], last = items[items.length - 1];
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-  };
-  card.addEventListener('keydown', _modalTrap);
-  // Initial focus: first field/control, else the dialog itself.
-  requestAnimationFrame(() => {
-    const target = card.querySelector('input, textarea, select, [autofocus]') || card.querySelector(FOCUSABLE) || card;
-    target.focus?.();
-  });
-  return card;
-}
-export function closeModal() {
-  const m = document.getElementById('modal');
-  m.classList.remove('show');
-  const ret = _modalReturnFocus; _modalReturnFocus = null; _modalTrap = null;
-  setTimeout(() => { m.classList.add('hidden'); m.innerHTML = ''; }, 180);
-  if (ret && ret.isConnected) ret.focus?.();
-}
+// openModal/closeModal are imported from shared/js/ui.js above and re-exported as-is: this app's
+// original defaults (no Escape-close, the wider initial-focus selector, `opts.compose` support)
+// are exactly shared/js/ui.js's own defaults — see that file's header for the reconciliation.
 
 // ---- Loading shimmer ----------------------------------------------------------------------
-export function shimmerRows(n = 6) {
-  return `<div class="shimmer-wrap">${Array.from({ length: n }, () => `<div class="shimmer-row"><div class="sh-av"></div><div class="sh-lines"><div class="sh-line w70"></div><div class="sh-line w40"></div></div></div>`).join('')}</div>`;
-}
+// Body now lives in shared/js/ui.js; this app's only historical difference was its `n` default
+// (6 vs shared's no-default) and that it never used the `bars` row (status alone did).
+/** @param {number} [n] @returns {string} */
+export function shimmerRows(n = 6) { return _sharedShimmerRows(n); }
 
-export function emptyState(iconName, title, sub) {
-  return `<div class="empty"><div class="empty-glow">${icon(iconName)}</div><b>${esc(title)}</b><span>${esc(sub)}</span></div>`;
-}
+// emptyState's rendering now lives in shared/js/ui.js, which takes this app's own icon() as its
+// first argument so the glyph is still this app's icon set — see that file's header. This app
+// never had the optional `actionHtml` 4th param (console/superadmin do), so this wrapper doesn't
+// forward one either — behaviour is unchanged either way.
+/** @param {string} iconName @param {string} title @param {string} sub @returns {string} */
+export function emptyState(iconName, title, sub) { return _sharedEmptyState(icon, iconName, title, sub); }
 
 // ---- Rich-text body rendering (spec §17#8 rich text/HTML) ----------------------------------
 // Messages may carry HTML bodies (composed in the rich editor). We render our own composed HTML
