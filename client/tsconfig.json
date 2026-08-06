@@ -12,10 +12,15 @@
     "both zero, and it never moves back out. Do not add a file here by widening a glob — list it",
     "explicitly so a future accidental include is visible in review.",
     "",
-    "IN (6 files, exit 0): js/global.d.ts (ambient-only, no logic), js/bus.js (16-line no-op dispatch",
-    "table — trivially small, flagged per the founder's own honesty check), js/seed.js (345 lines,",
+    "IN (7 files, exit 0): js/global.d.ts (ambient-only, no logic), js/bus.js (now a 4-line wrapper",
+    "around ../shared/js/bus.js's createBus() — see that file's own header), js/seed.js (345 lines,",
     "leaf), js/store.js (501 lines, imports only seed.js), js/net/jmap.js (358 lines, leaf),",
-    "js/net/send.js (217 lines, imports only store.js -> seed.js).",
+    "js/net/send.js (217 lines, imports only store.js -> seed.js), and ../shared/js/ui.js (2026-08-06",
+    "dedup pass: the el/esc/initials/toast/openModal/closeModal/shimmerRows/emptyState/errorState/",
+    "fmtDate helpers that used to be near-duplicated across client/console/superadmin/status's own",
+    "js/ui.js files, now typed and checked once here — added to all four apps' include for the same",
+    "reason). js/ui.js ITSELF stays OUT (98 own+closure errors below, down from 178 pre-dedup) — only",
+    "its shared dependency is ratcheted in.",
     "",
     "OUT despite '0 own errors' — closure-dirty, NOT actually clean, do not re-add without re-checking",
     "the closure: js/app.js (imports onboarding.js, shell.js, pwa.js, identity.js — all dirty below),",
@@ -27,7 +32,7 @@
     "OUT, real backlog, error count is that file's own contribution to the full 1174 (files with 0",
     "listed are closure-blocked as above, not error-free): js/avatar.js 7, js/compose.js 61,",
     "js/mesh-sim.js 7, js/mote.js 10, js/onboarding.js 45, js/profileModal.js 17, js/provenance.js 17,",
-    "js/pwa.js 15, js/resolver.js 4, js/safety.js 6, js/shell.js 70, js/signin.js 12, js/ui.js 178,",
+    "js/pwa.js 15, js/resolver.js 4, js/safety.js 6, js/shell.js 70, js/signin.js 12, js/ui.js 98,",
     "js/views/calendar.js 190, js/views/chat.js 135, js/views/contacts.js 61, js/views/files.js 58,",
     "js/views/groups.js 52, js/views/identity.js 66, js/views/mail.js 85, js/views/settings.js 78.",
     "",
@@ -63,6 +68,7 @@
     "js/seed.js",
     "js/store.js",
     "js/net/jmap.js",
-    "js/net/send.js"
+    "js/net/send.js",
+    "../shared/js/ui.js"
   ]
 }
