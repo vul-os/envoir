@@ -2,9 +2,16 @@
 // Inline stroke-SVG icons, an accessible focus-trapped modal, and the status-specific visuals
 // (status banner, health dot/pill, 90-day uptime bars). Aurora Indigo design language, shared
 // with the client / console / superadmin so the whole suite feels like one product.
-
-export const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
-export const esc = (s) => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+//
+// el/esc/fmtDate are re-exported as-is from shared/js/ui.js (byte-identical to what this app had).
+// toast/openModal/closeModal/shimmerRows/emptyState/errorState are thin wrappers supplying this
+// app's own defaults/icon() — see shared/js/ui.js's header for the full reconciliation.
+import {
+  el, esc, fmtDate,
+  toast as _sharedToast, openModal as _sharedOpenModal, closeModal as _sharedCloseModal,
+  shimmerRows as _sharedShimmerRows, emptyState as _sharedEmptyState, errorState as _sharedErrorState,
+} from '../../shared/js/ui.js';
+export { el, esc, fmtDate };
 
 // Relative times localize via Intl.RelativeTimeFormat (narrow stays compact: en "5m ago",
 // ja "5分前") — same thresholds as before, calendar date past a week.
@@ -20,7 +27,6 @@ export const timeAgo = (t) => {
 };
 export const fmtLong = (t) => new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' }) +
   ', ' + new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-export const fmtDate = (t) => new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 
 // Decimals render via toLocaleString so the separator is locale-correct ("99,99 %" territory);
 // the compact unit style is kept as-is.
@@ -112,60 +118,26 @@ export function uptimeBars(days) {
 }
 
 // ---- Toast --------------------------------------------------------------------------------
-export function toast(msg, opts = {}) {
-  const t = document.getElementById('toast');
-  t.setAttribute('role', 'status'); t.setAttribute('aria-live', 'polite');
-  t.innerHTML = `<span>${msg}</span>`;
-  t.classList.remove('hidden'); t.classList.add('show');
-  clearTimeout(t._h);
-  t._h = setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.classList.add('hidden'), 200); }, opts.ms || 2600);
-  return t;
-}
+// Body now lives in shared/js/ui.js; this app's only historical difference was its `ms` default
+// (2600 vs shared's 3000) and that it never used the action-button (inert here, grepped).
+/** @param {string} msg @param {import('../../shared/js/ui.js').ToastOpts} [opts] @returns {HTMLElement} */
+export function toast(msg, opts = {}) { return _sharedToast(msg, { ms: 2600, ...opts }); }
 
 // ---- Modal (accessible dialog) ------------------------------------------------------------
-const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-let _ret = null, _trap = null, _esc = null;
-export function openModal(html, opts = {}) {
-  const m = document.getElementById('modal');
-  _ret = document.activeElement;
-  m.innerHTML = `<div class="modal-scrim"></div><div class="modal-card ${opts.wide ? 'wide' : ''}" role="dialog" aria-modal="true"${opts.label ? ` aria-label="${esc(opts.label)}"` : ''}>${html}</div>`;
-  m.classList.remove('hidden');
-  requestAnimationFrame(() => m.classList.add('show'));
-  const card = m.querySelector('.modal-card');
-  m.querySelector('.modal-scrim').onclick = () => { if (!opts.sticky) closeModal(); };
-  _trap = (e) => {
-    if (e.key !== 'Tab') return;
-    const items = [...card.querySelectorAll(FOCUSABLE)].filter(x => x.offsetParent !== null);
-    if (!items.length) return;
-    const first = items[0], last = items[items.length - 1];
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-  };
-  card.addEventListener('keydown', _trap);
-  _esc = (e) => { if (e.key === 'Escape' && !opts.sticky) closeModal(); };
-  document.addEventListener('keydown', _esc);
-  requestAnimationFrame(() => (card.querySelector('input, [autofocus]') || card.querySelector(FOCUSABLE) || card).focus?.());
-  return card;
-}
-export function closeModal() {
-  const m = document.getElementById('modal');
-  m.classList.remove('show');
-  const ret = _ret; _ret = null; _trap = null;
-  if (_esc) { document.removeEventListener('keydown', _esc); _esc = null; }
-  setTimeout(() => { m.classList.add('hidden'); m.innerHTML = ''; }, 180);
-  if (ret && ret.isConnected) ret.focus?.();
-}
+// This app's original openModal ALWAYS wired Escape-to-close (unconditionally), like superadmin,
+// AND used a narrower initial-focus query (`input, [autofocus]` — missing textarea/select) than
+// the other three apps. Both are reproduced exactly via shared/js/ui.js's opts.
+/** @param {string} html @param {import('../../shared/js/ui.js').ModalOpts} [opts] @returns {Element} */
+export function openModal(html, opts = {}) { return _sharedOpenModal(html, { ...opts, escClose: true, initialFocusSelector: 'input, [autofocus]' }); }
+export function closeModal() { return _sharedCloseModal(); }
 
 // ---- Loading + empty + error states -------------------------------------------------------
-export function shimmerRows(n = 4) {
-  return `<div class="shimmer-wrap">${Array.from({ length: n }, () => `<div class="shimmer-row"><div class="sh-av"></div><div class="sh-lines"><div class="sh-line w70"></div><div class="sh-line w40"></div></div><div class="sh-bars"></div></div>`).join('')}</div>`;
-}
-export function emptyState(iconName, title, sub) {
-  return `<div class="empty"><div class="empty-glow">${icon(iconName)}</div><b>${esc(title)}</b><span>${esc(sub)}</span></div>`;
-}
-export function errorState(title, sub, retryId = '') {
-  return `<div class="empty err"><div class="empty-glow bad">${icon('warn')}</div><b>${esc(title)}</b><span>${esc(sub)}</span>${retryId ? `<div class="empty-act"><button class="btn" id="${retryId}">${icon('refresh')} Retry</button></div>` : ''}</div>`;
-}
+// Bodies now live in shared/js/ui.js; this app's shimmerRows always rendered the extra `.sh-bars`
+// placeholder the other three don't have (opts.bars, unconditional here, matching the original),
+// and its emptyState never had console/superadmin's `actionHtml` 4th param (matching client's).
+export function shimmerRows(n = 4) { return _sharedShimmerRows(n, { bars: true }); }
+export function emptyState(iconName, title, sub) { return _sharedEmptyState(icon, iconName, title, sub); }
+export function errorState(title, sub, retryId = '') { return _sharedErrorState(icon, title, sub, retryId); }
 export function meter(frac, cls = '') {
   const p = Math.max(0, Math.min(1, frac)) * 100;
   const c = cls || (p >= 90 ? 'bad' : p >= 75 ? 'warn' : 'good');
