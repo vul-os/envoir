@@ -2,9 +2,16 @@
 // Icons are inline stroke SVGs; avatars are deterministic gradients; the modal is an accessible
 // focus-trapped dialog. Shares the reference client's design language (client/js/ui.js) so the
 // admin console feels like part of the same product.
-
-export const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
-export const esc = (s) => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+//
+// el/esc/fmtDate/initials/toast/openModal/closeModal are re-exported as-is from shared/js/ui.js —
+// this app's own historical behaviour for every one of them was exactly shared's default (see
+// that file's header for the full reconciliation against client/superadmin/status).
+// shimmerRows/emptyState/errorState are thin wrappers supplying this app's own defaults/icon().
+import {
+  el, esc, fmtDate, initials, toast, openModal, closeModal,
+  shimmerRows as _sharedShimmerRows, emptyState as _sharedEmptyState, errorState as _sharedErrorState,
+} from '../../shared/js/ui.js';
+export { el, esc, fmtDate, initials, toast, openModal, closeModal };
 
 // Relative times localize via Intl.RelativeTimeFormat (narrow stays compact: en "5m ago",
 // ja "5分前") — same thresholds as before, calendar date past a week.
@@ -17,7 +24,6 @@ export const timeAgo = (t) => {
   if (s < 7 * 86400) return _rtf.format(-Math.floor(s / 86400), 'day');
   return new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
 };
-export const fmtDate = (t) => new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 export const fmtLong = (t) => new Date(t).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) +
   ' · ' + new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
@@ -122,13 +128,7 @@ export function sparkline(values, opts = {}) {
 }
 
 // ---- Avatars: deterministic gradient + initials -----------------------------------------
-export function initials(name) {
-  const parts = (name || '?').replace(/^@/, '').split(/[\s.@]+/).filter(Boolean);
-  // [...s][0] takes the first CODE POINT — s[0] would split an astral-plane char (emoji,
-  // rare CJK) into a lone surrogate that renders as U+FFFD.
-  if (parts.length >= 2) return ([...parts[0]][0] + [...parts[1]][0]).toUpperCase();
-  return [...(parts[0] || '?')].slice(0, 2).join('').toUpperCase();
-}
+// initials() itself is imported from shared/js/ui.js above (byte-identical to client's).
 export function avatar(name, hue = 220, size = 34) {
   return `<span class="av" style="--h:${hue};width:${size}px;height:${size}px;font-size:${Math.round(size * 0.38)}px" title="${esc(name)}">${esc(initials(name))}</span>`;
 }
@@ -147,67 +147,17 @@ export function statusPill(status) {
   return `<span class="pill accent sm">active</span>`;
 }
 
-// ---- Toast --------------------------------------------------------------------------------
-export function toast(msg, opts = {}) {
-  const t = document.getElementById('toast');
-  const ms = opts.ms || 3000;
-  t.setAttribute('role', 'status');
-  t.setAttribute('aria-live', 'polite');
-  t.innerHTML = `<span>${msg}</span>${opts.action ? `<button class="toast-act">${esc(opts.action)}</button>` : ''}`;
-  t.classList.remove('hidden'); t.classList.add('show');
-  clearTimeout(t._h);
-  if (opts.action && opts.onAction) t.querySelector('.toast-act').onclick = () => { clearTimeout(t._h); t.classList.remove('show'); opts.onAction(); };
-  t._h = setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.classList.add('hidden'), 200); }, ms);
-  return t;
-}
-
-// ---- Modal (accessible dialog: role=dialog + aria-modal, Tab focus-trap, focus restore) ----
-const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-let _modalReturnFocus = null;
-let _modalTrap = null;
-
-export function openModal(html, opts = {}) {
-  const m = document.getElementById('modal');
-  _modalReturnFocus = document.activeElement;
-  const labelAttr = opts.label ? ` aria-label="${esc(opts.label)}"` : '';
-  m.innerHTML = `<div class="modal-scrim"></div><div class="modal-card ${opts.wide ? 'wide' : ''}" role="dialog" aria-modal="true"${labelAttr}>${html}</div>`;
-  m.classList.remove('hidden');
-  requestAnimationFrame(() => m.classList.add('show'));
-  const card = m.querySelector('.modal-card');
-  m.querySelector('.modal-scrim').onclick = () => { if (!opts.sticky) closeModal(); };
-  _modalTrap = (e) => {
-    if (e.key !== 'Tab') return;
-    const items = [...card.querySelectorAll(FOCUSABLE)].filter(x => x.offsetParent !== null);
-    if (!items.length) return;
-    const first = items[0], last = items[items.length - 1];
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-  };
-  card.addEventListener('keydown', _modalTrap);
-  requestAnimationFrame(() => {
-    const target = card.querySelector('input, textarea, select, [autofocus]') || card.querySelector(FOCUSABLE) || card;
-    target.focus?.();
-  });
-  return card;
-}
-export function closeModal() {
-  const m = document.getElementById('modal');
-  m.classList.remove('show');
-  const ret = _modalReturnFocus; _modalReturnFocus = null; _modalTrap = null;
-  setTimeout(() => { m.classList.add('hidden'); m.innerHTML = ''; }, 180);
-  if (ret && ret.isConnected) ret.focus?.();
-}
+// ---- Toast, modal ---------------------------------------------------------------------------
+// toast/openModal/closeModal are imported from shared/js/ui.js above and re-exported as-is: this
+// app's original ms default (3000), Escape behaviour (none), initial-focus selector and lack of
+// opts.compose usage are exactly shared/js/ui.js's own defaults.
 
 // ---- Loading + empty + error states -------------------------------------------------------
-export function shimmerRows(n = 5) {
-  return `<div class="shimmer-wrap">${Array.from({ length: n }, () => `<div class="shimmer-row"><div class="sh-av"></div><div class="sh-lines"><div class="sh-line w70"></div><div class="sh-line w40"></div></div></div>`).join('')}</div>`;
-}
-export function emptyState(iconName, title, sub, actionHtml = '') {
-  return `<div class="empty"><div class="empty-glow">${icon(iconName)}</div><b>${esc(title)}</b><span>${esc(sub)}</span>${actionHtml ? `<div class="empty-act">${actionHtml}</div>` : ''}</div>`;
-}
-export function errorState(title, sub, retryId = '') {
-  return `<div class="empty err"><div class="empty-glow bad">${icon('warn')}</div><b>${esc(title)}</b><span>${esc(sub)}</span>${retryId ? `<div class="empty-act"><button class="btn" id="${retryId}">${icon('refresh')} Retry</button></div>` : ''}</div>`;
-}
+// Bodies now live in shared/js/ui.js; this app's only historical difference from client's was its
+// `n` default (5) and that it always had the `actionHtml`/errorState capability, preserved here.
+export function shimmerRows(n = 5) { return _sharedShimmerRows(n); }
+export function emptyState(iconName, title, sub, actionHtml = '') { return _sharedEmptyState(icon, iconName, title, sub, actionHtml); }
+export function errorState(title, sub, retryId = '') { return _sharedErrorState(icon, title, sub, retryId); }
 
 // ---- Safety-number visuals (spec §3.4) ---------------------------------------------------
 export function safetyGrid(safety) {
