@@ -12,13 +12,13 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 //
 // There IS a real, pre-existing TypeScript slice, though: client/test/*.test.ts
 // is genuine TypeScript, type-checked via tsc against hand-written sidecar
-// .d.ts files in client/js/ (see client/tsconfig.json) — a typed layer
-// describing the untyped runtime JS it sits beside, not something this
-// config converts INTO TypeScript. typescript-eslint legitimately applies to
-// that slice alone, at the bottom of this file, with full type-aware rules
-// (recommendedTypeChecked against client/tsconfig.json's own real, resolvable
-// project) since that tsconfig already type-checks this exact file set on
-// its own via `tsc --noEmit -p client/tsconfig.json`.
+// .d.ts files in client/js/ — a typed layer describing the untyped runtime
+// JS it sits beside, not something this config converts INTO TypeScript.
+// typescript-eslint legitimately applies to that slice alone, at the bottom
+// of this file, with full type-aware rules (recommendedTypeChecked against
+// client/tsconfig.eslint.json, a project scoped for ESLint's own type
+// resolution — see that file's header for why it's separate from
+// client/tsconfig.json, the narrower typecheck:client CI gate).
 export default defineConfig([
   globalIgnores([
     // Rust build output. `target/doc` alone is hundreds of generated files
@@ -149,23 +149,30 @@ export default defineConfig([
     },
   },
   // The pre-existing TypeScript slice: client/test/*.test.ts runs under
-  // `node --test` (Node globals, not browser), type-checked by
-  // `tsc --noEmit -p client/tsconfig.json` (see package.json's
-  // typecheck:client) against the sidecar .d.ts files in client/js/.
-  // client/tsconfig.json is a real, self-contained project (strict, noEmit,
-  // `include` covering exactly these two globs) that `tsc` already resolves
-  // cleanly on its own — so, unlike a repo whose only tsconfig can't build a
-  // clean program, type-aware rules genuinely apply here. recommendedTypeChecked
-  // + the explicit `project` pointer below give this slice the full type-aware
-  // set (no-floating-promises included), not just the syntax-only rules a
-  // missing/broken project would silently fall back to.
+  // `node --test` (Node globals, not browser). Type-aware linting here reads
+  // from client/tsconfig.eslint.json, NOT client/tsconfig.json — the latter
+  // is the typecheck:client CI gate and, as of 2026-08-06, its `include` is a
+  // ratchet scoped to only the client/js files that are currently fully
+  // clean, which does not cover client/test/**/*.ts or most of client/js/.
+  // typescript-eslint's parserOptions.project requires the linted file to be
+  // reachable from the given project's `include`, so pointing this block at
+  // the narrowed tsconfig.json would break outright ("file was not found in
+  // any of the provided project(s)") rather than just lose coverage.
+  // tsconfig.eslint.json carries the old, broad include (test/**/*.ts,
+  // js/**/*.d.ts, js/**/*.js) purely so the TS language service backing
+  // these rules can resolve type info for these files — it is never run as
+  // a `tsc --noEmit` gate itself, so the fact that the wider client/js/ set
+  // still has real errors doesn't block linting. recommendedTypeChecked +
+  // the explicit `project` pointer below give this slice the full type-aware
+  // rule set (no-floating-promises included), not just the syntax-only rules
+  // a missing/broken project would silently fall back to.
   {
     files: ['client/test/**/*.ts', 'client/js/**/*.d.ts'],
     extends: [...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       globals: { ...globals.node },
       parserOptions: {
-        project: ['./client/tsconfig.json'],
+        project: ['./client/tsconfig.eslint.json'],
         tsconfigRootDir: import.meta.dirname,
       },
     },
