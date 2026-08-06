@@ -45,6 +45,7 @@ export const esc = (s) => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => (
 // Relative times localize via Intl.RelativeTimeFormat (narrow keeps list columns compact:
 // en "5m ago", ja "5分前") — same thresholds as before, calendar date past a week.
 const _rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto', style: 'narrow' });
+/** @param {number} t @returns {string} */
 export const timeAgo = (t) => {
   const s = (Date.now() - t) / 1000;
   if (s < 45) return _rtf.format(0, 'second'); // numeric:'auto' → "now"
@@ -152,6 +153,7 @@ export function brandMark(size = 28, opts = {}) {
 }
 
 // ---- Avatars: deterministic gradient + initials -----------------------------------------
+/** @param {string | null | undefined} name @returns {string} */
 export function initials(name) {
   const parts = (name || '?').replace(/^@/, '').split(/[\s.@]+/).filter(Boolean);
   // [...s][0] takes the first CODE POINT — s[0] would split an astral-plane char (emoji,
