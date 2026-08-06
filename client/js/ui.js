@@ -1,8 +1,43 @@
 // ui.js — rendering primitives. Pure DOM, no framework. Icons are inline SVG (no external
 // assets). Avatars are deterministic gradients. Includes the MOTE inspector (spec §2.1) and
 // the safety-number visuals (spec §3.4 verification).
+//
+// sanitizeNode's JSDoc typedefs below are this module's own single source of truth for the
+// allow-list walk's minimal node shape (replacing what used to be a hand-written sidecar
+// ui.d.ts — deleted, see client/tsconfig.json's header comment for why a colocated same-named
+// .d.ts shadows its .js for module resolution once checkJs is on). The rest of ui.js's much
+// larger DOM-rendering surface is not yet annotated — see the client typecheck report for the
+// current count of what's left.
 
 import { fmtBytes } from './seed.js';
+
+/** The minimal text-node shape sanitizeNode's walk needs (nodeType 3, plain text content). Real
+ * DOM Text nodes and client/test/sanitize.test.ts's plain-object FakeText both satisfy this. */
+/**
+ * @typedef {Object} SanitizableTextNode
+ * @property {number} nodeType
+ * @property {string | null} [textContent]
+ */
+
+/** The minimal element-node shape sanitizeNode's walk needs (nodeType 1). Deliberately loose —
+ * real callers pass a live DOM Element; tests pass a plain-object stand-in with the same shape
+ * (client/test/sanitize.test.ts's FakeElement). */
+/**
+ * @typedef {Object} SanitizableElementNode
+ * @property {number} nodeType
+ * @property {string} tagName
+ * @property {string | null} [textContent]
+ * @property {ArrayLike<SanitizableChildNode> & Iterable<SanitizableChildNode>} childNodes
+ * @property {Array<{ name: string, value: string }>} attributes
+ * @property {(name: string) => string | null} getAttribute
+ * @property {(name: string, value: string) => void} setAttribute
+ * @property {(name: string) => void} removeAttribute
+ * @property {(node: SanitizableChildNode) => void} replaceWith
+ */
+
+/** @typedef {SanitizableElementNode | SanitizableTextNode} SanitizableChildNode */
+
+/** @typedef {{ childNodes: ArrayLike<SanitizableChildNode> & Iterable<SanitizableChildNode> }} SanitizableParent */
 
 export const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
 export const esc = (s) => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -248,9 +283,18 @@ export const SANITIZE_ALLOWED_TAGS = new Set(['B','STRONG','I','EM','U','A','UL'
 // survive, which attributes survive, the href-scheme check, the forced rel/target on <a>) is the
 // part most at risk of a hand-written mistake, and that's exactly what this makes testable without
 // a browser. `mkText` defaults to a real DOM text node; tests inject a plain stand-in instead.
+/**
+ * @param {SanitizableParent} node
+ * @param {(s: string) => SanitizableChildNode} [mkText]
+ * @returns {void}
+ */
 export function sanitizeNode(node, mkText = (s) => document.createTextNode(s)) {
-  [...node.childNodes].forEach(child => {
-    if (child.nodeType === 1) {
+  [...node.childNodes].forEach(childNode => {
+    if (childNode.nodeType === 1) {
+      // Runtime-guarded by the nodeType check above; nodeType is typed as plain `number` (not a
+      // 1|3 literal) rather than narrowing the union, because it must stay assignable both from
+      // real DOM nodes (whose own .nodeType is `number`) and from the plain-object test doubles.
+      const child = /** @type {SanitizableElementNode} */ (childNode);
       if (!SANITIZE_ALLOWED_TAGS.has(child.tagName)) { // unwrap disallowed element, keep text
         child.replaceWith(mkText(child.textContent || ''));
         return;
