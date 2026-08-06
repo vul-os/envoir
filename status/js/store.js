@@ -10,6 +10,73 @@
 const LS = 'envoir.status.v1';
 const DAY = 86400e3, HOUR = 3600e3, MIN = 60e3;
 
+/** @typedef {'up' | 'degraded' | 'down'} ComponentStatus */
+
+/** @typedef {{ status: ComponentStatus, up: number, label: string }} DayHistory */
+
+/**
+ * @typedef {Object} Component
+ * @property {string} id
+ * @property {string} name
+ * @property {string} icon
+ * @property {string} desc
+ * @property {ComponentStatus} [status]
+ * @property {number} [uptime]
+ * @property {DayHistory[]} [history]
+ */
+
+/**
+ * @typedef {Object} IncidentUpdate
+ * @property {number} ts
+ * @property {string} status
+ * @property {string} body
+ */
+
+/**
+ * @typedef {Object} Incident
+ * @property {string} id
+ * @property {string} title
+ * @property {string} impact
+ * @property {string} status
+ * @property {string[]} components
+ * @property {number} started
+ * @property {IncidentUpdate[]} updates
+ */
+
+/** @typedef {{ status: string, ts: number }} Delivery */
+
+/**
+ * @typedef {Object} StatusUser
+ * @property {string} address
+ * @property {string} node
+ * @property {{ status: string, usedBytes: number, quotaBytes: number, lastSync: number }} mailbox
+ * @property {{ status: string, path: string, relayNode: string }} reachability
+ * @property {{ status: ComponentStatus }} legacy
+ * @property {Array<{ peer: string, dir: string, kind: string, status: string, ts: number }>} deliveries
+ * @property {Incident[]} affecting
+ */
+
+/**
+ * @typedef {Object} Transparency
+ * @property {{ consistent: boolean, treeSize: number, checkpointAgeMin: number, witnesses: number }} kt
+ * @property {{ status: string, lastVerifiedMin: number }} gateway
+ */
+
+/**
+ * @typedef {Object} State
+ * @property {string} view
+ * @property {string} theme
+ * @property {'operational' | 'degraded' | 'outage'} scenario
+ * @property {boolean} signedIn
+ * @property {Component[]} components
+ * @property {Incident[]} incidents
+ * @property {string} overall
+ * @property {StatusUser | null} user
+ * @property {boolean} loading
+ * @property {Transparency | null} transparency
+ */
+
+/** @type {State} */
 export const state = {
   view: 'public',        // public | user
   theme: 'dark',
@@ -24,6 +91,7 @@ export const state = {
 };
 
 // The six public components (spec-mapped surfaces of the protocol).
+/** @type {Component[]} */
 export const COMPONENTS = [
   { id: 'mail', name: 'Mail delivery', icon: 'mail', desc: 'Native JMAP send + receive across the mesh' },
   { id: 'gateway', name: 'Legacy gateway', icon: 'gateway', desc: 'SMTP ↔ DMTAP bridge for legacy correspondents (spec §7)' },
@@ -32,11 +100,14 @@ export const COMPONENTS = [
   { id: 'directory', name: 'Directory', icon: 'directory', desc: 'Name resolution + DomainDirectory (spec §3.10)' },
   { id: 'relay', name: 'Reachability relay', icon: 'relay', desc: 'Direct-first, relay-fallback delivery path (spec §4)' },
 ];
+/** @param {string} id @returns {Component | undefined} */
 export const componentMeta = (id) => COMPONENTS.find(c => c.id === id);
 
+/** @returns {void} */
 export function persist() {
   localStorage.setItem(LS, JSON.stringify({ theme: state.theme, scenario: state.scenario, signedIn: state.signedIn }));
 }
+/** @returns {void} */
 export function loadPrefs() {
   try {
     const s = JSON.parse(localStorage.getItem(LS) || '{}');
@@ -48,6 +119,7 @@ export function loadPrefs() {
 }
 
 // ---- deterministic uptime history ---------------------------------------------------------
+/** @param {number} a @returns {() => number} */
 function mulberry32(a) {
   return function () {
     a |= 0; a = (a + 0x6D2B79F5) | 0;
@@ -57,12 +129,20 @@ function mulberry32(a) {
   };
 }
 
+/**
+ * @param {number} seed
+ * @param {number[]} blips
+ * @param {ComponentStatus | null} todayStatus
+ * @returns {DayHistory[]}
+ */
 function history(seed, blips, todayStatus) {
   const rnd = mulberry32(seed);
   const now = Date.now();
+  /** @type {DayHistory[]} */
   const days = [];
   for (let i = 89; i >= 0; i--) {
     const date = new Date(now - i * DAY);
+    /** @type {ComponentStatus} */
     let status = 'up';
     if (blips.includes(i)) status = rnd() < 0.4 ? 'down' : 'degraded';
     if (i === 0 && todayStatus) status = todayStatus;
@@ -72,24 +152,29 @@ function history(seed, blips, todayStatus) {
   }
   return days;
 }
+/** @param {DayHistory[]} days @returns {number} */
 function uptime90(days) {
   const s = days.reduce((a, d) => a + d.up, 0) / days.length;
   return s;
 }
 
 // ---- scenario generation ------------------------------------------------------------------
+/** @returns {void} */
 export function rebuild() {
   const sc = state.scenario;
   const now = Date.now();
 
   // per-component current status by scenario
-  const statusMap = {
+  /** @type {Record<string, Partial<Record<string, ComponentStatus>>>} */
+  const statusMapByScenario = {
     operational: {},
     degraded: { gateway: 'degraded', mixnet: 'degraded' },
     outage: { gateway: 'down', relay: 'degraded' },
-  }[sc] || {};
+  };
+  const statusMap = statusMapByScenario[sc] || {};
 
   // seeded blips (indices of days-ago that had trouble), plus today from the scenario
+  /** @type {Record<string, number[]>} */
   const blipMap = {
     mail: [63, 41], gateway: [77, 52, 20, 3], mixnet: [58, 12], kt: [], directory: [47], relay: [70, 31, 9],
   };
@@ -142,6 +227,7 @@ export function rebuild() {
 // The public counterpart to the superadmin's KT-log-health + attestation views: cross-witness
 // consistency and how fresh the last re-verification was, without exposing any operator detail
 // beyond what a correspondent needs to trust the log and the bridge.
+/** @param {string} sc @param {number} now @returns {Transparency} */
 function buildTransparency(sc, now) {
   return {
     kt: {
@@ -158,12 +244,16 @@ function buildTransparency(sc, now) {
 }
 
 // ---- authenticated per-user health --------------------------------------------------------
+/** @returns {void} */
 export function signIn() { state.signedIn = true; buildUser(); persist(); }
+/** @returns {void} */
 export function signOut() { state.signedIn = false; state.user = null; state.view = 'public'; persist(); }
 
+/** @returns {void} */
 function buildUser() {
   const now = Date.now();
-  const comp = (id) => state.components.find(c => c.id === id) || { status: 'up' };
+  /** @param {string} id @returns {Component | { status: ComponentStatus }} */
+  const comp = (id) => state.components.find(c => c.id === id) || { status: /** @type {ComponentStatus} */ ('up') };
   const gateway = comp('gateway').status, relay = comp('relay').status, mail = comp('mail').status;
 
   // which open incidents touch a surface this user relies on
@@ -190,11 +280,13 @@ function buildUser() {
       path: relay === 'up' ? 'direct' : 'relay-fallback',
       relayNode: 'relay1.eu-central.envoir.net',
     },
-    legacy: { status: gateway },
+    legacy: { status: gateway || 'up' },
     deliveries,
     affecting,
   };
 }
 
+/** @param {State['scenario']} sc @returns {void} */
 export function setScenario(sc) { state.scenario = sc; persist(); rebuild(); }
+/** @param {string} t @returns {void} */
 export function setTheme(t) { state.theme = t; document.documentElement.setAttribute('data-theme', t); persist(); }
