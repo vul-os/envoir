@@ -1,0 +1,43 @@
+{
+  "//": [
+    "ESLINT-ONLY project, split out 2026-08-06 when client/tsconfig.json (the",
+    "typecheck:client CI gate) was scoped down to a ratchet of currently",
+    "closure-clean files. eslint.config.js's type-aware block for",
+    "client/test/**/*.ts and client/js/**/*.d.ts needs `parserOptions.project`",
+    "to point at a tsconfig whose `include` actually contains the files being",
+    "linted, or typescript-eslint fails outright with 'file was not found in",
+    "any of the provided project(s)'. That's a real constraint, not a style",
+    "choice: type-aware ESLint rules ask the TypeScript language service for",
+    "semantic info about the file being linted, and the language service only",
+    "knows about files reachable from some project's `include`.",
+    "",
+    "This is safe to keep broad (the same include client/tsconfig.json used to",
+    "have, before the ratchet): the TS language service that backs ESLint's",
+    "typed rules resolves type info per file and tolerates OTHER files in the",
+    "program having errors — it does not require the whole program to compile",
+    "cleanly, and nothing here runs `tsc --noEmit` against this file as a gate",
+    "(see package.json: only client/tsconfig.json is wired to typecheck:client).",
+    "If it ever *is* wired to a `tsc --noEmit` gate, it will fail loudly (client",
+    "still has 1174 outstanding errors on this wider file set) — do not add",
+    "this file to any CI step without first re-running the ratchet math in",
+    "client/tsconfig.json's own comment block.",
+    "",
+    "Keep this file's compilerOptions and include in sync with what",
+    "client/tsconfig.json used to declare pre-ratchet; do not let it drift into",
+    "being a second, competing source of truth for what 'the client project' is."
+  ],
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"]
+  },
+  "include": ["test/**/*.ts", "js/**/*.d.ts", "js/**/*.js"]
+}
