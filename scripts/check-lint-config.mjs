@@ -28,10 +28,14 @@
  * ENVOIR FORK NOTE: envoir's frontend (client/, console/, superadmin/,
  * status/) is DELIBERATELY plain, buildless JavaScript — no bundler, nothing
  * gets converted to TypeScript. The only real TypeScript is
- * client/test/**\/*.ts (+ sidecar client/js/**\/*.d.ts), covered by
- * client/tsconfig.json and type-aware per eslint.config.js's bottom block.
- * So Assertion A's fixture goes in client/test/, matching where that
- * tsconfig's "include" actually resolves files — NOT under client/js/ or any
+ * client/test/**\/*.ts (+ sidecar client/js/**\/*.d.ts), type-aware per
+ * eslint.config.js's bottom block, which resolves type info from
+ * client/tsconfig.eslint.json — an ESLint-only project, split out from
+ * client/tsconfig.json on 2026-08-06 once the latter became a ratchet
+ * scoped to only the client/js files that typecheck clean today (see both
+ * files' own header comments). So Assertion A's fixture goes in
+ * client/test/, matching where tsconfig.eslint.json's "include" actually
+ * resolves files — NOT under client/js/ or any
  * of the other three browser surfaces, which have no tsconfig at all and
  * would make the assertion meaningless (see the canonical script's footer).
  *
@@ -64,10 +68,12 @@ const CONFIG = {
   // root (there is no web/ subdirectory), unlike gitstate.
   webRoot: path.resolve(SCRIPT_DIR, '..'),
 
-  // Directory (relative to webRoot) that client/tsconfig.json's "include"
-  // covers (`["test/**/*.ts", "js/**/*.d.ts"]`, resolved relative to
-  // client/tsconfig.json itself) so the type-awareness probe fixture lands
-  // somewhere `parserOptions.project` actually resolves it.
+  // Directory (relative to webRoot) that client/tsconfig.eslint.json's
+  // "include" covers (`["test/**/*.ts", "js/**/*.d.ts", "js/**/*.js"]`,
+  // resolved relative to that tsconfig itself — see its header for why
+  // ESLint's type resolution uses this file and not the narrower,
+  // ratchet-scoped client/tsconfig.json) so the type-awareness probe
+  // fixture lands somewhere `parserOptions.project` actually resolves it.
   fixtureDir: 'client/test',
   // NOT *.test.ts: `npm run test:client` runs `node --test
   // 'client/test/**/*.test.ts'` — a fixture matching that glob would be
