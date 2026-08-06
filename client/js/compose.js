@@ -3,6 +3,28 @@
 // (§17#7), privacy tier, scheduled send (§17#15), draft AUTOSAVE (§17#6), and SEND with an
 // UNDO window (§17#17). Building a message constructs a REAL MOTE (real signature) and animates
 // its simulated delivery through the inspector.
+//
+// The ComposeDraft typedef below is this module's own single source of truth (replacing what
+// used to be a hand-written sidecar compose.d.ts — deleted, see client/tsconfig.json's header
+// comment for why a colocated same-named .d.ts shadows its .js for module resolution once
+// checkJs is on). Only the send-path functions it covered (splitRecips, commitSend,
+// commitSendReal, and what they call into) are annotated here; the DOM-bound modal-building
+// half of this file (openCompose, wireAutocomplete, drawResolverHint) is not yet — see the
+// client typecheck report for the current count of what's left.
+
+/** A compose draft, as $('#csend').onclick / the autosave path hand it to the send paths. */
+/**
+ * @typedef {Object} ComposeDraft
+ * @property {string | null} [threadId]
+ * @property {string | null} [replyThread]
+ * @property {string} to
+ * @property {string} [subject]
+ * @property {string} [body]
+ * @property {string} [tier]
+ * @property {number | null} [scheduleAt]
+ * @property {import('./store.js').Attach[]} attach
+ * @property {string} [_text] The plain-text rendering of `body`, snapshotted at send time (stripped of any rich markup).
+ */
 
 import { openModal, closeModal, toast, icon, esc, avatar, showInspector, litHop, sanitizeHtml, trustPill } from './ui.js';
 import { buildMote, KIND } from './mote.js';
@@ -239,6 +261,7 @@ function drawResolverHint(input, hintEl) {
 }
 
 // ----- draft persistence (autosave upsert) -----
+/** @param {ComposeDraft} draft @param {string} [text] @returns {void} */
 function upsertDraft(draft, text) {
   const msg = { id: uid('m'), from: 'you', me: true, to: splitRecips(draft.to), time: Date.now(), tier: draft.tier, body: draft.body, html: true, text, attach: draft.attach.slice() };
   if (draft.threadId) {
@@ -253,10 +276,13 @@ function upsertDraft(draft, text) {
 }
 // Split on ASCII, full-width (，) and ideographic (、) commas — CJK keyboards type the latter two.
 // Exported for the headless harness.
+/** @param {string | null | undefined} s @returns {string[]} */
 export const splitRecips = (s) => (s || '').split(/[,，、]/).map(x => x.trim()).filter(Boolean);
 
 // Send with an UNDO window (Gmail's undo-send — a client-side pre-dispatch delay, spec §17#17).
+/** @type {{ draft: ComposeDraft, timer?: ReturnType<typeof setTimeout> } | null} */
 let _pending = null;
+/** @param {ComposeDraft} draft @returns {void} */
 function doSendWithUndo(draft) {
   // Snapshot the send mode at CLICK time. autoConnect() resolves async, so the mode can flip
   // (sim → real) while the undo window runs — a compose that said "simulated delivery" must not
@@ -278,6 +304,11 @@ function doSendWithUndo(draft) {
 //   sim  → the labeled mesh-sim animation over a real, locally-signed MOTE   (commitSendSim)
 // `mode` is the caller's click-time snapshot (doSendWithUndo); it wins over the live sendMode()
 // so async mode drift can't invert the user's intent. Exported for the headless harness.
+/**
+ * @param {ComposeDraft} draft
+ * @param {'real' | 'seam' | 'sim'} [mode]
+ * @returns {Promise<void>}
+ */
 export async function commitSend(draft, mode = sendMode()) {
   switch (mode) {
     case 'real': return commitSendReal(draft);
@@ -289,15 +320,22 @@ export async function commitSend(draft, mode = sendMode()) {
 // Build the client-side "sent" thread object for a just-sent message (shared by real + sim paths).
 // The trust chips reflect the first recipient the message ACTUALLY went to (sentMsg.to — under a
 // partial real-send failure that is not necessarily the first one typed). `local: true` as above.
+/**
+ * @param {ComposeDraft} draft
+ * @param {import('./store.js').Msg} sentMsg
+ * @returns {import('./store.js').Thread}
+ */
 function sentThread(draft, sentMsg) {
   const to0 = (sentMsg.to && sentMsg.to[0]) || splitRecips(draft.to)[0] || draft.to;
   const recip = person(to0);
-  return { id: uid('t'), subject: draft.subject || '(no subject)', labels: [], folder: 'sent', read: true, starred: false, snoozeUntil: null, tier: draft.tier, verified: recip.trust === 'verified', legacy: recip.trust === 'legacy', local: true, msgs: [sentMsg] };
+  return { id: uid('t'), subject: draft.subject || '(no subject)', labels: [], folder: 'sent', read: true, starred: false, snoozeUntil: null, tier: draft.tier || 'private', verified: recip.trust === 'verified', legacy: recip.trust === 'legacy', local: true, msgs: [sentMsg] };
 }
+/** @param {ComposeDraft} draft @returns {string} */
 const composedText = (draft) => draft._text || stripHtml(draft.body);
 
 // Markup beyond bare line structure (br / div / p — what plain typing in the contentEditable
 // produces) means the user actually FORMATTED the body, so a plain-text real send loses something.
+/** @param {string | undefined} html @returns {boolean} */
 const hasRichFormatting = (html) => /<(?!\/?(br|div|p)[\s/>])[a-z]/i.test(html || '');
 
 // REAL send over the node's Send API — one POST per recipient (the API takes a single `to`).
@@ -308,6 +346,7 @@ const hasRichFormatting = (html) => /<(?!\/?(br|div|p)[\s/>])[a-z]/i.test(html |
 //   • only recipients the node actually ACCEPTED are recorded as sent; failures are surfaced by
 //     name + reason and the unsent remainder is kept as a draft. All-fail keeps everything in
 //     Drafts — never a fake "Delivered". Exported for the headless harness.
+/** @param {ComposeDraft} draft @returns {Promise<void>} */
 export async function commitSendReal(draft) {
   const recips = splitRecips(draft.to);
   const text = composedText(draft);
@@ -320,10 +359,15 @@ export async function commitSendReal(draft) {
   }
 
   toast(`${icon('send')} Sending via your node…`, { ms: 2200 });
-  const sent = [], failed = [], receipts = [];
+  /** @type {string[]} */
+  const sent = [];
+  /** @type {Array<{ to: string, reason: string }>} */
+  const failed = [];
+  /** @type {import('./net/send.js').SendReceipt[]} */
+  const receipts = [];
   for (const to of recips) {
     try { receipts.push(await sendMail({ to, subject: draft.subject, body: text })); sent.push(to); }
-    catch (err) { failed.push({ to, reason: (err && err.message) ? err.message : 'send failed' }); }
+    catch (err) { failed.push({ to, reason: (err instanceof Error && err.message) ? err.message : 'send failed' }); }
   }
 
   if (!sent.length) {
@@ -362,6 +406,7 @@ export async function commitSendReal(draft) {
 
 // Live node, but no send token provisioned. Do NOT simulate a send in real mode: hold the message
 // as a draft and tell the user exactly what's missing (the send-token seam).
+/** @param {ComposeDraft} draft @returns {void} */
 function commitSendSeam(draft) {
   upsertDraft(draft, composedText(draft));
   bus.rerender(); bus.refreshChrome();
@@ -369,6 +414,7 @@ function commitSendSeam(draft) {
 }
 
 // SIMULATION: build a real, locally-signed MOTE and animate its delivery through the inspector.
+/** @param {ComposeDraft} draft @returns {Promise<void>} */
 async function commitSendSim(draft) {
   const to0 = splitRecips(draft.to)[0] || draft.to;
   const group = state.groups.find(g => g.address === to0 || g.handle === to0);
@@ -389,10 +435,11 @@ async function commitSendSim(draft) {
   toast(`${icon('check')} Delivered (simulated) · MOTE ${esc(mote.contentId.slice(0, 16))}…`);
 }
 
+/** @param {ComposeDraft} draft @returns {void} */
 function doSchedule(draft) {
   closeModal();
   upsertDraft(draft, draft._text);      // scheduled mail waits as a draft with scheduledAt set
-  const when = new Date(draft.scheduleAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  const when = new Date(draft.scheduleAt || Date.now()).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
   toast(`${icon('clock')} Scheduled to send ${when} · held encrypted on your node until then`);
   bus.rerender(); bus.refreshChrome();
 }
