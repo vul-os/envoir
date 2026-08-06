@@ -11,9 +11,12 @@
     "it never moves back out. Do not add a file here by widening a glob — list it explicitly so a",
     "future accidental include is visible in review.",
     "",
-    "IN (1 file, exit 0): js/bus.js — a 13-line no-op dispatch table with no imports. This is",
-    "trivially small; flagged honestly rather than presented as meaningful coverage. It is the ONLY",
-    "file in this surface whose import closure is currently clean.",
+    "IN (2 files, exit 0): js/bus.js — now a 3-line wrapper around ../shared/js/bus.js's createBus()",
+    "(see that file's own header) — and ../shared/js/ui.js (2026-08-06 dedup pass: the el/esc/",
+    "fmtDate/toast helpers that used to be near-duplicated across client/console/superadmin/status's",
+    "own js/ui.js files, now typed and checked once here — added to all four apps' include for the",
+    "same reason). js/ui.js ITSELF stays OUT (33 own+closure errors below, down from 82 pre-dedup) —",
+    "only its shared dependency is ratcheted in.",
     "",
     "OUT despite '0 own errors' — closure-dirty, not actually clean: js/app.js imports store.js and",
     "shell.js, both dirty below, so its closure is dirty even though app.js itself has no errors of",
@@ -21,7 +24,7 @@
     "",
     "OUT, real backlog, error count is that file's own contribution to the full 368 (app.js has 0",
     "listed because it is closure-blocked as above, not error-free): js/shell.js 39, js/store.js 65,",
-    "js/ui.js 82, js/views/abuse.js 29, js/views/billing.js 33, js/views/fleet.js 79,",
+    "js/ui.js 33, js/views/abuse.js 29, js/views/billing.js 33, js/views/fleet.js 79,",
     "js/views/overview.js 26, js/views/provisioning.js 15.",
     "",
     "superadmin/js/*.js stays plain JS on disk — it is served straight to the browser via a bare",
@@ -45,5 +48,5 @@
     "forceConsistentCasingInFileNames": true,
     "types": []
   },
-  "include": ["js/bus.js"]
+  "include": ["js/bus.js", "../shared/js/ui.js"]
 }
