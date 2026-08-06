@@ -25,19 +25,31 @@ const DEFAULT_BASE_URL = 'http://127.0.0.1:4700';
 
 export { DEFAULT_BASE_URL };
 
+/**
+ * @typedef {Object} SendApiErrorOptions
+ * @property {number} [status]
+ * @property {string | null} [slug]
+ * @property {string | null} [detail]
+ */
+
 /** A Send-API error carrying the HTTP status, the node's machine-readable slug, and its detail. */
 export class SendApiError extends Error {
+  /** @param {string} message @param {SendApiErrorOptions} [opts] */
   constructor(message, { status = 0, slug = null, detail = null } = {}) {
     super(message);
     this.name = 'SendApiError';
+    /** @type {number} */
     this.status = status;
+    /** @type {string | null} */
     this.slug = slug;
+    /** @type {string | null} */
     this.detail = detail;
   }
 }
 
 // Map the node's stable error slug (dmtap-send `error_slug`) + our client-side slugs onto a short,
 // human sentence. Unknown slugs fall through to the raw detail so nothing is ever silently masked.
+/** @type {Record<string, string>} */
 const SLUG_MESSAGES = {
   no_token: 'no send token — add one in Settings → Node',
   bad_request: 'the message was rejected as malformed',
@@ -56,6 +68,7 @@ const SLUG_MESSAGES = {
   build_failed: 'the message could not be sealed',
 };
 
+/** @param {string} slug @param {string | null} detail @param {number} status @returns {string} */
 function sendErrorMessage(slug, detail, status) {
   if (slug && SLUG_MESSAGES[slug]) return SLUG_MESSAGES[slug];
   if (detail) return detail;
@@ -63,19 +76,47 @@ function sendErrorMessage(slug, detail, status) {
 }
 
 /**
+ * The Resend-shaped body POST /v1/send expects (spec §13.5.1). `to` is typed optional, not
+ * required: send.js validates a missing/falsy `to` at RUNTIME (throwing the `bad_request` slug)
+ * rather than via a default parameter, so callers — including the deliberately-invalid-input
+ * tests exercising that validation — can omit it.
+ * @typedef {Object} SendMessageInput
+ * @property {string} [from]
+ * @property {string} [to]
+ * @property {string} [subject]
+ * @property {string} [body]
+ * @property {string} [mime]
+ */
+
+/** The node's receipt on a successful send. */
+/**
+ * @typedef {Object} SendReceipt
+ * @property {string} id
+ * @property {boolean} native
+ * @property {string | null} transport
+ */
+
+/**
+ * @typedef {Object} SendClientConfig
+ * @property {string} [baseUrl]
+ * @property {string} [token]
+ * @property {number} [timeoutMs]
+ */
+
+/**
  * A live client for the node's Envoir Send API. DOM-free / state-free: pass it a base URL and a
  * Bearer capability token and it speaks `POST /v1/send` (spec §13.5.1) and nothing else.
- *
- * @param {object} cfg
- * @param {string} cfg.baseUrl    node base URL (default http://127.0.0.1:4700)
- * @param {string} cfg.token      send capability token (Bearer)
- * @param {number} [cfg.timeoutMs] per-request timeout (default 8000)
  */
 export class SendClient {
+  /** @param {SendClientConfig} [cfg] */
   constructor({ baseUrl, token, timeoutMs = 8000 } = {}) {
+    /** @type {string} */
     this.baseUrl = (baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, '');
+    /** @type {string} */
     this.token = token || '';
+    /** @type {number} */
     this.timeoutMs = timeoutMs;
+    /** @type {string} */
     this.sendUrl = `${this.baseUrl}/v1/send`;
   }
 
@@ -84,11 +125,14 @@ export class SendClient {
    * with the Bearer token, and returns the node's receipt `{ id, native, transport }` on 200. Any
    * non-2xx (or transport failure) throws a {@link SendApiError} carrying the node's error slug +
    * detail — so a failed send can NEVER masquerade as a success.
+   * @param {SendMessageInput} [msg]
+   * @returns {Promise<SendReceipt>}
    */
   async send({ from, to, subject = '', body = '', mime } = {}) {
     if (!this.token) throw new SendApiError(SLUG_MESSAGES.no_token, { slug: 'no_token' });
     if (!to) throw new SendApiError('a recipient is required', { slug: 'bad_request' });
 
+    /** @type {{ from: string, to: string, subject: string, body: string, mime?: string }} */
     const payload = { from: from || '', to, subject: subject || '', body: body || '' };
     if (mime) payload.mime = mime;
 
@@ -109,12 +153,13 @@ export class SendClient {
     } catch (err) {
       throw new SendApiError(SLUG_MESSAGES.unreachable, {
         slug: 'unreachable',
-        detail: err && err.message ? err.message : String(err),
+        detail: err instanceof Error ? err.message : String(err),
       });
     } finally {
       if (timer) clearTimeout(timer);
     }
 
+    /** @type {{ error?: string, detail?: unknown, id?: string, native?: boolean, transport?: string } | null} */
     let parsed = null;
     try { parsed = await res.json(); } catch { /* non-JSON / empty body */ }
 
@@ -138,6 +183,7 @@ export class SendClient {
  *   'seam' → REAL mode but NO send token → sending is NOT wired; never fake a "sent"
  *   'sim'  → SIMULATION mode → compose uses the labeled mesh-sim animation
  */
+/** @returns {'real' | 'seam' | 'sim'} */
 export function sendMode() {
   const cfg = resolveNodeConfig();
   if (state.net && state.net.mode === 'real') return cfg.sendToken ? 'real' : 'seam';
@@ -145,11 +191,22 @@ export function sendMode() {
 }
 
 /**
+ * @typedef {Object} SendMailInput
+ * @property {string} [from]
+ * @property {string} to
+ * @property {string} [subject]
+ * @property {string} [body]
+ * @property {string} [mime]
+ */
+
+/**
  * Send `msg` for real via the node's Send API. `msg = { to, subject, body, mime?, from? }`.
  * `from` defaults to the connected account id. Throws {@link SendApiError} on any failure.
  * Returns the node's receipt `{ id, native, transport }`.
+ * @param {SendMailInput} msg
+ * @returns {Promise<SendReceipt>}
  */
-export async function sendMail(msg = {}) {
+export async function sendMail(msg) {
   const cfg = resolveNodeConfig();
   if (!cfg.sendToken) throw new SendApiError(SLUG_MESSAGES.no_token, { slug: 'no_token' });
   const from = msg.from || (state.net && state.net.accountId) || cfg.username || '';
