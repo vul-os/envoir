@@ -1,0 +1,37 @@
+{
+  // Type-checks the CI gate scripts surface (currently just
+  // check-lint-config.mjs) WITHOUT touching client/tsconfig.json (a
+  // deliberately narrow ratchet), client/tsconfig.eslint.json (ESLint's own
+  // type-resolution project, never run as a `tsc --noEmit` gate), or any of
+  // console/superadmin/status's tsconfigs — a CI helper script has no
+  // business being part of any of those programs. This is a fourth,
+  // separate program, scoped only to scripts/.
+  //
+  // allowJs + checkJs type-check the .mjs source directly via JSDoc
+  // annotations — no build step, no renaming to .ts. See the file itself
+  // for why it must stay .mjs (run directly by node from CI and
+  // package.json).
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "types": ["node"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+
+    "allowJs": true,
+    "checkJs": true,
+
+    "declaration": false,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true
+  },
+  "include": ["check-lint-config.mjs"]
+}
