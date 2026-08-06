@@ -1,0 +1,26 @@
+{
+  "//": [
+    "Type-checks superadmin/js/**/*.js. superadmin/js/*.js stays plain JS on disk — it is served",
+    "straight to the browser via a bare <script type=\"module\"> with no bundler in front of it",
+    "(see superadmin/index.html), and none of these files are renamed to .ts, so the runtime is",
+    "byte-identical to what shipped before. checkJs makes tsc read the JSDoc annotations already",
+    "in each .js file (or infer types from usage where JSDoc is absent) and enforce them exactly",
+    "as it would for real .ts — this is the mechanism, not a build step. There is no test/ dir",
+    "here (unlike client/, this surface has no headless unit tests), so this project is JS-only:",
+    "just js/**/*.js, no .ts sources at all."
+  ],
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": []
+  },
+  "include": ["js/**/*.js"]
+}
