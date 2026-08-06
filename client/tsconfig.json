@@ -1,10 +1,15 @@
 {
   "//": [
-    "Type-checks client/test/*.test.ts against hand-written sidecar .d.ts files in client/js/.",
-    "client/js/*.js itself is intentionally NOT converted or type-checked here: it is served",
-    "straight to the browser via a bare <script type=\"module\"> with no bundler in front of it",
-    "(see client/index.html), so turning it into real TypeScript would require adding a build",
-    "step this repo does not have. See the migration report for the full reasoning."
+    "Type-checks client/test/*.test.ts AND client/js/**/*.js under the same compiler run.",
+    "client/js/*.js stays plain JS on disk — it is served straight to the browser via a bare",
+    "<script type=\"module\"> with no bundler in front of it (see client/index.html), and none of",
+    "these files are renamed to .ts/.tsx, so the runtime is byte-identical to what shipped before.",
+    "checkJs makes tsc read the JSDoc annotations already in each .js file (or infer types from",
+    "usage where JSDoc is absent) and enforce them exactly as it would for real .ts — this is the",
+    "mechanism, not a build step. The remaining sidecar .d.ts files in client/js/ declare test-only",
+    "shapes (e.g. a headless DOM stand-in) that have no corresponding real export and so cannot be",
+    "expressed as JSDoc on the .js they accompany; where a .d.ts merely restated a .js's own",
+    "exports it was deleted in favor of the .js's own JSDoc as the single source of truth."
   ],
   "compilerOptions": {
     "strict": true,
@@ -13,11 +18,11 @@
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "noEmit": true,
-    "allowJs": false,
-    "checkJs": false,
+    "allowJs": true,
+    "checkJs": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "types": ["node"]
   },
-  "include": ["test/**/*.ts", "js/**/*.d.ts"]
+  "include": ["test/**/*.ts", "js/**/*.d.ts", "js/**/*.js"]
 }
