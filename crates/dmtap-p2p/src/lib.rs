@@ -682,12 +682,10 @@ fn resolve_kad(
                 let _ = reply.send(Some(peer_record.record.value));
             }
         }
-        kad::QueryResult::GetRecord(_) => {
-            // A non-found GetRecord progress step: only report "not found" once the query is done.
-            if last {
-                if let Some(reply) = pending.gets.remove(&id) {
-                    let _ = reply.send(None);
-                }
+        // A non-found GetRecord progress step: only report "not found" once the query is done.
+        kad::QueryResult::GetRecord(_) if last => {
+            if let Some(reply) = pending.gets.remove(&id) {
+                let _ = reply.send(None);
             }
         }
         _ => {}
