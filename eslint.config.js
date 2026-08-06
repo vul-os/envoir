@@ -35,7 +35,9 @@ export default defineConfig([
     'site/**',
     'node_modules/**',
   ]),
-  // The four browser surfaces: client/, console/, superadmin/, status/. Each
+  // The four browser surfaces: client/, console/, superadmin/, status/, plus
+  // shared/js/ — the 2026-08-06 dedup module the four surfaces' own js/ui.js
+  // and js/bus.js import by relative path (../../shared/js/*.js). All of it
   // ships plain ES modules straight to the browser, so they get browser +
   // ES2022 globals. client/sw.js is carved out below (it's a service worker,
   // not a window context) and so is client/assets/make-icons.mjs (Node-side
@@ -46,6 +48,7 @@ export default defineConfig([
       'console/js/**/*.js',
       'superadmin/js/**/*.js',
       'status/js/**/*.js',
+      'shared/js/**/*.js',
     ],
     extends: [js.configs.recommended],
     languageOptions: {
@@ -58,9 +61,9 @@ export default defineConfig([
       // ES modules with no other static analysis ever run on them.
       // argsIgnorePattern only (not varsIgnorePattern): the fleet's bus.js
       // dispatch-table stub is a real, repo-wide convention (see
-      // client|console|superadmin/js/bus.js: `setView: (_v) => {}`, filled
-      // in later at mount time) — a documented-but-unused parameter, not
-      // dead code. Ordinary unused local/module-level vars still get flagged.
+      // shared/js/bus.js's createBus(): `setView: (_v) => {}`, filled in
+      // later at mount time) — a documented-but-unused parameter, not dead
+      // code. Ordinary unused local/module-level vars still get flagged.
       'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'no-implicit-globals': 'error',
       'no-self-assign': 'error',
