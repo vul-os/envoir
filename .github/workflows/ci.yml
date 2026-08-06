@@ -426,6 +426,13 @@ jobs:
       - name: Typecheck status against status/tsconfig.json
         run: npm run typecheck:status
 
+      # scripts/tsconfig.json is a separate program covering the CI gate
+      # script (check-lint-config.mjs) via allowJs+checkJs+JSDoc — it was
+      # unchecked JavaScript before this, despite being the logic the gate
+      # below is trusted through.
+      - name: Typecheck scripts against scripts/tsconfig.json
+        run: npm run typecheck:scripts
+
       # Behavioural gate for the lint config itself: proves type-aware rules
       # actually resolve type information in client/test/**/*.ts (a config
       # can say recommendedTypeChecked and still not resolve types), that
