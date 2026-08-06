@@ -17,6 +17,44 @@ import { FOLDERS } from '../seed.js';
 import { currentIdentity } from '../identity.js';
 import { JmapClient } from './jmap.js';
 
+/**
+ * connect()'s actual requirement, narrower than the full NodeConfig: sync.js's own guard reads
+ * only baseUrl/username/appPassword (`enabled`/`sendToken` are resolveNodeConfig()/sendMail()'s
+ * concern, not connect()'s).
+ * @typedef {Object} ConnectConfig
+ * @property {string} baseUrl
+ * @property {string} username
+ * @property {string} appPassword
+ * @property {string} [sendToken]
+ * @property {boolean} [enabled]
+ */
+
+/** @typedef {{ ok: boolean, mode: 'real' | 'sim', count?: number, reason?: string }} ConnectResult */
+/** @typedef {{ ok: boolean, changed?: boolean, count?: number, reason?: string }} SyncResult */
+
+/** A JMAP Email as this module reads it (the EMAIL_PROPS subset requested from the node). */
+/**
+ * @typedef {Object} JmapEmailLike
+ * @property {string} [id]
+ * @property {string} [blobId]
+ * @property {string} [threadId]
+ * @property {Record<string, boolean>} [mailboxIds]
+ * @property {Record<string, boolean>} [keywords]
+ * @property {number} [size]
+ * @property {string} [receivedAt]
+ * @property {string} [subject]
+ * @property {Array<{ email?: string, name?: string }>} [from]
+ * @property {Array<{ email?: string, name?: string }>} [to]
+ * @property {Array<{ email?: string, name?: string }>} [cc]
+ * @property {string} [preview]
+ * @property {boolean} [hasAttachment]
+ * @property {Record<string, { value: string }>} [bodyValues]
+ * @property {Array<{ partId: string }>} [textBody]
+ */
+
+/** A JMAP mailbox as Mailbox/get returns it (only the fields this module reads). */
+/** @typedef {{ id: string, role?: string, name?: string }} JmapMailboxLike */
+
 // The Email properties we need for the thread/message shape (keeps the payload lean).
 const EMAIL_PROPS = [
   'id', 'blobId', 'threadId', 'mailboxIds', 'keywords', 'size',
@@ -29,8 +67,10 @@ const SYSTEM_KEYWORDS = new Set(['$seen', '$flagged', '$answered', '$draft', '$d
 
 // Map a JMAP mailbox (its role, else its name) onto one of the client's fixed FOLDERS ids.
 const FOLDER_IDS = new Set(FOLDERS.map((f) => f.id));
+/** @param {JmapMailboxLike | null | undefined} mb @returns {string} */
 function mailboxToFolder(mb) {
   const role = (mb && mb.role ? String(mb.role) : '').toLowerCase();
+  /** @type {Record<string, string>} */
   const byRole = { inbox: 'inbox', sent: 'sent', drafts: 'drafts', archive: 'archive', junk: 'spam', spam: 'spam', trash: 'trash' };
   if (byRole[role]) return byRole[role];
   const name = (mb && mb.name ? String(mb.name) : '').toLowerCase();
@@ -41,6 +81,7 @@ function mailboxToFolder(mb) {
 }
 
 // The set of addresses that are "me" (so a sent message renders as You, matching seed convention).
+/** @param {string | null | undefined} accountId @returns {Set<string>} */
 function ownAddresses(accountId) {
   const set = new Set();
   if (accountId) set.add(accountId.toLowerCase());
@@ -53,6 +94,7 @@ function ownAddresses(accountId) {
   return set;
 }
 
+/** @param {{ email?: string, name?: string } | null | undefined} a @returns {string} */
 function addrString(a) {
   if (!a) return '';
   if (a.email) return a.email;
@@ -60,6 +102,7 @@ function addrString(a) {
   return '';
 }
 
+/** @param {JmapEmailLike} email @returns {string} */
 function bodyText(email) {
   const bv = email.bodyValues || {};
   // Prefer the part referenced by textBody[0].partId, else any bodyValue, else the preview.
@@ -70,11 +113,17 @@ function bodyText(email) {
 }
 
 // Map one JMAP Email → the client's message object, given the mailbox→folder lookup + own addrs.
+/**
+ * @param {JmapEmailLike} email
+ * @param {Set<string>} mine
+ * @returns {import('../store.js').Msg}
+ */
 function emailToMsg(email, mine) {
   const from = Array.isArray(email.from) && email.from[0] ? addrString(email.from[0]) : '';
-  const isMe = from && mine.has(from.toLowerCase());
+  const isMe = !!from && mine.has(from.toLowerCase());
   const to = Array.isArray(email.to) ? email.to.map(addrString).filter(Boolean) : [];
   const time = Date.parse(email.receivedAt || '') || Date.now();
+  /** @type {import('../store.js').Msg} */
   const msg = {
     id: email.id || uid('m'),
     from: isMe ? 'you' : (from || 'unknown'),
@@ -88,8 +137,17 @@ function emailToMsg(email, mine) {
   return msg;
 }
 
+/** @typedef {import('../store.js').Thread & { _emails: JmapEmailLike[] }} ThreadBuild */
+
 // Fold a flat list of JMAP Emails into the client's thread objects (grouped by JMAP threadId).
+/**
+ * @param {JmapEmailLike[]} emails
+ * @param {Map<string, JmapMailboxLike>} mailboxById
+ * @param {Set<string>} mine
+ * @returns {import('../store.js').Thread[]}
+ */
 function emailsToThreads(emails, mailboxById, mine) {
+  /** @type {Map<string, ThreadBuild>} */
   const byThread = new Map();
   for (const email of emails) {
     if (!email) continue;
@@ -97,12 +155,13 @@ function emailsToThreads(emails, mailboxById, mine) {
     let t = byThread.get(tid);
     if (!t) {
       t = { id: tid, subject: '', labels: [], folder: 'inbox', read: true, starred: false,
-        snoozeUntil: null, tier: 'private', verified: false, legacy: false, _emails: [] };
+        snoozeUntil: null, tier: 'private', verified: false, legacy: false, msgs: [], _emails: [] };
       byThread.set(tid, t);
     }
     t._emails.push(email);
   }
 
+  /** @type {import('../store.js').Thread[]} */
   const threads = [];
   for (const t of byThread.values()) {
     // Order the thread's emails chronologically, oldest first (matches seed message order).
@@ -119,11 +178,12 @@ function emailsToThreads(emails, mailboxById, mine) {
 
     // Folder: from the mailbox of the most-recent email (last after the sort).
     const last = t._emails[t._emails.length - 1];
-    const mbId = last && last.mailboxIds ? Object.keys(last.mailboxIds).find((k) => last.mailboxIds[k]) : null;
+    const mbId = last && last.mailboxIds ? Object.keys(last.mailboxIds).find((k) => last.mailboxIds && last.mailboxIds[k]) : null;
     t.folder = mailboxToFolder(mbId ? mailboxById.get(mbId) : null);
 
     // Labels: union of non-system keywords across the thread, kept as-is (a known LABELS id
     // renders a chip; an unknown one is simply carried without one — never a crash).
+    /** @type {Set<string>} */
     const labels = new Set();
     for (const e of t._emails) {
       for (const kw of Object.keys(e.keywords || {})) {
@@ -132,8 +192,9 @@ function emailsToThreads(emails, mailboxById, mine) {
     }
     t.labels = [...labels];
 
-    delete t._emails;
-    threads.push(t);
+    threads.push({ id: t.id, subject: t.subject, labels: t.labels, folder: t.folder, read: t.read,
+      starred: t.starred, snoozeUntil: t.snoozeUntil, tier: t.tier, verified: t.verified,
+      legacy: t.legacy, msgs: t.msgs });
   }
   // Newest thread first (the list re-sorts by lastTime anyway, but keep a sane default).
   threads.sort((a, b) => (b.msgs[b.msgs.length - 1].time) - (a.msgs[a.msgs.length - 1].time));
@@ -141,15 +202,20 @@ function emailsToThreads(emails, mailboxById, mine) {
 }
 
 // Pull the full mailbox from the node and rebuild state.mail. Returns { threads, sessionState }.
+/**
+ * @param {import('./jmap.js').JmapClient} client
+ * @returns {Promise<{ threads: import('../store.js').Thread[], sessionState: string | null }>}
+ */
 async function pullMail(client) {
   await client.discover();
   const mbRes = await client.mailboxGet(null);
+  /** @type {Map<string, JmapMailboxLike>} */
   const mailboxById = new Map();
   for (const mb of (mbRes && mbRes.list) || []) mailboxById.set(mb.id, mb);
 
   // One round-trip: Email/query (all) → Email/get via back-reference.
   const getRes = await client.emailQueryGet(null, EMAIL_PROPS);
-  const emails = (getRes && getRes.list) || [];
+  const emails = /** @type {JmapEmailLike[]} */ ((getRes && getRes.list) || []);
 
   const mine = ownAddresses(client.accountId);
   const threads = emailsToThreads(emails, mailboxById, mine);
@@ -169,9 +235,15 @@ async function pullMail(client) {
 // the worst case is a visible duplicate next to the server's copy — honest, and strictly better
 // than silently losing the user's only record of what they sent.
 // Exported for the headless harness (client/test/net.test.mjs).
+/**
+ * @param {import('../store.js').Thread[]} serverThreads
+ * @returns {import('../store.js').Thread[]}
+ */
 export function mergeLocalMail(serverThreads) {
+  /** @type {Set<string>} */
   const serverIds = new Set();
   for (const t of serverThreads) for (const m of t.msgs) serverIds.add(String(m.id));
+  /** @param {import('../store.js').Msg} m @returns {boolean} */
   const superseded = (m) => Array.isArray(m.nodeIds) && m.nodeIds.length > 0
     && m.nodeIds.every((id) => serverIds.has(String(id)));
 
@@ -194,6 +266,7 @@ export function mergeLocalMail(serverThreads) {
 }
 
 // Point the mail UI selection at something sensible after the store is swapped.
+/** @returns {void} */
 function reselectInbox() {
   const first = state.mail.find((t) => t.folder === 'inbox') || state.mail[0];
   state.ui.selThread = first ? first.id : null;
@@ -216,6 +289,7 @@ let connEpoch = 0;
  * On any failure the store is left in SIMULATION mode (the demo keeps working). Returns
  * `{ ok, mode, count?, reason? }`.
  */
+/** @param {ConnectConfig} cfg @returns {Promise<ConnectResult>} */
 export async function connect(cfg) {
   if (!cfg || !cfg.baseUrl || !cfg.username || !cfg.appPassword) {
     setNetStatus({ mode: 'sim', status: 'idle', error: null });
@@ -243,8 +317,8 @@ export async function connect(cfg) {
     return { ok: true, mode: 'real', count: threads.length };
   } catch (err) {
     if (myEpoch !== connEpoch) return { ok: false, mode: state.net.mode, reason: 'superseded' };
-    setNetStatus({ mode: 'sim', status: 'error', error: err && err.message ? err.message : String(err), client: null });
-    return { ok: false, mode: 'sim', reason: err && err.message ? err.message : 'unreachable' };
+    setNetStatus({ mode: 'sim', status: 'error', error: err instanceof Error ? err.message : String(err), client: null });
+    return { ok: false, mode: 'sim', reason: err instanceof Error ? err.message : 'unreachable' };
   }
 }
 
@@ -252,6 +326,7 @@ export async function connect(cfg) {
  * Auto-connect on boot from the resolved node config (an injected Tauri config, else the saved
  * settings). Silent: if nothing is configured or the node is unreachable, the app simply stays
  * in its clearly-labeled SIMULATION. Returns the same shape as connect().
+ * @returns {Promise<ConnectResult>}
  */
 export async function autoConnect() {
   const cfg = resolveNodeConfig();
@@ -262,7 +337,7 @@ export async function autoConnect() {
   return connect(cfg);
 }
 
-/** Drop back to SIMULATION mode (used by the Settings "Disconnect" affordance). */
+/** Drop back to SIMULATION mode (used by the Settings "Disconnect" affordance). @returns {void} */
 export function disconnect() {
   // Invalidate any connect() still in flight — see the connEpoch comment above connect().
   connEpoch++;
@@ -272,16 +347,17 @@ export function disconnect() {
 /**
  * Refresh live mail while in REAL mode. Uses Email/changes to skip a re-pull when nothing has
  * changed; otherwise re-pulls the mailbox. No-op (returns unchanged) in SIMULATION mode.
+ * @returns {Promise<SyncResult>}
  */
 export async function syncNow() {
   const net = state.net;
   if (net.mode !== 'real' || !net.client) return { ok: false, reason: 'not-real' };
-  const client = net.client;
+  const client = /** @type {import('./jmap.js').JmapClient} */ (net.client);
   try {
     let changed = true;
     if (net.sessionState) {
       const delta = await client.emailChanges(net.sessionState);
-      if (delta && !delta.cannotCalculateChanges) {
+      if (delta && !('cannotCalculateChanges' in delta)) {
         const created = (delta.created || []).length;
         const updated = (delta.updated || []).length;
         const destroyed = (delta.destroyed || []).length;
@@ -299,7 +375,7 @@ export async function syncNow() {
     setNetStatus({ sessionState, lastSync: Date.now(), status: 'connected', error: null });
     return { ok: true, changed: true, count: threads.length };
   } catch (err) {
-    setNetStatus({ status: 'error', error: err && err.message ? err.message : String(err) });
-    return { ok: false, reason: err && err.message ? err.message : 'sync-failed' };
+    setNetStatus({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+    return { ok: false, reason: err instanceof Error ? err.message : 'sync-failed' };
   }
 }
