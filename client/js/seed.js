@@ -2,12 +2,35 @@
 // there are no real peers, no real mailbox on a node, no real mixnet. A production client
 // replaces this with a libp2p connection to the user's node (spec §4) + JMAP sync (§8.1).
 // Everything here is in-memory and honestly labeled "simulated network" in the UI.
+//
+// JSDoc typedefs below are this module's own single source of truth (replacing what used to be
+// a hand-written sidecar seed.d.ts — deleted, see client/tsconfig.json's header comment for why
+// a colocated same-named .d.ts shadows its .js for module resolution once checkJs is on).
+
+/**
+ * @typedef {Object} Person
+ * @property {string} id
+ * @property {string} name
+ * @property {string} givenName
+ * @property {string} familyName
+ * @property {string} address
+ * @property {string[]} addresses
+ * @property {string | null} avatarUrl
+ * @property {number} hue
+ * @property {'verified' | 'tofu' | 'unverified' | 'legacy'} trust
+ * @property {string | null} org
+ * @property {string | null} title
+ * @property {string | null} phone
+ * @property {string | null} note
+ * @property {string[]} tags
+ */
 
 const HOUR = 3600e3, DAY = 86400e3, MIN = 60e3;
 const now = Date.now();
 
 // ---- People (shared across mail, chat, calendar, contacts, groups) -----------------------
 // trust ∈ verified (safety number compared) | tofu (pinned on first contact) | unverified | legacy
+/** @type {Person[]} */
 export const PEOPLE = [
   { id: 'ada',    name: 'Ada Okonkwo',    givenName: 'Ada',    familyName: 'Okonkwo',    address: 'ada@envoir.org',      addresses: ['ada.o@envoir.org'], avatarUrl: null, hue: 210, trust: 'verified',   org: 'DMTAP Core',        title: 'Protocol lead',   phone: '+1 555 0182', note: 'Wrote the MOTE framing.', tags: ['Team', 'Core'] },
   { id: 'grace',  name: 'Grace Vasquez',  givenName: 'Grace',  familyName: 'Vasquez',    address: 'grace@navy.mil',      addresses: [], avatarUrl: null, hue: 262, trust: 'verified',   org: 'Naval Research',    title: 'Cryptographer',   phone: '+1 555 0143', note: 'Verified in person at RWC.', tags: ['Work'] },
@@ -24,15 +47,24 @@ export const PEOPLE = [
 
 // Add or update a contact (JSContact MOTE, spec §8.4). Mutating PEOPLE keeps person() resolving
 // the same reference everywhere. A real client syncs these as encrypted MOTEs across devices.
+/** @param {Person} p @returns {Person} */
 export function addPerson(p) { PEOPLE.push(p); return p; }
 // Remove a contact (spec §17#30 delete). Mutates PEOPLE in place for the same reason as above.
+/** @param {string} id @returns {void} */
 export function removePerson(id) { const i = PEOPLE.findIndex(p => p.id === id); if (i >= 0) PEOPLE.splice(i, 1); }
 // All organizational tags in use (spec §17#31 local-tag contact groups — no address of their own).
+/** @returns {string[]} */
 export function contactTags() { return [...new Set(PEOPLE.flatMap(p => p.tags || []))].sort(); }
 
+/**
+ * Resolve a contact by id or address; falls back to a minimal stand-in for an address with no
+ * saved contact (e.g. a peer who has only ever appeared as a message sender).
+ * @param {string} idOrAddr
+ * @returns {Person | { id: string, name: string, address: string, hue: number, trust: 'unverified' }}
+ */
 export const person = (idOrAddr) =>
   PEOPLE.find(p => p.id === idOrAddr || p.address === idOrAddr) ||
-  { id: idOrAddr, name: idOrAddr, address: idOrAddr, hue: 220, trust: 'unverified' };
+  { id: idOrAddr, name: idOrAddr, address: idOrAddr, hue: 220, trust: /** @type {const} */ ('unverified') };
 
 // ---- Labels (Gmail-style, color-coded) ---------------------------------------------------
 export const LABELS = [
@@ -177,6 +209,7 @@ export function seedChats() {
 
 // ---- Calendar: events with recurrence, attendees + RSVP, reminders (spec §8.4) ------------
 export function seedCalendar() {
+  /** @param {number} offsetDays @param {number} h @param {number} [m] @returns {number} */
   const d = (offsetDays, h, m = 0) => { const x = new Date(now + offsetDays * DAY); x.setHours(h, m, 0, 0); return x.getTime(); };
   return [
     { id: 'e1', title: 'Mesh working group sync', color: 210, start: d(0, 10), end: d(0, 11),
@@ -301,6 +334,8 @@ export const FOLDERS = [
   { id: 'trash',   name: 'Trash',    icon: 'trash' },
 ];
 
+/** Compact byte-size formatting (locale-correct decimal separator via toLocaleString). */
+/** @param {number} n @returns {string} */
 export function fmtBytes(n) {
   if (n < 1024) return n + ' B';
   const u = ['KB', 'MB', 'GB', 'TB']; let i = -1;

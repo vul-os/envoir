@@ -4,6 +4,170 @@
 // network). SETTINGS (theme, default tier, signatures, vacation, filters) persist to
 // localStorage so they survive reloads — a real client would sync these as MOTEs across the
 // device cluster (spec §8.5). Views mutate `state` and call the shell's rerender().
+//
+// JSDoc typedefs below are the single source of truth for this module's shape — they replace
+// what used to be a hand-written sidecar store.d.ts. That file drifted out of the compiler's
+// reach entirely once checkJs was enabled: a same-named .d.ts colocated with its .js SHADOWS
+// the .js for module resolution (verified empirically), so `import ... from './store.js'`
+// resolved to the sidecar's stale, narrower export list instead of the real module and produced
+// false "has no exported member" errors for every real export the sidecar hadn't kept in sync.
+
+/** @typedef {'sim' | 'real'} NetMode */
+
+/** Resolved node connection config (spec §8.1/§8.2/§13.5.1) — see resolveNodeConfig(). */
+/**
+ * @typedef {Object} NodeConfig
+ * @property {boolean} enabled
+ * @property {string} baseUrl
+ * @property {string} username
+ * @property {string} appPassword
+ * @property {string} sendToken
+ */
+
+/** An attachment reference as carried on a Msg (name/size only — no attachment upload here). */
+/**
+ * @typedef {Object} Attach
+ * @property {string} name
+ * @property {number} size
+ */
+
+/** One message within a mail Thread. */
+/**
+ * @typedef {Object} Msg
+ * @property {string} id
+ * @property {string} from
+ * @property {boolean} [me]
+ * @property {string[]} to
+ * @property {number} time
+ * @property {string} [tier]
+ * @property {string} body
+ * @property {boolean} [html]
+ * @property {string} [text]
+ * @property {Attach[]} [attach]
+ * @property {string[]} [nodeIds] Node-issued receipt (content) ids for a real-mode send — see net/send.js / net/sync.js.
+ * @property {boolean} [local] Marks a thread/message that exists only in this client (see net/sync.js mergeLocalMail).
+ * @property {unknown} [provenance]
+ * @property {string} [plusTag]
+ */
+
+/** A mail conversation thread (folder ∈ inbox | sent | drafts | archive | spam | trash). */
+/**
+ * @typedef {Object} Thread
+ * @property {string} id
+ * @property {string} subject
+ * @property {string[]} labels
+ * @property {string} folder
+ * @property {boolean} read
+ * @property {boolean} starred
+ * @property {number | null} snoozeUntil
+ * @property {string} tier
+ * @property {boolean} verified
+ * @property {boolean} legacy
+ * @property {Msg[]} msgs
+ * @property {boolean} [local]
+ * @property {string} [calendarEventId]
+ * @property {number | null} [scheduledAt]
+ */
+
+/**
+ * @typedef {Object} Group
+ * @property {string} id
+ * @property {string} name
+ * @property {string} address
+ * @property {string} [handle]
+ * @property {string} [mode]
+ * @property {string} [joinPolicy]
+ * @property {boolean} [membershipVisible]
+ * @property {number} [created]
+ * @property {Array<{address: string, role: string, hidden?: boolean}>} [members]
+ */
+
+/**
+ * @typedef {Object} NetState
+ * @property {NetMode} mode
+ * @property {string} status
+ * @property {string | null} error
+ * @property {unknown} client
+ * @property {string | null} accountId
+ * @property {string | null} sessionState
+ * @property {number} lastSync
+ */
+
+/**
+ * @typedef {Object} UiState
+ * @property {string} mailFolder
+ * @property {string | null} mailLabel
+ * @property {string | null} selThread
+ * @property {string | null} selChat
+ * @property {string | null} selGroup
+ * @property {unknown} chatThread
+ * @property {string} calView
+ * @property {number} calCursor
+ * @property {unknown} selEvent
+ * @property {Set<string>} selected
+ * @property {string} search
+ * @property {boolean} mobileDetail
+ * @property {unknown} compose
+ */
+
+/**
+ * @typedef {Object} FilterRule
+ * @property {string} id
+ * @property {string} from
+ * @property {string} subject
+ * @property {string} label
+ * @property {string} action
+ * @property {boolean} enabled
+ */
+
+/**
+ * @typedef {Object} Settings
+ * @property {string} theme
+ * @property {string} mailDensity
+ * @property {string} tierDefault
+ * @property {boolean} gateway
+ * @property {boolean} presence
+ * @property {unknown[]} signatures
+ * @property {FilterRule[]} filters
+ * @property {{enabled: boolean, subject: string, message: string, from: string, to: string}} vacation
+ * @property {string[]} blocked
+ * @property {string[]} allowed
+ * @property {NodeConfig} node
+ */
+
+/** A loosely-shaped demo record — every seed.js collection below is simulated data with an
+ * `id`, kept loose here because these collections (unlike Thread/Msg/Group) are not yet read
+ * back through typed accessors anywhere; the `id` is the one field store.js itself relies on
+ * (initStore's default-selection lines). */
+/** @typedef {{ id: string, [k: string]: unknown }} IdRecord */
+
+/**
+ * @typedef {Object} State
+ * @property {string} view
+ * @property {Thread[]} mail
+ * @property {IdRecord[]} chats
+ * @property {IdRecord[]} events
+ * @property {IdRecord[]} files
+ * @property {Group[]} groups
+ * @property {IdRecord[]} devices
+ * @property {IdRecord[]} sessions
+ * @property {IdRecord[]} labels
+ * @property {import('./seed.js').Person[]} people
+ * @property {UiState} ui
+ * @property {Settings} settings
+ * @property {NetState} net
+ */
+
+/**
+ * @typedef {Object} ParsedSearch
+ * @property {string} text
+ * @property {string | null} from
+ * @property {string | null} to
+ * @property {string | null} subject
+ * @property {string | null} label
+ * @property {string | null} in
+ * @property {Record<string, boolean>} flags
+ */
 
 import { seedMail, seedChats, seedCalendar, seedFiles, seedGroups, seedSignatures, seedFilters, seedDevices, seedSessions, LABELS, PEOPLE, person } from './seed.js';
 
@@ -31,6 +195,7 @@ const defaultSettings = {
   node: { enabled: false, baseUrl: 'http://127.0.0.1:4700', username: '', appPassword: '', sendToken: '' },
 };
 
+/** @type {State} */
 export const state = {
   view: 'mail',
   // data (simulated network)
@@ -56,6 +221,10 @@ export const state = {
 };
 
 // Merge a partial network-status patch into state.net (called by net/sync.js on every transition).
+/**
+ * @param {Partial<NetState>} patch
+ * @returns {NetState}
+ */
 export function setNetStatus(patch) {
   state.net = { ...state.net, ...patch };
   return state.net;
@@ -64,6 +233,7 @@ export function setNetStatus(patch) {
 // Resolve the node connection config: a Tauri/host-injected `window.__ENVOIR_NODE__` wins (the
 // shell will inject base URL + app-password + send token there), otherwise the saved Settings →
 // Node config. Returns `{ enabled, baseUrl, username, appPassword, sendToken }`.
+/** @returns {NodeConfig} */
 export function resolveNodeConfig() {
   const injected = (typeof globalThis !== 'undefined' && globalThis.__ENVOIR_NODE__) || null;
   if (injected && injected.baseUrl && injected.username && injected.appPassword) {
@@ -89,6 +259,7 @@ export function resolveNodeConfig() {
   };
 }
 
+/** @returns {void} */
 export function initStore() {
   state.mail = seedMail();
   state.chats = seedChats();
@@ -112,6 +283,9 @@ export function initStore() {
 const INVITE_TITLES = ['Quick sync', 'Roadmap check-in', 'Coffee chat', 'Relay planning', 'Spec walkthrough', 'Design pairing'];
 const INVITE_COLORS = [210, 262, 330, 150, 46, 8, 190];
 let _inviteSeq = 0;
+/**
+ * @returns {{ event: { id: string, [k: string]: unknown }, thread: Thread, organizer: { address: string, [k: string]: unknown } }}
+ */
 export function simulateIncomingInvite() {
   const candidates = PEOPLE.filter(p => p.trust !== 'legacy' && !(p.address || '').startsWith('you@'));
   const organizer = candidates[_inviteSeq++ % candidates.length];
@@ -145,9 +319,11 @@ export function simulateIncomingInvite() {
   return { event: ev, thread: inviteThread, organizer };
 }
 
+/** @returns {void} */
 export function saveSettings() {
   localStorage.setItem(LS_SETTINGS, JSON.stringify(state.settings));
 }
+/** @returns {void} */
 export function loadSettings() {
   try {
     const s = JSON.parse(localStorage.getItem(LS_SETTINGS) || 'null');
@@ -161,6 +337,11 @@ export function loadSettings() {
 }
 
 // ---- Mail helpers -------------------------------------------------------------------------
+/**
+ * @param {string} folder
+ * @param {string | null} [label]
+ * @returns {Thread[]}
+ */
 export function threadsIn(folder, label) {
   return state.mail.filter(t => {
     if (label) return t.labels.includes(label) && t.folder !== 'trash' && t.folder !== 'spam';
@@ -169,13 +350,17 @@ export function threadsIn(folder, label) {
     return t.folder === folder;
   }).sort((a, b) => lastTime(b) - lastTime(a));
 }
+/** @param {Thread} t @returns {number} */
 export const lastTime = (t) => t.msgs[t.msgs.length - 1].time;
+/** @param {string} id @returns {Thread | undefined} */
 export const thread = (id) => state.mail.find(t => t.id === id);
+/** @param {string} folder @returns {number} */
 export function unreadCount(folder) {
   return state.mail.filter(t => t.folder === folder && !t.read).length;
 }
 
 let _idc = 1000;
+/** @param {string} [p] @returns {string} */
 export const uid = (p = 'x') => p + (++_idc) + Date.now().toString(36).slice(-3);
 
 // ---- On-device search with operators (spec §17#4, §0.7 no server-side index) ---------------
@@ -183,9 +368,16 @@ export const uid = (p = 'x') => p + (++_idc) + Date.now().toString(36).slice(-3)
 // Everything else is free-text. Parsed and matched entirely on-device — a real client indexes
 // its own plaintext mailbox locally; no provider ever builds a searchable index.
 export const SEARCH_OPERATORS = ['from', 'to', 'subject', 'label', 'in', 'is', 'has'];
+/**
+ * @param {string} raw
+ * @returns {ParsedSearch}
+ */
 export function parseSearch(raw) {
   const q = (raw || '').trim();
-  const p = { text: [], from: null, to: null, subject: null, label: null, in: null, flags: {} };
+  /** @type {string[]} */
+  const textParts = [];
+  /** @type {ParsedSearch} */
+  const p = { text: '', from: null, to: null, subject: null, label: null, in: null, flags: {} };
   if (!q) return p;
   // token split that keeps "quoted phrases" together
   const tokens = q.match(/(\w+):"[^"]*"|(\w+):\S+|"[^"]*"|\S+/g) || [];
@@ -197,26 +389,37 @@ export function parseSearch(raw) {
       if (key === 'is') { if (val === 'unread') p.flags.unread = true; else if (val === 'read') p.flags.read = true; else if (val === 'starred' || val === 'flagged') p.flags.starred = true; }
       else if (key === 'has') { if (val === 'attachment' || val === 'attach') p.flags.attachment = true; }
       else if (key === 'in') p.in = val;
-      else p[key] = val;
+      else if (key === 'from') p.from = val;
+      else if (key === 'to') p.to = val;
+      else if (key === 'subject') p.subject = val;
+      else if (key === 'label') p.label = val;
     } else {
-      p.text.push(tok.replace(/^"|"$/g, '').toLowerCase());
+      textParts.push(tok.replace(/^"|"$/g, '').toLowerCase());
     }
   }
-  p.text = p.text.join(' ').trim();
+  p.text = textParts.join(' ').trim();
   return p;
 }
 // Does this parsed query reference a scope operator (label:/in:)? Those search globally.
+/** @param {ParsedSearch} p @returns {boolean} */
 export function searchIsGlobal(p) { return !!(p.label || p.in); }
 
+/**
+ * @param {Thread} t
+ * @param {ParsedSearch | null} p
+ * @returns {boolean}
+ */
 export function matchThread(t, p) {
   if (!p) return true;
+  /** @param {string[]} arr @param {string} v @returns {boolean} */
   const has = (arr, v) => arr.some(x => (x || '').toLowerCase().includes(v));
   const froms = t.msgs.map(m => m.from === 'you' ? 'you you@envoir.org' : (person(m.from).name + ' ' + person(m.from).address));
   const tos = t.msgs.flatMap(m => m.to || []);
   if (p.from && !has(froms, p.from)) return false;
   if (p.to && !has(tos, p.to)) return false;
   if (p.subject && !(t.subject || '').toLowerCase().includes(p.subject)) return false;
-  if (p.label && !(t.labels || []).some(l => l.toLowerCase() === p.label || (LABELS.find(x => x.id === l)?.name || '').toLowerCase().includes(p.label))) return false;
+  const label = p.label;
+  if (label && !(t.labels || []).some(l => l.toLowerCase() === label || (LABELS.find(x => x.id === l)?.name || '').toLowerCase().includes(label))) return false;
   if (p.in && t.folder !== p.in && !(p.in === 'starred' && t.starred) && !(p.in === 'anywhere')) return false;
   if (p.flags.unread && t.read) return false;
   if (p.flags.read && !t.read) return false;
@@ -229,6 +432,7 @@ export function matchThread(t, p) {
   return true;
 }
 
+/** @param {unknown} s @returns {string} */
 export function stripHtml(s) {
   return (s == null ? '' : String(s)).replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
 }
@@ -237,6 +441,11 @@ export function stripHtml(s) {
 // Rules run on the owner's own always-on node — functionally "server-side" (applies while the
 // client is closed) without a third party ever seeing plaintext (§8.2). Here they run over the
 // simulated store. A real node MAY reuse Sieve (RFC 5228) verbatim; this is the client UX for it.
+/**
+ * @param {FilterRule} rule
+ * @param {Thread} t
+ * @returns {boolean}
+ */
 export function ruleMatches(rule, t) {
   if (!rule.enabled) return false;
   const from = rule.from ? rule.from.trim().toLowerCase() : '';
@@ -252,6 +461,10 @@ export function ruleMatches(rule, t) {
   return true;
 }
 // Apply all enabled rules to a set of threads. Returns count of threads changed.
+/**
+ * @param {Thread[]} [threads]
+ * @returns {number}
+ */
 export function applyFilters(threads = state.mail) {
   let changed = 0;
   for (const t of threads) {
@@ -271,11 +484,18 @@ export function applyFilters(threads = state.mail) {
 }
 
 // ---- Block / allow lists (spec §9.2) ------------------------------------------------------
+/** @param {string} [a] @returns {string} */
 export const normAddr = (a) => (a || '').trim().toLowerCase();
+/** @param {string} addr @returns {boolean} */
 export function isBlocked(addr) { return state.settings.blocked.includes(normAddr(addr)); }
+/** @param {string} addr @returns {boolean} */
 export function isAllowed(addr) { return state.settings.allowed.includes(normAddr(addr)); }
+/** @param {string} addr @returns {void} */
 export function blockSender(addr) { const a = normAddr(addr); if (a && !state.settings.blocked.includes(a)) state.settings.blocked.push(a); state.settings.allowed = state.settings.allowed.filter(x => x !== a); saveSettings(); }
+/** @param {string} addr @returns {void} */
 export function unblockSender(addr) { const a = normAddr(addr); state.settings.blocked = state.settings.blocked.filter(x => x !== a); saveSettings(); }
+/** @param {string} addr @returns {void} */
 export function allowSender(addr) { const a = normAddr(addr); if (a && !state.settings.allowed.includes(a)) state.settings.allowed.push(a); state.settings.blocked = state.settings.blocked.filter(x => x !== a); saveSettings(); }
 // The sender address of a thread (first non-you message), for block/allow actions.
+/** @param {Thread} t @returns {string} */
 export function threadSender(t) { const m = t.msgs.find(x => x.from !== 'you') || t.msgs[0]; return m.from === 'you' ? (m.to?.[0] || '') : person(m.from).address; }
