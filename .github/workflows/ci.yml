@@ -407,6 +407,25 @@ jobs:
       - name: Typecheck client/test against client/tsconfig.json
         run: npm run typecheck:client
 
+      # console/superadmin/status each got their own tsconfig.json alongside
+      # client's, the same day, with the same allowJs/checkJs mechanism — but
+      # only typecheck:client was wired in above. An unwired script cannot
+      # fail a build, which is the exact hollow-gate shape this suite hunts:
+      # `npm run typecheck:console` could have gone red on any push with CI
+      # staying green throughout, indistinguishable from a gate that never
+      # ran. Each tsconfig's `include` is a ratchet scoped to its currently
+      # closure-clean files only (documented in-file with the real backlog
+      # counts), so these are green today and stay a genuine gate on that set
+      # as files are added back one by one.
+      - name: Typecheck console against console/tsconfig.json
+        run: npm run typecheck:console
+
+      - name: Typecheck superadmin against superadmin/tsconfig.json
+        run: npm run typecheck:superadmin
+
+      - name: Typecheck status against status/tsconfig.json
+        run: npm run typecheck:status
+
       # Behavioural gate for the lint config itself: proves type-aware rules
       # actually resolve type information in client/test/**/*.ts (a config
       # can say recommendedTypeChecked and still not resolve types), that
