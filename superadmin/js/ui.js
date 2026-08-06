@@ -2,9 +2,18 @@
 // assets. Icons are inline stroke SVGs; the modal is an accessible focus-trapped dialog. Shares
 // the reference client/console "instrument-panel" design language on the Aurora Indigo palette so
 // the operator console feels like part of the same product.
-
-export const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
-export const esc = (s) => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+//
+// el/esc/fmtDate/toast are re-exported as-is from shared/js/ui.js — this app's own historical
+// behaviour for these was exactly shared's default (see that file's header). initials() stays
+// local below: its split regex also matches "-"/"_", a real behavioural difference from
+// client/console's shared copy, not something to silently merge. openModal/closeModal/
+// shimmerRows/emptyState/errorState are thin wrappers supplying this app's own defaults/icon().
+import {
+  el, esc, fmtDate, toast,
+  openModal as _sharedOpenModal, closeModal as _sharedCloseModal, shimmerRows as _sharedShimmerRows,
+  emptyState as _sharedEmptyState, errorState as _sharedErrorState,
+} from '../../shared/js/ui.js';
+export { el, esc, fmtDate, toast };
 
 // Relative times localize via Intl.RelativeTimeFormat (narrow stays compact: en "5m ago",
 // ja "5分前") — same thresholds as before, calendar date past a week.
@@ -18,7 +27,6 @@ export const timeAgo = (t) => {
   if (s < 7 * 86400) return _rtf.format(-Math.floor(s / 86400), 'day');
   return new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
 };
-export const fmtDate = (t) => new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 export const fmtLong = (t) => new Date(t).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) +
   ' · ' + new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
@@ -171,67 +179,24 @@ export function sparkline(values, opts = {}) {
     <polygon class="spark-area" points="${area}"/><polyline class="spark-line" points="${pts.join(' ')}"/></svg>`;
 }
 
-// ---- Toast --------------------------------------------------------------------------------
-export function toast(msg, opts = {}) {
-  const t = document.getElementById('toast');
-  const ms = opts.ms || 3000;
-  t.setAttribute('role', 'status'); t.setAttribute('aria-live', 'polite');
-  t.innerHTML = `<span>${msg}</span>`;
-  t.classList.remove('hidden'); t.classList.add('show');
-  clearTimeout(t._h);
-  t._h = setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.classList.add('hidden'), 200); }, ms);
-  return t;
-}
+// toast is imported from shared/js/ui.js above and re-exported as-is: this app's ms default was
+// already 3000 (matching shared's default), and it never called toast with `opts.action` (grepped)
+// — the action-button support shared/js/ui.js's toast has is inert here, not a behaviour change.
 
 // ---- Modal (accessible dialog: role=dialog + aria-modal, Tab focus-trap, focus restore) ---
-const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-let _modalReturnFocus = null, _modalTrap = null, _escHandler = null;
-
-export function openModal(html, opts = {}) {
-  const m = document.getElementById('modal');
-  _modalReturnFocus = document.activeElement;
-  const labelAttr = opts.label ? ` aria-label="${esc(opts.label)}"` : '';
-  m.innerHTML = `<div class="modal-scrim"></div><div class="modal-card ${opts.wide ? 'wide' : ''}" role="dialog" aria-modal="true"${labelAttr}>${html}</div>`;
-  m.classList.remove('hidden');
-  requestAnimationFrame(() => m.classList.add('show'));
-  const card = m.querySelector('.modal-card');
-  m.querySelector('.modal-scrim').onclick = () => { if (!opts.sticky) closeModal(); };
-  _modalTrap = (e) => {
-    if (e.key !== 'Tab') return;
-    const items = [...card.querySelectorAll(FOCUSABLE)].filter(x => x.offsetParent !== null);
-    if (!items.length) return;
-    const first = items[0], last = items[items.length - 1];
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-  };
-  card.addEventListener('keydown', _modalTrap);
-  _escHandler = (e) => { if (e.key === 'Escape' && !opts.sticky) closeModal(); };
-  document.addEventListener('keydown', _escHandler);
-  requestAnimationFrame(() => {
-    const target = card.querySelector('input, textarea, select, [autofocus]') || card.querySelector(FOCUSABLE) || card;
-    target.focus?.();
-  });
-  return card;
-}
-export function closeModal() {
-  const m = document.getElementById('modal');
-  m.classList.remove('show');
-  const ret = _modalReturnFocus; _modalReturnFocus = null; _modalTrap = null;
-  if (_escHandler) { document.removeEventListener('keydown', _escHandler); _escHandler = null; }
-  setTimeout(() => { m.classList.add('hidden'); m.innerHTML = ''; }, 180);
-  if (ret && ret.isConnected) ret.focus?.();
-}
+// This app's own openModal ALWAYS wired Escape-to-close (unconditionally, not opt-outable), unlike
+// client/console's. `{ ...opts, escClose: true }` (escClose placed last so it always wins)
+// reproduces that exactly via shared/js/ui.js's opt.
+/** @param {string} html @param {import('../../shared/js/ui.js').ModalOpts} [opts] @returns {Element} */
+export function openModal(html, opts = {}) { return _sharedOpenModal(html, { ...opts, escClose: true }); }
+export function closeModal() { return _sharedCloseModal(); }
 
 // ---- Loading + empty + error states -------------------------------------------------------
-export function shimmerRows(n = 5) {
-  return `<div class="shimmer-wrap">${Array.from({ length: n }, () => `<div class="shimmer-row"><div class="sh-av"></div><div class="sh-lines"><div class="sh-line w70"></div><div class="sh-line w40"></div></div></div>`).join('')}</div>`;
-}
-export function emptyState(iconName, title, sub, actionHtml = '') {
-  return `<div class="empty"><div class="empty-glow">${icon(iconName)}</div><b>${esc(title)}</b><span>${esc(sub)}</span>${actionHtml ? `<div class="empty-act">${actionHtml}</div>` : ''}</div>`;
-}
-export function errorState(title, sub, retryId = '') {
-  return `<div class="empty err"><div class="empty-glow bad">${icon('warn')}</div><b>${esc(title)}</b><span>${esc(sub)}</span>${retryId ? `<div class="empty-act"><button class="btn" id="${retryId}">${icon('refresh')} Retry</button></div>` : ''}</div>`;
-}
+// Bodies now live in shared/js/ui.js; this app's only historical difference from console's was
+// its `n` default (5, same as console) and its own icon() — both preserved here.
+export function shimmerRows(n = 5) { return _sharedShimmerRows(n); }
+export function emptyState(iconName, title, sub, actionHtml = '') { return _sharedEmptyState(icon, iconName, title, sub, actionHtml); }
+export function errorState(title, sub, retryId = '') { return _sharedErrorState(icon, title, sub, retryId); }
 
 export function copyBtn(text, label = 'Copy') {
   const b = el(`<button class="icon-btn sm" title="${esc(label)}" aria-label="${esc(label)}">${icon('copy')}</button>`);
