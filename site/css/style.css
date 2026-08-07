@@ -259,16 +259,27 @@ section + section { border-top: 1px solid var(--line); }
 .btn-ghost:hover { border-color: var(--indigo); background: color-mix(in srgb, var(--indigo) 12%, transparent); }
 .btn-mono { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.02em; }
 .btn.sm { padding: 0.5em 0.9em; font-size: 12.5px; }
-@media (max-width: 620px) { .topbar .btn span.full { display: none; } }
+/* Header shedding order, set from measurement rather than round numbers.
+   The bar's children are brand 80 + search 340 + palette 118 + net-pill 145 +
+   right group 256, plus 48 of gaps and 32 of padding: ~1019px with everything
+   shown, and ~719 once the search has flexed down to its minimum. The old
+   thresholds started shedding at 620, which left the whole 621-719 band
+   overflowing, and 520 and 320 broken further down. Each step below is the
+   width at which what remains actually fits. Verified by sweeping 320-1920. */
+@media (max-width: 760px) { .topbar .btn span.full { display: none; } }
 /* Below 480px the net pill collapsed to just its status dot, which reads as a
    stray grey circle wedged between two real controls rather than as status.
    Drop it entirely there — the status bar already carries "node: simulated". */
-@media (max-width: 480px) { .cmd-open span.full { display: none; } .net-pill { display: none; } }
+@media (max-width: 620px) { .net-pill { display: none; } }
+@media (max-width: 460px) { .cmd-open span.full { display: none; } }
+/* Last to go: the GitHub icon button. The primary call to action beside it
+   points at the same repository, so nothing becomes unreachable. */
+@media (max-width: 380px) { .topbar-right .icon-btn[href] { display: none; } }
 /* Below ~560px the search field is squeezed to about two visible characters
    ("Se…"), which reads as broken rather than compact. The command palette is
    already the real search affordance on this page, so drop the field and let
    the ⌘K control carry it. */
-@media (max-width: 560px) { .topbar-search { display: none; } }
+@media (max-width: 700px) { .topbar-search { display: none; } }
 
 /* ---- shell body: rail + list column + reading pane ---- */
 .shell { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: var(--rail-w) var(--list-w) 1fr; }
